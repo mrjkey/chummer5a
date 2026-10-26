@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Release-package launcher: sits at the top of the zip and starts Chummer\Chummer5.exe (see scripts/win-release.sh) -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <AssemblyName>Chummer5a</AssemblyName>
+    <RootNamespace>ChummerLauncher</RootNamespace>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <ApplicationIcon>..\Chummer\chummer.ico</ApplicationIcon>
+    <Nullable>disable</Nullable>
+    <DebugType>none</DebugType>
+    <Title>Chummer5a</Title>
+    <Description>Starts Chummer5a from the Chummer folder</Description>
+    <Copyright>Licensed GNU GPLv3</Copyright>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System.Windows.Forms" />
+  </ItemGroup>
+</Project>

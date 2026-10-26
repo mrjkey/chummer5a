@@ -1,11 +1,19 @@
 # Releasing the MCP build
 
-A release is one zip on a GitHub release of `mrjkey/chummer5a`. The zip holds:
+A release is one zip on a GitHub release of `mrjkey/chummer5a`. Everything a user reads or runs is at the top of the zip, and the app itself is in a subfolder:
 
-- the Release build of Chummer (`Chummer5.exe` and everything next to it)
-- `Setup-ClaudeCode.cmd`, which registers the MCP server with Claude Code and installs the skill
-- `.mcp.json` and `.claude/skills/sr5-build-advisor`, so `claude` started inside the folder works with no setup
-- `AI-AGENT-SETUP.md`, the end-user guide (a copy of `docs/ai-agent-setup.md`)
+```
+Chummer5a.exe          launcher (ChummerLauncher project) that starts Chummer\Chummer5.exe
+README.md              quick start                       <- package/README.md
+CLAUDE-SETUP.md        Claude Code setup, WSL, troubleshooting  <- package/CLAUDE-SETUP.md
+Setup-ClaudeCode.cmd   registers the MCP server (user scope) and installs the skill  <- package/
+CLAUDE.md              tells Claude what the folder is   <- package/CLAUDE.release.md
+.mcp.json              <- repo .mcp.json
+.claude/skills/sr5-build-advisor/  <- repo skill
+Chummer/               the Release build of Chummer (Chummer/bin/Release)
+```
+
+Chummer finds its data, settings and saves next to its own exe, so `Chummer5.exe` can't move to the top. The launcher stands in for it. The release `CLAUDE.md` is named `CLAUDE.release.md` in the repo, so that Claude Code doesn't load it while you work on the source.
 
 ## Prerequisites (one time)
 
@@ -37,12 +45,13 @@ scripts/win-release.sh 5.226.0-mcp.1
 The script does the following:
 
 - It deletes `Chummer/bin/Release` and rebuilds it from scratch, so nothing from local test runs (settings, characters, logs) ends up in the zip.
-- It adds the Claude Code files to the build output.
+- It builds the launcher.
+- It lays out the zip as shown above.
 - It writes `dist/Chummer5a-MCP-5.226.0-mcp.1.zip`. The `dist/` folder is gitignored.
 
 Smoke test before publishing:
 
-1. Extract the zip to a new folder and run `Chummer5.exe`.
+1. Extract the zip to a new folder and run `Chummer5a.exe`.
 2. Open a character.
 3. Run `claude` in that folder and check `/mcp`.
 

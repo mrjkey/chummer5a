@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Build a clean Release of Chummer on the Windows host and package it, with the Claude Code setup files, as
+# Build a clean Release of Chummer and its launcher on the Windows host and package them as
 # dist/Chummer5a-MCP-<version>.zip. Usage: scripts/win-release.sh [version]   (default: AssemblyVersion from Chummer.csproj)
+# Zip layout: docs, Claude Code setup and the Chummer5a.exe launcher at the top, the app itself in Chummer\.
 # See docs/releasing.md for publishing the zip as a GitHub release.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -11,6 +12,7 @@ VERSION="${1:-$(grep -oPm1 '(?<=<AssemblyVersion>)[^<]+' "$REPO/Chummer/Chummer.
 VERSION="${VERSION#v}"
 NAME="Chummer5a-MCP-$VERSION"
 OUT="$WIN_DIR/Chummer/bin/Release"
+LAUNCHER="$WIN_DIR/ChummerLauncher/bin/Release/Chummer5a.exe"
 DIST="$REPO/dist"
 STAGE="$DIST/$NAME"
 
@@ -18,15 +20,19 @@ STAGE="$DIST/$NAME"
 rm -rf "$OUT"
 "$HERE/win-build.sh" -t:Rebuild
 [ -f "$OUT/Chummer5.exe" ] || { echo "Build output not found at $OUT" >&2; exit 1; }
+win_cmd "\"$MSBUILD\" ChummerLauncher\\ChummerLauncher.csproj -restore -t:Rebuild -p:Configuration=Release -nologo -v:minimal"
+[ -f "$LAUNCHER" ] || { echo "Launcher not found at $LAUNCHER" >&2; exit 1; }
 
 rm -rf "$STAGE" "$DIST/$NAME.zip"
-mkdir -p "$STAGE/.claude/skills"
-cp -a "$OUT/." "$STAGE/"
-# Lets "claude" started inside the Chummer folder pick up the server and skill without running the setup script
+mkdir -p "$STAGE/Chummer" "$STAGE/.claude/skills"
+cp -a "$OUT/." "$STAGE/Chummer/"
+cp "$LAUNCHER" "$STAGE/"
+cp "$REPO/package/README.md" "$REPO/package/CLAUDE-SETUP.md" "$STAGE/"
+# CLAUDE.md, .mcp.json and the skill let "claude" started in the top folder work without running the setup script
+cp "$REPO/package/CLAUDE.release.md" "$STAGE/CLAUDE.md"
 cp "$REPO/.mcp.json" "$STAGE/"
 cp -a "$REPO/.claude/skills/sr5-build-advisor" "$STAGE/.claude/skills/"
-cp "$REPO/docs/ai-agent-setup.md" "$STAGE/AI-AGENT-SETUP.md"
-sed 's/\r$//; s/$/\r/' "$HERE/claude-setup/Setup-ClaudeCode.cmd" > "$STAGE/Setup-ClaudeCode.cmd"
+sed 's/\r$//; s/$/\r/' "$REPO/package/Setup-ClaudeCode.cmd" > "$STAGE/Setup-ClaudeCode.cmd"
 
 python3 -I - "$STAGE" "$DIST/$NAME.zip" <<'EOF'
 import os, sys, zipfile

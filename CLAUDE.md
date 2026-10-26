@@ -7,7 +7,7 @@ Chummer is a .NET Framework 4.8 WinForms app (Windows only). The repo lives on t
 - `scripts/win-build.sh`: builds `Chummer.csproj` with Visual Studio's MSBuild (found via vswhere). `dotnet build` does **not** work (binary .resx resources, MSB3823). `CONFIG=Release scripts/win-build.sh` for a release build.
 - `scripts/win-test.sh [dotnet test args]`: builds and runs `Chummer.Tests` (MSTest), e.g. `scripts/win-test.sh --filter "FullyQualifiedName~AgentToolsTests"`.
 - `scripts/win-run.sh [chummer args]`: launches the built `Chummer5.exe`. Close any running Chummer before rebuilding.
-- `scripts/win-release.sh [version]`: clean Release build packaged with the Claude Code setup files as `dist/Chummer5a-MCP-<version>.zip`. See `docs/releasing.md`; the end-user guide is `docs/ai-agent-setup.md`.
+- `scripts/win-release.sh [version]`: clean Release build packaged as `dist/Chummer5a-MCP-<version>.zip`. The top of the zip has the `ChummerLauncher` exe (`Chummer5a.exe`), the docs and the Claude Code setup files from `package/`. The app goes in `Chummer\`. See `docs/releasing.md`.
 - `scripts/win-env.sh` holds the paths. If the repo is on the WSL filesystem instead, the scripts rsync it to `C:\dev\chummer5a` first (cmd-based build events break on `\\wsl$` paths). Override with `CHUMMER_WIN_DIR`, `CONFIG`, `MSBUILD` or `MSBUILD_SDKS_PATH`. The VS install has no .NET SDK resolver, so the scripts point MSBuild at the newest installed .NET 8 SDK and disable the workload resolver.
 
 ## AI agent integration
