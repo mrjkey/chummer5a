@@ -760,29 +760,40 @@ namespace Chummer
 
                     XmlNode objXmlQuality = _xmlDocument.TryGetNodeByNameOrId("/chummer/qualities/quality", frmSelectLifestyleQuality.MyForm.SelectedQuality);
 
-                    LifestyleQuality objQuality = new LifestyleQuality(_objCharacter);
-                    try
-                    {
-                        await objQuality.CreateAsync(objXmlQuality, _objLifestyle, _objCharacter, QualitySource.Selected).ConfigureAwait(false);
-                        //objNode.ContextMenuStrip = cmsQuality;
-                        if (objQuality.InternalId.IsEmptyGuid())
-                        {
-                            await objQuality.RemoveAsync(false).ConfigureAwait(false);
-                            continue;
-                        }
-
-                        await objQuality.SetFreeAsync(frmSelectLifestyleQuality.MyForm.FreeCost).ConfigureAwait(false);
-
-                        await _objLifestyle.LifestyleQualities.AddAsync(objQuality).ConfigureAwait(false);
-                    }
-                    catch
-                    {
-                        await objQuality.RemoveAsync(false, CancellationToken.None).ConfigureAwait(false);
-                        throw;
-                    }
+                    await AddLifestyleQualityFromNodeAsync(_objCharacter, _objLifestyle, objXmlQuality, frmSelectLifestyleQuality.MyForm.FreeCost).ConfigureAwait(false);
                 }
             }
             while (blnAddAgain);
+        }
+
+        /// <summary>
+        /// Add a quality to a lifestyle, as the dialog's Add Quality button does once the quality is picked.
+        /// </summary>
+        /// <returns>The new quality, or null if it could not be created (e.g. its choice dialog was cancelled).</returns>
+        internal static async Task<LifestyleQuality> AddLifestyleQualityFromNodeAsync(Character objCharacter, Lifestyle objLifestyle, XmlNode objXmlQuality,
+                                                                                      bool blnFree, CancellationToken token = default)
+        {
+            LifestyleQuality objQuality = new LifestyleQuality(objCharacter);
+            try
+            {
+                await objQuality.CreateAsync(objXmlQuality, objLifestyle, objCharacter, QualitySource.Selected, token: token).ConfigureAwait(false);
+                //objNode.ContextMenuStrip = cmsQuality;
+                if (objQuality.InternalId.IsEmptyGuid())
+                {
+                    await objQuality.RemoveAsync(false, token).ConfigureAwait(false);
+                    return null;
+                }
+
+                await objQuality.SetFreeAsync(blnFree, token).ConfigureAwait(false);
+
+                await objLifestyle.LifestyleQualities.AddAsync(objQuality, token).ConfigureAwait(false);
+                return objQuality;
+            }
+            catch
+            {
+                await objQuality.RemoveAsync(false, CancellationToken.None).ConfigureAwait(false);
+                throw;
+            }
         }
 
         private async void cmdDeleteQuality_Click(object sender, EventArgs e)
@@ -984,61 +995,94 @@ namespace Chummer
         /// </summary>
         private async Task AcceptForm(CancellationToken token = default)
         {
-            string strLifestyleName = await txtLifestyleName.DoThreadSafeFuncAsync(x => x.Text, token: token).ConfigureAwait(false);
-            if (string.IsNullOrEmpty(strLifestyleName))
-            {
-                await Program.ShowScrollableMessageBoxAsync(this, await LanguageManager.GetStringAsync("Message_SelectAdvancedLifestyle_LifestyleName", token: token).ConfigureAwait(false), await LanguageManager.GetStringAsync("MessageTitle_SelectAdvancedLifestyle_LifestyleName", token: token).ConfigureAwait(false), MessageBoxButtons.OK, MessageBoxIcon.Information, token: token).ConfigureAwait(false);
-                return;
-            }
-            if (await _objLifestyle.GetStyleTypeAsync(token).ConfigureAwait(false) != LifestyleType.Standard && await _objLifestyle.GetTotalLPAsync(token).ConfigureAwait(false) < 0)
-            {
-                await Program.ShowScrollableMessageBoxAsync(this, await LanguageManager.GetStringAsync("Message_SelectAdvancedLifestyle_OverLPLimit", token: token).ConfigureAwait(false), await LanguageManager.GetStringAsync("MessageTitle_SelectAdvancedLifestyle_OverLPLimit", token: token).ConfigureAwait(false), MessageBoxButtons.OK, MessageBoxIcon.Information, token: token).ConfigureAwait(false);
-                return;
-            }
-
-            string strBaseLifestyle = await cboBaseLifestyle.DoThreadSafeFuncAsync(x => x.SelectedValue.ToString(), token: token).ConfigureAwait(false);
+            string strBaseLifestyle = await cboBaseLifestyle.DoThreadSafeFuncAsync(x => x.SelectedValue?.ToString(), token: token).ConfigureAwait(false);
             XmlNode objXmlLifestyle = _xmlDocument.TryGetNodeByNameOrId("/chummer/lifestyles/lifestyle", strBaseLifestyle);
-            if (objXmlLifestyle == null)
-                return;
-            _objLifestyle.Source = objXmlLifestyle["source"]?.InnerTextViaPool(token);
-            _objLifestyle.Page = objXmlLifestyle["page"]?.InnerTextViaPool(token);
-            await _objLifestyle.SetNameAsync(strLifestyleName, token).ConfigureAwait(false);
-            decimal.TryParse(objXmlLifestyle["cost"]?.InnerTextViaPool(token), System.Globalization.NumberStyles.Any, GlobalSettings.InvariantCultureInfo, out decimal decCost);
-            await _objLifestyle.SetCostAsync(decCost, token).ConfigureAwait(false);
-            await _objLifestyle.SetPercentageAsync(await nudPercentage.DoThreadSafeFuncAsync(x => x.Value, token).ConfigureAwait(false), token).ConfigureAwait(false);
-            await _objLifestyle.SetBaseLifestyleAsync(strBaseLifestyle, token).ConfigureAwait(false);
-            if (await _objLifestyle.GetStyleTypeAsync(token).ConfigureAwait(false) != LifestyleType.Standard)
+            string strRefusal = await ApplyLifestyleAsync(_objLifestyle, objXmlLifestyle,
+                                                          await txtLifestyleName.DoThreadSafeFuncAsync(x => x.Text, token: token).ConfigureAwait(false),
+                                                          await nudPercentage.DoThreadSafeFuncAsync(x => x.Value, token).ConfigureAwait(false),
+                                                          await nudArea.DoThreadSafeFuncAsync(x => x.ValueAsInt, token).ConfigureAwait(false),
+                                                          await nudComforts.DoThreadSafeFuncAsync(x => x.ValueAsInt, token).ConfigureAwait(false),
+                                                          await nudSecurity.DoThreadSafeFuncAsync(x => x.ValueAsInt, token).ConfigureAwait(false),
+                                                          await chkTrustFund.DoThreadSafeFuncAsync(x => x.Checked, token).ConfigureAwait(false),
+                                                          await nudRoommates.DoThreadSafeFuncAsync(x => x.ValueAsInt, token).ConfigureAwait(false),
+                                                          await chkSplitCostWithRoommates.DoThreadSafeFuncAsync(x => x.Checked, token).ConfigureAwait(false),
+                                                          await nudBonusLP.DoThreadSafeFuncAsync(x => x.ValueAsInt, token).ConfigureAwait(false), token)
+                .ConfigureAwait(false);
+            switch (strRefusal)
             {
-                await _objLifestyle
-                    .SetAreaAsync(await nudArea.DoThreadSafeFuncAsync(x => x.ValueAsInt, token).ConfigureAwait(false),
-                        token).ConfigureAwait(false);
-                await _objLifestyle
-                    .SetComfortsAsync(
-                        await nudComforts.DoThreadSafeFuncAsync(x => x.ValueAsInt, token).ConfigureAwait(false), token)
-                    .ConfigureAwait(false);
-                await _objLifestyle
-                    .SetSecurityAsync(
-                        await nudSecurity.DoThreadSafeFuncAsync(x => x.ValueAsInt, token).ConfigureAwait(false), token)
-                    .ConfigureAwait(false);
+                case null:
+                    break;
+                case "":
+                    return;
+                default:
+                    await Program.ShowScrollableMessageBoxAsync(this, await LanguageManager.GetStringAsync(strRefusal, token: token).ConfigureAwait(false),
+                                                                await LanguageManager.GetStringAsync(strRefusal.Replace("Message_", "MessageTitle_"), token: token).ConfigureAwait(false),
+                                                                MessageBoxButtons.OK, MessageBoxIcon.Information, token: token).ConfigureAwait(false);
+                    return;
             }
 
-            await _objLifestyle.SetTrustFundAsync(await chkTrustFund.DoThreadSafeFuncAsync(x => x.Checked, token).ConfigureAwait(false), token).ConfigureAwait(false);
-            await _objLifestyle.SetRoommatesAsync(await _objLifestyle.GetTrustFundAsync(token).ConfigureAwait(false) ? 0 : await nudRoommates.DoThreadSafeFuncAsync(x => x.ValueAsInt, token).ConfigureAwait(false), token).ConfigureAwait(false) ;
-            await _objLifestyle.SetSplitCostWithRoommatesAsync(await chkSplitCostWithRoommates.DoThreadSafeFuncAsync(x => x.Checked, token).ConfigureAwait(false), token).ConfigureAwait(false);
-            if (await _objLifestyle.GetStyleTypeAsync(token).ConfigureAwait(false) != LifestyleType.Standard)
-                await _objLifestyle.SetBonusLPAsync(await nudBonusLP.DoThreadSafeFuncAsync(x => x.ValueAsInt, token).ConfigureAwait(false), token).ConfigureAwait(false);
-
-            // Get the starting Nuyen information.
-            if (int.TryParse(objXmlLifestyle["dice"]?.InnerTextViaPool(token), System.Globalization.NumberStyles.Integer, GlobalSettings.InvariantCultureInfo, out int intDice))
-                await _objLifestyle.SetDiceAsync(intDice, token).ConfigureAwait(false);
-            decimal.TryParse(objXmlLifestyle["multiplier"]?.InnerTextViaPool(token), System.Globalization.NumberStyles.Any, GlobalSettings.InvariantCultureInfo, out decimal decMultiplier);
-            await _objLifestyle.SetMultiplierAsync(decMultiplier, token).ConfigureAwait(false);
             SelectedLifestyle = _objLifestyle;
             await this.DoThreadSafeAsync(x =>
             {
                 x.DialogResult = DialogResult.OK;
                 x.Close();
             }, token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Fill in a lifestyle from its base lifestyle and the dialog's values, as OK does. Also used to buy or edit lifestyles without the dialog
+        /// (by the AI agent).
+        /// </summary>
+        /// <param name="objLifestyle">Lifestyle to fill in.</param>
+        /// <param name="objXmlLifestyle">Data node of the base lifestyle.</param>
+        /// <param name="strLifestyleName">The lifestyle's name; required.</param>
+        /// <param name="decPercentage">Percentage of the cost the character pays.</param>
+        /// <param name="intArea">Advanced lifestyles: Neighborhood points.</param>
+        /// <param name="intComforts">Advanced lifestyles: Comforts points.</param>
+        /// <param name="intSecurity">Advanced lifestyles: Security points.</param>
+        /// <param name="blnTrustFund">Whether the Trust Fund quality pays for it.</param>
+        /// <param name="intRoommates">Number of roommates (none with a trust fund).</param>
+        /// <param name="blnSplitCost">Whether the roommates split the cost.</param>
+        /// <param name="intBonusLP">Advanced lifestyles: bonus lifestyle points.</param>
+        /// <param name="token">Cancellation token to listen to.</param>
+        /// <returns>Null when done; otherwise the language key of the reason it was refused, or empty if there is no base lifestyle.</returns>
+        internal static async Task<string> ApplyLifestyleAsync(Lifestyle objLifestyle, XmlNode objXmlLifestyle, string strLifestyleName, decimal decPercentage,
+                                                               int intArea, int intComforts, int intSecurity, bool blnTrustFund, int intRoommates,
+                                                               bool blnSplitCost, int intBonusLP, CancellationToken token = default)
+        {
+            if (string.IsNullOrEmpty(strLifestyleName))
+                return "Message_SelectAdvancedLifestyle_LifestyleName";
+            if (await objLifestyle.GetStyleTypeAsync(token).ConfigureAwait(false) != LifestyleType.Standard && await objLifestyle.GetTotalLPAsync(token).ConfigureAwait(false) < 0)
+                return "Message_SelectAdvancedLifestyle_OverLPLimit";
+            if (objXmlLifestyle == null)
+                return string.Empty;
+            string strBaseLifestyle = objXmlLifestyle["name"]?.InnerTextViaPool(token);
+            objLifestyle.Source = objXmlLifestyle["source"]?.InnerTextViaPool(token);
+            objLifestyle.Page = objXmlLifestyle["page"]?.InnerTextViaPool(token);
+            await objLifestyle.SetNameAsync(strLifestyleName, token).ConfigureAwait(false);
+            decimal.TryParse(objXmlLifestyle["cost"]?.InnerTextViaPool(token), System.Globalization.NumberStyles.Any, GlobalSettings.InvariantCultureInfo, out decimal decCost);
+            await objLifestyle.SetCostAsync(decCost, token).ConfigureAwait(false);
+            await objLifestyle.SetPercentageAsync(decPercentage, token).ConfigureAwait(false);
+            await objLifestyle.SetBaseLifestyleAsync(strBaseLifestyle, token).ConfigureAwait(false);
+            if (await objLifestyle.GetStyleTypeAsync(token).ConfigureAwait(false) != LifestyleType.Standard)
+            {
+                await objLifestyle.SetAreaAsync(intArea, token).ConfigureAwait(false);
+                await objLifestyle.SetComfortsAsync(intComforts, token).ConfigureAwait(false);
+                await objLifestyle.SetSecurityAsync(intSecurity, token).ConfigureAwait(false);
+            }
+
+            await objLifestyle.SetTrustFundAsync(blnTrustFund, token).ConfigureAwait(false);
+            await objLifestyle.SetRoommatesAsync(await objLifestyle.GetTrustFundAsync(token).ConfigureAwait(false) ? 0 : intRoommates, token).ConfigureAwait(false) ;
+            await objLifestyle.SetSplitCostWithRoommatesAsync(blnSplitCost, token).ConfigureAwait(false);
+            if (await objLifestyle.GetStyleTypeAsync(token).ConfigureAwait(false) != LifestyleType.Standard)
+                await objLifestyle.SetBonusLPAsync(intBonusLP, token).ConfigureAwait(false);
+
+            // Get the starting Nuyen information.
+            if (int.TryParse(objXmlLifestyle["dice"]?.InnerTextViaPool(token), System.Globalization.NumberStyles.Integer, GlobalSettings.InvariantCultureInfo, out int intDice))
+                await objLifestyle.SetDiceAsync(intDice, token).ConfigureAwait(false);
+            decimal.TryParse(objXmlLifestyle["multiplier"]?.InnerTextViaPool(token), System.Globalization.NumberStyles.Any, GlobalSettings.InvariantCultureInfo, out decimal decMultiplier);
+            await objLifestyle.SetMultiplierAsync(decMultiplier, token).ConfigureAwait(false);
+            return null;
         }
 
         private async Task RefreshSelectedLifestyle(CancellationToken token = default)

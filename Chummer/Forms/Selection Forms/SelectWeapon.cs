@@ -527,40 +527,7 @@ namespace Chummer
                         token.ThrowIfCancellationRequested();
                         foreach (XmlNode objXmlWeapon in objNodeList)
                         {
-                            if (!await objXmlWeapon.CreateNavigator()
-                                    .RequirementsMetAsync(_objCharacter, ParentWeapon, token: token)
-                                    .ConfigureAwait(false))
-                                continue;
-
-                            XPathNavigator xmlTestNode =
-                                objXmlWeapon.SelectSingleNodeAndCacheExpressionAsNavigator("forbidden/weapondetails",
-                                    token);
-                            if (xmlTestNode != null
-                                && await xmlParentWeaponDataNode
-                                    .ProcessFilterOperationNodeAsync(xmlTestNode, false, token).ConfigureAwait(false))
-                            {
-                                // Assumes topmost parent is an AND node
-                                continue;
-                            }
-
-                            xmlTestNode =
-                                objXmlWeapon.SelectSingleNodeAndCacheExpressionAsNavigator("required/weapondetails",
-                                    token);
-                            if (xmlTestNode != null
-                                && !await xmlParentWeaponDataNode
-                                    .ProcessFilterOperationNodeAsync(xmlTestNode, false, token).ConfigureAwait(false))
-                            {
-                                // Assumes topmost parent is an AND node
-                                continue;
-                            }
-
-                            if (objXmlWeapon["cyberware"]?.InnerTextIsTrueString() == true)
-                                continue;
-                            string strTest = objXmlWeapon["mount"]?.InnerTextViaPool(token);
-                            if (!string.IsNullOrEmpty(strTest) && !Mounts.Contains(strTest))
-                                continue;
-                            strTest = objXmlWeapon["extramount"]?.InnerTextViaPool(token);
-                            if (!string.IsNullOrEmpty(strTest) && !Mounts.Contains(strTest))
+                            if (!await WeaponFitsAsync(objXmlWeapon, xmlParentWeaponDataNode, ParentWeapon, _objCharacter, Mounts, token).ConfigureAwait(false))
                                 continue;
                             if (blnHideOverAvailLimit
                                 && !await SelectionShared
@@ -687,40 +654,11 @@ namespace Chummer
                             : null;
                         foreach (XmlNode objXmlWeapon in objNodeList)
                         {
-                            if (!await objXmlWeapon.CreateNavigator().RequirementsMetAsync(_objCharacter, ParentWeapon, token: token).ConfigureAwait(false))
-                                continue;
-
-                            XPathNavigator xmlTestNode = objXmlWeapon.SelectSingleNodeAndCacheExpressionAsNavigator("forbidden/weapondetails", token);
-                            if (xmlTestNode != null
-                                && await xmlParentWeaponDataNode.ProcessFilterOperationNodeAsync(xmlTestNode, false, token).ConfigureAwait(false))
-                            {
-                                // Assumes topmost parent is an AND node
-                                continue;
-                            }
-
-                            xmlTestNode = objXmlWeapon.SelectSingleNodeAndCacheExpressionAsNavigator("required/weapondetails", token);
-                            if (xmlTestNode != null
-                                && !await xmlParentWeaponDataNode.ProcessFilterOperationNodeAsync(xmlTestNode, false, token).ConfigureAwait(false))
-                            {
-                                // Assumes topmost parent is an AND node
-                                continue;
-                            }
-
-                            if (objXmlWeapon["cyberware"]?.InnerTextIsTrueString() == true)
+                            if (!await WeaponFitsAsync(objXmlWeapon, xmlParentWeaponDataNode, ParentWeapon, _objCharacter, Mounts, token).ConfigureAwait(false))
                                 continue;
 
                             string strMount = objXmlWeapon["mount"]?.InnerTextViaPool(token);
-                            if (!string.IsNullOrEmpty(strMount) && !Mounts.Contains(strMount))
-                            {
-                                continue;
-                            }
-
                             string strExtraMount = objXmlWeapon["extramount"]?.InnerTextViaPool(token);
-                            if (!string.IsNullOrEmpty(strExtraMount) && !Mounts.Contains(strExtraMount))
-                            {
-                                continue;
-                            }
-
                             if (blnForCategories)
                                 return true;
                             if (blnHideOverAvailLimit
@@ -1031,6 +969,49 @@ namespace Chummer
         /// Markup percentage.
         /// </summary>
         public decimal Markup => _decMarkup;
+
+        /// <summary>
+        /// Whether a weapon entry can be picked, as the weapon list checks each entry: its requirements, what it needs of (or forbids on) the
+        /// parent weapon, that it isn't a cyberweapon, and that its mounts are free. Also used to buy weapons without the dialog (by the AI agent).
+        /// </summary>
+        /// <param name="objXmlWeapon">Weapon data node.</param>
+        /// <param name="xmlParentWeaponDataNode">Data node of the weapon it goes under, if any.</param>
+        /// <param name="objParentWeapon">Weapon it goes under, if any.</param>
+        /// <param name="objCharacter">Character buying the weapon.</param>
+        /// <param name="setMounts">Free mounts it may use.</param>
+        /// <param name="token">Cancellation token to listen to.</param>
+        internal static async Task<bool> WeaponFitsAsync(XmlNode objXmlWeapon, XmlNode xmlParentWeaponDataNode, Weapon objParentWeapon, Character objCharacter,
+                                                         ICollection<string> setMounts, CancellationToken token = default)
+        {
+            if (!await objXmlWeapon.CreateNavigator().RequirementsMetAsync(objCharacter, objParentWeapon, token: token).ConfigureAwait(false))
+                return false;
+
+            XPathNavigator xmlTestNode = objXmlWeapon.SelectSingleNodeAndCacheExpressionAsNavigator("forbidden/weapondetails", token);
+            if (xmlTestNode != null
+                && await xmlParentWeaponDataNode.ProcessFilterOperationNodeAsync(xmlTestNode, false, token).ConfigureAwait(false))
+            {
+                // Assumes topmost parent is an AND node
+                return false;
+            }
+
+            xmlTestNode = objXmlWeapon.SelectSingleNodeAndCacheExpressionAsNavigator("required/weapondetails", token);
+            if (xmlTestNode != null
+                && !await xmlParentWeaponDataNode.ProcessFilterOperationNodeAsync(xmlTestNode, false, token).ConfigureAwait(false))
+            {
+                // Assumes topmost parent is an AND node
+                return false;
+            }
+
+            if (objXmlWeapon["cyberware"]?.InnerTextIsTrueString() == true)
+                return false;
+
+            string strMount = objXmlWeapon["mount"]?.InnerTextViaPool(token);
+            if (!string.IsNullOrEmpty(strMount) && !setMounts.Contains(strMount))
+                return false;
+
+            string strExtraMount = objXmlWeapon["extramount"]?.InnerTextViaPool(token);
+            return string.IsNullOrEmpty(strExtraMount) || setMounts.Contains(strExtraMount);
+        }
 
         /// <summary>
         /// Only the provided Weapon Categories should be shown in the list.

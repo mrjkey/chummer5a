@@ -75,6 +75,22 @@ namespace Chummer.Agent
                                  ("talent_skills", "array", "New free skill choices for the talent."),
                                  ("character", "string", CharacterArgDescription)),
                 SetPrioritiesAsync);
+            yield return new AgentTool("set_build_settings",
+                "Put an open character on other settings (build rules and books), as the editor's Special > Change Options does, e.g. to enable more "
+                + "books with 'Full House'. Moving a creation-mode character to settings with another build method converts the build, which needs "
+                + "`convert_build`.",
+                AgentTool.Schema(("settings!", "string", SettingsArgDescription),
+                                 ("ignore_rules", "boolean", "Turn rule enforcement off (or back on). Default: unchanged."),
+                                 ("convert_build", "boolean", "Allow converting the build when the build method changes. Default false."),
+                                 ("character", "string", CharacterArgDescription)),
+                SetBuildSettingsAsync);
+            yield return new AgentTool("manage_portrait",
+                "Add, remove or pick the main portrait (mugshot) of a character, as the Description tab's mugshot buttons do.",
+                AgentTool.Schema(("action!", "string", "'add' (an image file), 'remove' or 'set_main'."),
+                                 ("path", "string", "For 'add': the image file (PNG, JPG, BMP or GIF)."),
+                                 ("index", "integer", "For 'remove' and 'set_main': which portrait, counting from 1."),
+                                 ("character", "string", CharacterArgDescription)),
+                ManagePortraitAsync);
             yield return new AgentTool("open_character",
                 "Open a saved character file in Chummer's editor, as File > Open does. Relative paths are looked up in Chummer's saves folder.",
                 AgentTool.Schema(("path!", "string", "The .chum5 file, e.g. 'Darrow.chum5' or a full path.")),
@@ -93,6 +109,89 @@ namespace Chummer.Agent
                                  ("overwrite", "boolean", "Replace an existing file at `path` that isn't this character's. Default false."),
                                  ("character", "string", CharacterArgDescription)),
                 SaveCharacterAsync);
+        }
+
+        private static async Task<object> SetBuildSettingsAsync(JObject objArgs, CancellationToken token)
+        {
+            CharacterShared frmCharacter = await GetCharacterFormAsync(objArgs, token).ConfigureAwait(false);
+            Character objCharacter = frmCharacter.CharacterObject;
+            CharacterSettings objSettings = await FindSettingsAsync(RequiredString(objArgs, "settings"), token).ConfigureAwait(false);
+            bool blnIgnoreRules = objArgs.Value<bool?>("ignore_rules") ?? await objCharacter.GetIgnoreRulesAsync(token).ConfigureAwait(false);
+            bool blnConvert = objArgs.Value<bool?>("convert_build") == true;
+            CharacterBuildMethod eOldBuildMethod = await (await objCharacter.GetSettingsAsync(token).ConfigureAwait(false)).GetBuildMethodAsync(token).ConfigureAwait(false);
+            bool blnConvertRefused = false;
+            // Special > Change Options, then OK in the build method dialog
+            if (!await SelectBuildMethod.ApplySettingsAsync(objCharacter, objSettings, blnIgnoreRules, true, eOldBuildMethod, (e, t) =>
+                {
+                    blnConvertRefused = !blnConvert;
+                    return Task.FromResult(blnConvert);
+                }, token).ConfigureAwait(false))
+            {
+                throw new AgentToolException(blnConvertRefused
+                                                 ? "'" + await objSettings.GetNameAsync(token).ConfigureAwait(false) + "' uses the " + objSettings.BuildMethod
+                                                   + " build method instead of " + eOldBuildMethod + "; pass convert_build=true to convert the build."
+                                                 : "Chummer couldn't switch the character to those settings.");
+            }
+
+            await frmCharacter.MakeDirtyWithCharacterUpdate(token).ConfigureAwait(false);
+            return new
+            {
+                result = objCharacter.CharacterName + " now uses '" + await objSettings.GetNameAsync(token).ConfigureAwait(false) + "' ("
+                         + objSettings.BuildMethod + (blnIgnoreRules ? ", rules ignored" : string.Empty) + ")."
+            };
+        }
+
+        private static async Task<object> ManagePortraitAsync(JObject objArgs, CancellationToken token)
+        {
+            CharacterShared frmCharacter = await GetCharacterFormAsync(objArgs, token).ConfigureAwait(false);
+            Character objCharacter = frmCharacter.CharacterObject;
+            ThreadSafeList<System.Drawing.Image> lstMugshots = await objCharacter.GetMugshotsAsync(token).ConfigureAwait(false);
+            int intCount = await lstMugshots.GetCountAsync(token).ConfigureAwait(false);
+            string strAction = RequiredString(objArgs, "action").ToLowerInvariant();
+            int GetIndex()
+            {
+                int intIndex = OptionalInt(objArgs, "index") ?? throw new AgentToolException("`index` is required.");
+                if (intIndex < 1 || intIndex > intCount)
+                    throw new AgentToolException("The character has " + intCount.ToString(GlobalSettings.InvariantCultureInfo) + " portrait(s); `index` counts from 1.");
+                return intIndex - 1;
+            }
+
+            string strResult;
+            switch (strAction)
+            {
+                case "add":
+                {
+                    string strPath = RequiredString(objArgs, "path");
+                    if (!File.Exists(strPath))
+                        throw new AgentToolException("There is no file '" + strPath + "'.");
+                    // Add Mugshot, after the file is picked
+                    if (!await frmCharacter.AddMugshotFromFileAsync(strPath, token).ConfigureAwait(false))
+                        throw new AgentToolException("'" + strPath + "' isn't an image Chummer can read.");
+                    strResult = "Added portrait " + (intCount + 1).ToString(GlobalSettings.InvariantCultureInfo) + ".";
+                    break;
+                }
+                case "remove":
+                {
+                    int intIndex = GetIndex();
+                    await frmCharacter.RemoveMugshot(intIndex, token).ConfigureAwait(false);
+                    strResult = "Removed portrait " + (intIndex + 1).ToString(GlobalSettings.InvariantCultureInfo) + ".";
+                    break;
+                }
+                case "set_main":
+                {
+                    int intIndex = GetIndex();
+                    // The Main Mugshot checkbox
+                    await objCharacter.SetMainMugshotIndexAsync(intIndex, token).ConfigureAwait(false);
+                    strResult = "Portrait " + (intIndex + 1).ToString(GlobalSettings.InvariantCultureInfo) + " is now the main one.";
+                    break;
+                }
+                default:
+                    throw new AgentToolException("`action` must be 'add', 'remove' or 'set_main'.");
+            }
+
+            await frmCharacter.RefreshMugshotPanelAsync(token).ConfigureAwait(false);
+            await frmCharacter.MakeDirtyWithCharacterUpdate(token).ConfigureAwait(false);
+            return new { result = strResult, portraits = await lstMugshots.GetCountAsync(token).ConfigureAwait(false) };
         }
 
         #region Settings

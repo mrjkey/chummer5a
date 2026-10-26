@@ -23,6 +23,8 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Xml;
+using System.Xml.XPath;
+using Chummer.Backend.Enums;
 using Chummer.Backend.Equipment;
 using Chummer.Backend.Uniques;
 using Newtonsoft.Json.Linq;
@@ -39,8 +41,11 @@ namespace Chummer.Agent
         {
             yield return new AgentTool("add_weapon",
                 "Buy a weapon from search_catalog(kind='weapon'), as the editor's Add Weapon does. Checks requirements, books and the availability limit; "
-                + "the result shows nuyen remaining.",
+                + "the result shows nuyen remaining. With `parent` it goes under a weapon (underbarrel weapons), into a vehicle's weapon mount, or into "
+                + "a drone or mechanical arm vehicle mod.",
                 AgentTool.Schema(("id!", "string", "Weapon id from search_catalog, or its exact English name."),
+                                 ("parent", "string", "Id of a weapon, weapon mount or arm vehicle mod to put it in, from list_items."),
+                                 ("location", "string", "Weapon location to file it under, from manage_location(tab='weapons')."),
                                  ("free", "boolean", FreeDescription),
                                  ("black_market", "boolean", BlackMarketDescription),
                                  ("character", "string", CharacterArgDescription)),
@@ -56,11 +61,15 @@ namespace Chummer.Agent
             yield return new AgentTool("add_gear",
                 "Buy gear from search_catalog(kind='gear') (commlinks, fake SINs and licenses, ammo, tools, drugs...), as the editor's Add Gear does. "
                 + "A commlink becomes the active one if the character has none. Identical items stack. Checks requirements, books, rating and availability. "
+                + "With `parent` it goes into something the character has, as that item's Add Gear / Add as Plugin menu item does: programs into a "
+                + "commlink, gear into armor or its mods, cyberware, a weapon accessory, a vehicle or a vehicle's sensor; only what the parent takes is allowed. "
+                + "Capacity is not checked here; validate_character reports overfull items. "
                 + "Ammunition, spare clips and speed loaders ask which weapon category they are for: pass it as forced_value (e.g. 'Heavy Pistols').",
                 AgentTool.Schema(("id!", "string", "Gear id from search_catalog, or its exact English name."),
                                  ("rating", "integer", "Rating, for gear that has one (e.g. a Fake SIN 4). Default the item's minimum."),
                                  ("quantity", "number", "How many to buy. Default 1 (or the pack size, for things sold in packs)."),
-                                 ("parent", "string", "Id of gear the character has to plug this into (e.g. a program into a commlink, from get_character_summary)."),
+                                 ("parent", "string", "Id of the item to put this into (gear, armor, armor mod, cyberware, weapon accessory or vehicle), from list_items."),
+                                 ("location", "string", "Gear location (or a vehicle's location, with a vehicle parent) to file it under, from manage_location."),
                                  ("forced_value", "string", ForcedValueDescription),
                                  ("free", "boolean", FreeDescription),
                                  ("black_market", "boolean", BlackMarketDescription),
@@ -73,7 +82,9 @@ namespace Chummer.Agent
                                  ("kind", "string", "'cyberware' (default) or 'bioware'."),
                                  ("grade", "string", "Grade name, e.g. 'Standard' (default), 'Alphaware', 'Used', 'Betaware'."),
                                  ("rating", "integer", "Rating, for ware that has one. Default the item's minimum."),
-                                 ("parent", "string", "Id of cyberware the character has to install this into (e.g. a cyberarm), from get_character_summary."),
+                                 ("parent", "string", "Id of cyberware to install this into as a plugin (e.g. a cyberarm; it takes the parent's grade), or of a vehicle mod "
+                                                      + "that holds cyberware (e.g. a drone arm), from list_items."),
+                                 ("forced_value", "string", "Answer for the choice it asks: 'Left' or 'Right' for ware that goes on one side, or its other choice."),
                                  ("free", "boolean", FreeDescription),
                                  ("black_market", "boolean", BlackMarketDescription),
                                  ("character", "string", CharacterArgDescription)),
@@ -88,7 +99,7 @@ namespace Chummer.Agent
             yield return new AgentTool("add_weapon_accessory",
                 "Fit an accessory (search_catalog kind='accessory') to a weapon the character has, as the editor's Add Accessory does. "
                 + "The accessory must fit one of the weapon's free mounts; the error lists them.",
-                AgentTool.Schema(("weapon!", "string", "Weapon id from get_character_summary, or its name."),
+                AgentTool.Schema(("weapon!", "string", "Weapon id from list_items (vehicle and underbarrel weapons too), or its name."),
                                  ("id!", "string", "Accessory id from search_catalog, or its exact English name."),
                                  ("mount", "string", "Mount to use, e.g. 'Top', 'Barrel', 'Under'. Default the first that fits."),
                                  ("extra_mount", "string", "Second mount, for accessories that take two. Default the first that fits."),
@@ -116,11 +127,43 @@ namespace Chummer.Agent
                                  ("character", "string", CharacterArgDescription)),
                 AddVehicleModAsync);
             yield return new AgentTool("add_lifestyle",
-                "Add a lifestyle from search_catalog(kind='lifestyle'), e.g. Squatter, Low, Middle, paid for a number of months at creation.",
-                AgentTool.Schema(("id!", "string", "Lifestyle id from search_catalog, or its exact English name."),
+                "Add a lifestyle, as the Lifestyles tab's Add Lifestyle (or Add Advanced Lifestyle) dialog does: a base lifestyle from "
+                + "search_catalog(kind='lifestyle'), paid for some months, with optional roommates, cost percentage, trust fund and lifestyle qualities. "
+                + "Advanced lifestyles (Run Faster) also take Neighborhood/Comforts/Security points and bonus LP.",
+                AgentTool.Schema(("id!", "string", "Base lifestyle id from search_catalog, or its exact English name, e.g. 'Low', 'Medium', 'High'."),
                                  ("months", "integer", "Months paid in advance. Default 1."),
+                                 ("name", "string", "The lifestyle's name, e.g. 'Penthouse'. Default: the base lifestyle's name."),
+                                 ("advanced", "boolean", "An advanced lifestyle with points to spend (Run Faster). Default false."),
+                                 ("percentage", "number", "Percentage of the cost the character pays. Default 100."),
+                                 ("roommates", "integer", "Number of roommates. Default 0."),
+                                 ("split_cost", "boolean", "Roommates split the cost."),
+                                 ("trust_fund", "boolean", "Paid by the character's Trust Fund quality."),
+                                 ("area", "integer", "Advanced: extra Neighborhood points."),
+                                 ("comforts", "integer", "Advanced: extra Comforts points."),
+                                 ("security", "integer", "Advanced: extra Security points."),
+                                 ("bonus_lp", "integer", "Advanced: bonus lifestyle points."),
+                                 ("qualities", "array", "Lifestyle qualities to add, by name or id (search_catalog kind='lifestyle' lists them under the "
+                                                        + "lifestyle data); prefix a name with 'free:' to take it for free."),
                                  ("character", "string", CharacterArgDescription)),
                 AddLifestyleAsync);
+            yield return new AgentTool("edit_lifestyle",
+                "Change a lifestyle the character has, as double-clicking it on the Lifestyles tab does: its base lifestyle, name, percentage, "
+                + "roommates, trust fund, advanced points, and lifestyle qualities. Only the fields passed change. Use set_item_values for months.",
+                AgentTool.Schema(("id!", "string", "Lifestyle id from list_items."),
+                                 ("base", "string", "New base lifestyle."),
+                                 ("name", "string", "New name."),
+                                 ("percentage", "number", "Percentage of the cost the character pays."),
+                                 ("roommates", "integer", "Number of roommates."),
+                                 ("split_cost", "boolean", "Roommates split the cost."),
+                                 ("trust_fund", "boolean", "Paid by the character's Trust Fund quality."),
+                                 ("area", "integer", "Advanced: extra Neighborhood points."),
+                                 ("comforts", "integer", "Advanced: extra Comforts points."),
+                                 ("security", "integer", "Advanced: extra Security points."),
+                                 ("bonus_lp", "integer", "Advanced: bonus lifestyle points."),
+                                 ("add_qualities", "array", "Lifestyle qualities to add, by name or id; prefix 'free:' to take one for free."),
+                                 ("remove_qualities", "array", "Lifestyle qualities to remove, by name or id."),
+                                 ("character", "string", CharacterArgDescription)),
+                EditLifestyleAsync);
         }
 
         #region Helpers
@@ -209,37 +252,162 @@ namespace Chummer.Agent
 
         private static async Task<object> AddWeaponAsync(JObject objArgs, CancellationToken token)
         {
-            CharacterCreate frmCreate = await GetCreateFormAsync(objArgs, token).ConfigureAwait(false);
-            XmlNode objXmlWeapon = await GetBuyableNodeAsync(frmCreate.CharacterObject, "weapons.xml", "/chummer/weapons/weapon", RequiredString(objArgs, "id"),
+            CharacterShared frmCharacter = await GetCharacterFormAsync(objArgs, token).ConfigureAwait(false);
+            CharacterCareer frmCareer = frmCharacter as CharacterCareer;
+            Character objCharacter = frmCharacter.CharacterObject;
+            XmlNode objXmlWeapon = await GetBuyableNodeAsync(objCharacter, "weapons.xml", "/chummer/weapons/weapon", RequiredString(objArgs, "id"),
                                                              token: token).ConfigureAwait(false);
-            Weapon objWeapon = await frmCreate.AddWeaponFromNodeAsync(objXmlWeapon, objArgs.Value<bool?>("free") == true,
-                                                                      objArgs.Value<bool?>("black_market") == true, token: token).ConfigureAwait(false);
-            return await FinishEditAsync(frmCreate, "Added " + await objWeapon.GetCurrentDisplayNameAsync(token).ConfigureAwait(false)
-                                                    + " (id " + objWeapon.InternalId + ").", token).ConfigureAwait(false);
+            string strName = objXmlWeapon["name"]?.InnerText;
+            bool blnIgnoreRules = await objCharacter.GetIgnoreRulesAsync(token).ConfigureAwait(false);
+            bool blnFree = objArgs.Value<bool?>("free") == true;
+            bool blnBlackMarket = objArgs.Value<bool?>("black_market") == true;
+            decimal decMarkup = GetMarkup(objArgs, frmCharacter);
+            OwnedItem objParentItem = null;
+            string strParent = objArgs.Value<string>("parent")?.Trim();
+            if (!string.IsNullOrEmpty(strParent))
+                objParentItem = await FindItemAsync(objCharacter, strParent, token).ConfigureAwait(false);
+
+            Weapon objWeapon;
+            bool blnTooExpensive = false;
+            switch (objParentItem?.Item)
+            {
+                case null:
+                {
+                    Location objLocation = null;
+                    string strLocation = objArgs.Value<string>("location")?.Trim();
+                    if (!string.IsNullOrEmpty(strLocation))
+                        objLocation = await FindLocationAsync(objCharacter.WeaponLocations, strLocation, token).ConfigureAwait(false)
+                                      ?? throw new AgentToolException("There is no weapon location '" + strLocation + "'. Add one with manage_location(tab='weapons').");
+                    // The Add Weapon dialog's list: no underbarrel-only or cyberware weapons
+                    if (!blnIgnoreRules && !await SelectWeapon.WeaponFitsAsync(objXmlWeapon, null, null, objCharacter, new HashSet<string>(), token).ConfigureAwait(false))
+                        throw new AgentToolException(strName + " can't be bought on its own (it goes under another weapon, or is part of cyberware).");
+                    if (frmCareer != null)
+                        (objWeapon, blnTooExpensive) = await frmCareer.AddWeaponFromNodeAsync(objXmlWeapon, blnFree, blnBlackMarket, decMarkup, objLocation, token)
+                                                                      .ConfigureAwait(false);
+                    else
+                        objWeapon = await ((CharacterCreate)frmCharacter).AddWeaponFromNodeAsync(objXmlWeapon, blnFree, blnBlackMarket, objLocation, token: token)
+                                                                         .ConfigureAwait(false);
+                    break;
+                }
+                case Weapon objParentWeapon:
+                {
+                    // Add Underbarrel Weapon: only underbarrel weapons that fit the parent's free mounts
+                    if (objParentWeapon.Cyberware)
+                        throw new AgentToolException("Underbarrel weapons can't be added to cyberweapons.");
+                    if (!blnIgnoreRules)
+                    {
+                        if (objXmlWeapon["category"]?.InnerText != "Underbarrel Weapons")
+                            throw new AgentToolException(strName + " isn't an underbarrel weapon.");
+                        XmlNode xmlParentNode = (await objCharacter.LoadDataAsync("weapons.xml", token: token).ConfigureAwait(false))
+                            .TryGetNodeById("/chummer/weapons/weapon", objParentWeapon.SourceID);
+                        HashSet<string> setMounts = new HashSet<string>(await objParentWeapon.GetAccessoryMountsAsync(token: token).ConfigureAwait(false));
+                        if (!await SelectWeapon.WeaponFitsAsync(objXmlWeapon, xmlParentNode, objParentWeapon, objCharacter, setMounts, token).ConfigureAwait(false))
+                            throw new AgentToolException(strName + " doesn't fit under " + objParentWeapon.Name + " (its mount is taken, or the weapon doesn't qualify). Free mounts: "
+                                                         + string.Join(", ", setMounts) + ".");
+                    }
+
+                    bool blnInVehicle = false;
+                    for (OwnedItem objLoop = objParentItem.Parent; objLoop != null; objLoop = objLoop.Parent)
+                        blnInVehicle |= objLoop.Item is Vehicle;
+                    (objWeapon, blnTooExpensive) = await frmCharacter.AddUnderbarrelWeaponFromNodeAsync(
+                                                                         objParentWeapon, objXmlWeapon, blnFree, blnBlackMarket, decMarkup, frmCareer != null,
+                                                                         frmCareer != null
+                                                                             ? await GetExpenseStringAsync(blnInVehicle ? "String_ExpensePurchaseVehicleWeapon" : "String_ExpensePurchaseWeapon",
+                                                                                                           token).ConfigureAwait(false)
+                                                                             : string.Empty,
+                                                                         NuyenExpenseType.AddVehicleWeapon, frmCareer == null, token)
+                                                                     .ConfigureAwait(false);
+                    break;
+                }
+                case WeaponMount objMount:
+                    if (!blnIgnoreRules)
+                    {
+                        if (objMount.IsWeaponsFull)
+                            throw new AgentToolException(objMount.Name + " already holds as many weapons as it can.");
+                        await EnsureWeaponFitsMountAsync(objCharacter, objXmlWeapon, objMount.AllowedWeaponCategories, objMount.WeaponFilter, objMount.Name, token)
+                            .ConfigureAwait(false);
+                    }
+
+                    (objWeapon, blnTooExpensive) = await frmCharacter.AddWeaponToWeaponMountFromNodeAsync(objMount, null, objXmlWeapon, blnFree, decMarkup,
+                                                                                                         frmCareer != null, token).ConfigureAwait(false);
+                    break;
+                case VehicleMod objMod:
+                {
+                    // Drone and mechanical arms hold a weapon themselves
+                    if (!objMod.Name.StartsWith("Mechanical Arm", StringComparison.Ordinal) && !objMod.Name.Contains("Drone Arm"))
+                        throw new AgentToolException(objMod.Name + " can't hold a weapon; pick a weapon mount, or a drone or mechanical arm.");
+                    (_, _, WeaponMount objArmMount) = await objCharacter.Vehicles.FindVehicleModAsync(x => x.InternalId == objMod.InternalId, token).ConfigureAwait(false);
+                    if (!blnIgnoreRules)
+                        await EnsureWeaponFitsMountAsync(objCharacter, objXmlWeapon, objMod.WeaponMountCategories, string.Empty, objMod.Name, token).ConfigureAwait(false);
+                    (objWeapon, blnTooExpensive) = await frmCharacter.AddWeaponToWeaponMountFromNodeAsync(objArmMount, objMod, objXmlWeapon, blnFree, decMarkup,
+                                                                                                         frmCareer != null, token).ConfigureAwait(false);
+                    break;
+                }
+                default:
+                    throw new AgentToolException("Weapons can go under another weapon, into a vehicle's weapon mount, or into a drone or mechanical arm; not into "
+                                                 + await GetItemNameAsync(objParentItem.Item, token).ConfigureAwait(false) + ".");
+            }
+
+            if (objWeapon == null)
+                throw new AgentToolException(blnTooExpensive ? "The character can't afford " + strName + "." : "The weapon was not added.");
+            return await FinishAnyEditAsync(frmCharacter, "Added " + await objWeapon.GetCurrentDisplayNameAsync(token).ConfigureAwait(false)
+                                                          + (objParentItem != null ? " to " + await GetItemNameAsync(objParentItem.Item, token).ConfigureAwait(false) : string.Empty)
+                                                          + " (id " + objWeapon.InternalId + ").", token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Refuse weapons a mount's Select Weapon dialog would not list: outside its categories or filter, or failing the usual checks.
+        /// </summary>
+        private static async Task EnsureWeaponFitsMountAsync(Character objCharacter, XmlNode objXmlWeapon, string strCategories, string strFilter, string strMountName,
+                                                             CancellationToken token)
+        {
+            string strName = objXmlWeapon["name"]?.InnerText;
+            HashSet<string> setCategories = new HashSet<string>((strCategories ?? string.Empty).Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries)
+                                                                                                .Select(x => x.Trim()));
+            string strCategory = objXmlWeapon["category"]?.InnerText ?? string.Empty;
+            if (setCategories.Count > 0 && !setCategories.Contains(strCategory))
+                throw new AgentToolException(strName + " (" + strCategory + ") doesn't fit " + strMountName + ". It takes: " + string.Join(", ", setCategories) + ".");
+            if (!string.IsNullOrEmpty(strFilter) && objXmlWeapon.CreateNavigator().SelectSingleNode("self::node()[" + strFilter + "]") == null)
+                throw new AgentToolException(strName + " doesn't fit " + strMountName + ".");
+            if (!await SelectWeapon.WeaponFitsAsync(objXmlWeapon, null, null, objCharacter, new HashSet<string>(), token).ConfigureAwait(false))
+                throw new AgentToolException(strName + " can't go into " + strMountName + ".");
         }
 
         private static async Task<object> AddArmorAsync(JObject objArgs, CancellationToken token)
         {
-            CharacterCreate frmCreate = await GetCreateFormAsync(objArgs, token).ConfigureAwait(false);
-            Character objCharacter = frmCreate.CharacterObject;
+            CharacterShared frmCharacter = await GetCharacterFormAsync(objArgs, token).ConfigureAwait(false);
+            Character objCharacter = frmCharacter.CharacterObject;
             XmlNode objXmlArmor = await GetDataNodeAsync(objCharacter, "armor.xml", "/chummer/armors/armor", RequiredString(objArgs, "id"), token).ConfigureAwait(false);
             int intRating = GetRating(objXmlArmor, OptionalInt(objArgs, "rating"), await objCharacter.GetIgnoreRulesAsync(token).ConfigureAwait(false));
             objXmlArmor = await GetBuyableNodeAsync(objCharacter, "armor.xml", "/chummer/armors/armor", RequiredString(objArgs, "id"), Math.Max(1, intRating),
                                                     token: token).ConfigureAwait(false);
-            Armor objArmor = await frmCreate.AddArmorFromNodeAsync(objXmlArmor, intRating, objArgs.Value<bool?>("free") == true,
-                                                                   objArgs.Value<bool?>("black_market") == true, token: token).ConfigureAwait(false)
-                             ?? throw new AgentToolException("The armor was not added (a choice it needed was cancelled).");
-            return await FinishEditAsync(frmCreate, "Added " + await objArmor.GetCurrentDisplayNameAsync(token).ConfigureAwait(false)
-                                                    + " (id " + objArmor.InternalId + ").", token).ConfigureAwait(false);
+            bool blnFree = objArgs.Value<bool?>("free") == true;
+            bool blnBlackMarket = objArgs.Value<bool?>("black_market") == true;
+            decimal decMarkup = GetMarkup(objArgs, frmCharacter);
+            Armor objArmor;
+            bool blnTooExpensive = false;
+            if (frmCharacter is CharacterCareer frmCareer)
+                (objArmor, blnTooExpensive) = await frmCareer.AddArmorFromNodeAsync(objXmlArmor, intRating, blnFree, blnBlackMarket, decMarkup, token: token)
+                                                             .ConfigureAwait(false);
+            else
+                objArmor = await ((CharacterCreate)frmCharacter).AddArmorFromNodeAsync(objXmlArmor, intRating, blnFree, blnBlackMarket, token: token)
+                                                                .ConfigureAwait(false);
+            if (objArmor == null)
+                throw new AgentToolException(blnTooExpensive
+                                                 ? "The character can't afford " + objXmlArmor["name"]?.InnerText + "."
+                                                 : "The armor was not added (a choice it needed was cancelled).");
+            return await FinishAnyEditAsync(frmCharacter, "Added " + await objArmor.GetCurrentDisplayNameAsync(token).ConfigureAwait(false)
+                                                          + " (id " + objArmor.InternalId + ").", token).ConfigureAwait(false);
         }
 
         private static async Task<object> AddGearAsync(JObject objArgs, CancellationToken token)
         {
-            CharacterCreate frmCreate = await GetCreateFormAsync(objArgs, token).ConfigureAwait(false);
-            Character objCharacter = frmCreate.CharacterObject;
+            CharacterShared frmCharacter = await GetCharacterFormAsync(objArgs, token).ConfigureAwait(false);
+            Character objCharacter = frmCharacter.CharacterObject;
             string strId = RequiredString(objArgs, "id");
             XmlNode objXmlGear = await GetDataNodeAsync(objCharacter, "gear.xml", "/chummer/gears/gear", strId, token).ConfigureAwait(false);
-            int intRating = GetRating(objXmlGear, OptionalInt(objArgs, "rating"), await objCharacter.GetIgnoreRulesAsync(token).ConfigureAwait(false));
+            bool blnIgnoreRules = await objCharacter.GetIgnoreRulesAsync(token).ConfigureAwait(false);
+            int intRating = GetRating(objXmlGear, OptionalInt(objArgs, "rating"), blnIgnoreRules);
             objXmlGear = await GetBuyableNodeAsync(objCharacter, "gear.xml", "/chummer/gears/gear", strId, Math.Max(1, intRating), token: token).ConfigureAwait(false);
             decimal decQuantity = objArgs.Value<decimal?>("quantity")
                                   ?? (decimal.TryParse(objXmlGear["costfor"]?.InnerText, System.Globalization.NumberStyles.Any,
@@ -248,29 +416,323 @@ namespace Chummer.Agent
                                       : 1);
             if (decQuantity <= 0)
                 throw new AgentToolException("`quantity` must be more than 0.");
-            Gear objParent = null;
+            bool blnFree = objArgs.Value<bool?>("free") == true;
+            bool blnBlackMarket = objArgs.Value<bool?>("black_market") == true;
+            string strForced = objArgs.Value<string>("forced_value") ?? string.Empty;
+            string strGearName = objXmlGear["name"]?.InnerText;
+
+            OwnedItem objParentItem = null;
             string strParent = objArgs.Value<string>("parent")?.Trim();
             if (!string.IsNullOrEmpty(strParent))
+                objParentItem = await FindItemAsync(objCharacter, strParent, token).ConfigureAwait(false);
+            object objParent = objParentItem?.Item;
+            // The closest thing up the tree that isn't gear (armor, cyberware, an accessory, a vehicle...), and the vehicle it is in, if any
+            OwnedItem objHolder = objParentItem;
+            while (objHolder?.Item is Gear)
+                objHolder = objHolder.Parent;
+            OwnedItem objVehicleItem = objParentItem;
+            while (objVehicleItem != null && !(objVehicleItem.Item is Vehicle))
+                objVehicleItem = objVehicleItem.Parent;
+            Vehicle objInVehicle = objVehicleItem?.Item as Vehicle;
+
+            Location objLocation = null;
+            string strLocation = objArgs.Value<string>("location")?.Trim();
+            if (!string.IsNullOrEmpty(strLocation))
             {
-                objParent = await FindGearAsync(await objCharacter.Gear.ToListAsync(token).ConfigureAwait(false), strParent, token).ConfigureAwait(false)
-                            ?? await FindOwnedAsync(await objCharacter.Gear.ToListAsync(token).ConfigureAwait(false), strParent, token).ConfigureAwait(false)
-                            ?? throw new AgentToolException("The character has no gear '" + strParent + "' to plug this into.");
+                ThreadSafeObservableCollection<Location> lstLocations = objParent == null
+                    ? objCharacter.GearLocations
+                    : objParent is Vehicle objLocationVehicle
+                        ? objLocationVehicle.Locations
+                        : throw new AgentToolException("`location` only applies to gear bought for the character or for a vehicle.");
+                objLocation = await FindLocationAsync(lstLocations, strLocation, token).ConfigureAwait(false)
+                              ?? throw new AgentToolException("There is no location '" + strLocation + "'. Add one with manage_location.");
             }
 
-            Gear objGear = await frmCreate.AddGearFromNodeAsync(objXmlGear, intRating, decQuantity, objParent, null,
-                                                                objArgs.Value<bool?>("free") == true, objArgs.Value<bool?>("black_market") == true,
-                                                                false, true, objArgs.Value<string>("forced_value") ?? string.Empty, token)
-                                    .ConfigureAwait(false)
-                           ?? throw new AgentToolException("The gear was not added (its choice dialog was cancelled, or it could not be created).");
-            return await FinishEditAsync(frmCreate, "Added " + await objGear.GetCurrentDisplayNameAsync(token).ConfigureAwait(false)
+            decimal decMarkup = GetMarkup(objArgs, frmCharacter);
+            if (!blnIgnoreRules)
+                await EnsureGearFitsParentAsync(objCharacter, objXmlGear, objParent, objInVehicle != null, token).ConfigureAwait(false);
+
+            // Each parent's Add Gear / Add as Plugin menu item
+            Gear objGear;
+            bool blnTooExpensive = false;
+            string strRefusal = string.Empty;
+            if (frmCharacter is CharacterCareer frmCareer)
+            {
+                (objGear, strRefusal) = await BuyCareerGearAsync(frmCareer, objXmlGear, intRating, decQuantity, objParent, objHolder?.Item, objInVehicle,
+                                                                 objLocation, blnFree, blnBlackMarket, decMarkup, strForced, token).ConfigureAwait(false);
+            }
+            else
+            {
+                CharacterCreate frmCreate = (CharacterCreate)frmCharacter;
+                switch (objParent)
+                {
+                    case null:
+                        objGear = await frmCreate.AddGearFromNodeAsync(objXmlGear, intRating, decQuantity, null, objLocation, blnFree, blnBlackMarket,
+                                                                       false, true, strForced, token).ConfigureAwait(false);
+                        break;
+                    case Gear objParentGear:
+                        switch (objHolder?.Item)
+                        {
+                            case null:
+                                objGear = await frmCreate.AddGearFromNodeAsync(objXmlGear, intRating, decQuantity, objParentGear, null, blnFree, blnBlackMarket,
+                                                                               false, true, strForced, token).ConfigureAwait(false);
+                                break;
+                            case Armor objArmor:
+                                objGear = await frmCreate.AddArmorGearFromNodeAsync(objArmor, null, objParentGear, objXmlGear, intRating, decQuantity, blnFree,
+                                                                                    blnBlackMarket, false, strForced, token).ConfigureAwait(false);
+                                break;
+                            case ArmorMod objMod:
+                                objGear = await frmCreate.AddArmorGearFromNodeAsync(objMod.Parent, objMod, objParentGear, objXmlGear, intRating, decQuantity, blnFree,
+                                                                                    blnBlackMarket, false, strForced, token).ConfigureAwait(false);
+                                break;
+                            case Cyberware objCyberware:
+                                objGear = await frmCreate.AddChildGearFromNodeAsync(objXmlGear, intRating, decQuantity, objParentGear, objParentGear.Children,
+                                                                                    objInVehicle == null
+                                                                                    && ((objParentGear.Parent as Gear)?.Equipped
+                                                                                        ?? await objCyberware.GetIsModularCurrentlyEquippedAsync(token).ConfigureAwait(false)),
+                                                                                    blnFree, blnBlackMarket, false, null, strForced, token).ConfigureAwait(false);
+                                break;
+                            case WeaponAccessory objAccessory:
+                                objGear = objInVehicle == null
+                                    ? await frmCreate.AddChildGearFromNodeAsync(objXmlGear, intRating, decQuantity, objParentGear, objParentGear.Children,
+                                                                                (objParentGear.Parent as Gear)?.Equipped ?? objAccessory.Equipped,
+                                                                                blnFree, blnBlackMarket, false, null, strForced, token).ConfigureAwait(false)
+                                    : await frmCreate.AddChildGearFromNodeAsync(objXmlGear, intRating, decQuantity, objParentGear, objParentGear.Children, false,
+                                                                                blnFree, blnBlackMarket, false, (x, t) => objInVehicle.Weapons.AddAsync(x, t),
+                                                                                strForced, token).ConfigureAwait(false);
+                                break;
+                            case Vehicle objVehicle:
+                                // A vehicle sensor's plugins
+                                objGear = await frmCreate.AddChildGearFromNodeAsync(objXmlGear, intRating, decQuantity, objParentGear, objParentGear.Children, false,
+                                                                                    blnFree, null, false, (x, t) => objVehicle.Weapons.AddAsync(x, t),
+                                                                                    strForced, token).ConfigureAwait(false);
+                                break;
+                            default:
+                                throw new AgentToolException("Gear can't be plugged into that.");
+                        }
+
+                        break;
+                    case Armor objArmor:
+                        objGear = await frmCreate.AddArmorGearFromNodeAsync(objArmor, null, null, objXmlGear, intRating, decQuantity, blnFree, blnBlackMarket,
+                                                                            false, strForced, token).ConfigureAwait(false);
+                        break;
+                    case ArmorMod objArmorMod:
+                        objGear = await frmCreate.AddArmorGearFromNodeAsync(objArmorMod.Parent, objArmorMod, null, objXmlGear, intRating, decQuantity, blnFree,
+                                                                            blnBlackMarket, false, strForced, token).ConfigureAwait(false);
+                        break;
+                    case Cyberware objCyberware:
+                        (objGear, blnTooExpensive) = await frmCreate.AddGearToCyberwareFromNodeAsync(objCyberware, objXmlGear, intRating, decQuantity, blnFree,
+                                                                                                    blnBlackMarket, false, 0, false, true, true,
+                                                                                                    objInVehicle == null, string.Empty,
+                                                                                                    NuyenExpenseType.AddCyberwareGear, strForced, token)
+                                                                     .ConfigureAwait(false);
+                        break;
+                    case WeaponAccessory objAccessory:
+                        objGear = objInVehicle == null
+                            ? await frmCreate.AddChildGearFromNodeAsync(objXmlGear, intRating, decQuantity, objAccessory, objAccessory.GearChildren,
+                                                                        objAccessory.Equipped, blnFree, blnBlackMarket, false, null, strForced, token)
+                                             .ConfigureAwait(false)
+                            : await frmCreate.AddChildGearFromNodeAsync(objXmlGear, intRating, decQuantity, objAccessory, objAccessory.GearChildren, false,
+                                                                        blnFree, blnBlackMarket, false, (x, t) => objAccessory.Parent.Children.AddAsync(x, t),
+                                                                        strForced, token).ConfigureAwait(false);
+                        break;
+                    case Vehicle objVehicle:
+                        (objGear, blnTooExpensive) = await frmCreate.AddVehicleGearFromNodeAsync(objVehicle, objLocation, objXmlGear, intRating, decQuantity,
+                                                                                                blnFree, blnBlackMarket, false, true, strForced, token)
+                                                                     .ConfigureAwait(false);
+                        break;
+                    default:
+                        throw new AgentToolException("Gear can't be put into " + await GetItemNameAsync(objParent, token).ConfigureAwait(false) + ".");
+                }
+            }
+
+            if (objGear == null)
+                throw new AgentToolException(blnTooExpensive
+                                                 ? "The character can't afford " + strGearName + "."
+                                                 : await GetRefusalMessageAsync(strRefusal, "The gear was not added (its choice dialog was cancelled, or it could not be created).",
+                                                                                token).ConfigureAwait(false));
+            return await FinishAnyEditAsync(frmCharacter, "Added " + await objGear.GetCurrentDisplayNameAsync(token).ConfigureAwait(false)
+                                                    + (objParent != null ? " to " + await GetItemNameAsync(objParent, token).ConfigureAwait(false) : string.Empty)
                                                     + " (id " + objGear.InternalId + ", quantity "
                                                     + objGear.Quantity.ToString(GlobalSettings.InvariantCultureInfo) + ").", token).ConfigureAwait(false);
         }
 
+        /// <summary>
+        /// Buy gear in career mode, paid from the character's nuyen, as each parent's Add Gear / Add as Plugin menu item does in the career editor.
+        /// </summary>
+        /// <returns>The gear that holds the purchase (null if nothing was bought), and the language key of why not.</returns>
+        private static async Task<(Gear Gear, string Refusal)> BuyCareerGearAsync(CharacterCareer frmCareer, XmlNode objXmlGear, int intRating, decimal decQuantity,
+                                                                                  object objParent, object objHolder, Vehicle objInVehicle, Location objLocation,
+                                                                                  bool blnFree, bool blnBlackMarket, decimal decMarkup, string strForced,
+                                                                                  CancellationToken token)
+        {
+            Gear objGear;
+            bool blnTooExpensive;
+            switch (objParent)
+            {
+                case null:
+                    return await frmCareer.AddGearFromNodeAsync(objXmlGear, intRating, decQuantity, blnFree, blnBlackMarket, false, true, decMarkup,
+                                                                objLocation: objLocation, strForceItemValue: strForced, token: token).ConfigureAwait(false);
+                case Gear objParentGear:
+                    switch (objHolder)
+                    {
+                        case null:
+                            return await frmCareer.AddGearFromNodeAsync(objXmlGear, intRating, decQuantity, blnFree, blnBlackMarket, false, true, decMarkup,
+                                                                        objParentGear, strForceItemValue: strForced, token: token).ConfigureAwait(false);
+                        case Armor objArmor:
+                            return await frmCareer.AddArmorGearFromNodeAsync(objArmor, null, objParentGear, objXmlGear, intRating, decQuantity, blnFree,
+                                                                             blnBlackMarket, false, decMarkup, strForced, token).ConfigureAwait(false);
+                        case ArmorMod objMod:
+                            return await frmCareer.AddArmorGearFromNodeAsync(objMod.Parent, objMod, objParentGear, objXmlGear, intRating, decQuantity, blnFree,
+                                                                             blnBlackMarket, false, decMarkup, strForced, token).ConfigureAwait(false);
+                        case Cyberware objCyberware:
+                            (objGear, blnTooExpensive) = await frmCareer.BuyChildGearFromNodeAsync(
+                                objXmlGear, intRating, decQuantity, objParentGear, objParentGear.Children,
+                                objInVehicle == null
+                                && ((objParentGear.Parent as Gear)?.Equipped ?? await objCyberware.GetIsModularCurrentlyEquippedAsync(token).ConfigureAwait(false)),
+                                blnFree, false, decMarkup, "String_ExpensePurchaseCyberwareGear", NuyenExpenseType.AddCyberwareGear, true, null, strForced,
+                                token).ConfigureAwait(false);
+                            break;
+                        case WeaponAccessory objAccessory:
+                            (objGear, blnTooExpensive) = await frmCareer.BuyChildGearFromNodeAsync(
+                                objXmlGear, intRating, decQuantity, objParentGear, objParentGear.Children,
+                                objInVehicle == null && ((objParentGear.Parent as Gear)?.Equipped ?? objAccessory.Equipped),
+                                blnFree, false, decMarkup, "String_ExpensePurchaseWeaponGear", NuyenExpenseType.AddWeaponGear, true,
+                                objInVehicle == null
+                                    ? (Func<Weapon, CancellationToken, Task>)null
+                                    : async (x, t) =>
+                                    {
+                                        await x.SetParentVehicleAsync(objInVehicle, t).ConfigureAwait(false);
+                                        await objInVehicle.Weapons.AddAsync(x, t).ConfigureAwait(false);
+                                    }, strForced, token).ConfigureAwait(false);
+                            break;
+                        case Vehicle objVehicle:
+                            // A vehicle sensor's plugins
+                            (objGear, blnTooExpensive) = await frmCareer.BuyChildGearFromNodeAsync(
+                                objXmlGear, intRating, decQuantity, objParentGear, objParentGear.Children, false, blnFree, false, decMarkup,
+                                "String_ExpensePurchaseVehicleGear", NuyenExpenseType.AddVehicleGear, true,
+                                (x, t) => objVehicle.Weapons.AddAsync(x, t), strForced, token).ConfigureAwait(false);
+                            break;
+                        default:
+                            throw new AgentToolException("Gear can't be plugged into that.");
+                    }
+
+                    break;
+                case Armor objArmor:
+                    return await frmCareer.AddArmorGearFromNodeAsync(objArmor, null, null, objXmlGear, intRating, decQuantity, blnFree, blnBlackMarket,
+                                                                     false, decMarkup, strForced, token).ConfigureAwait(false);
+                case ArmorMod objArmorMod:
+                    return await frmCareer.AddArmorGearFromNodeAsync(objArmorMod.Parent, objArmorMod, null, objXmlGear, intRating, decQuantity, blnFree,
+                                                                     blnBlackMarket, false, decMarkup, strForced, token).ConfigureAwait(false);
+                case Cyberware objCyberware:
+                    (objGear, blnTooExpensive) = await frmCareer.AddGearToCyberwareFromNodeAsync(
+                        objCyberware, objXmlGear, intRating, decQuantity, blnFree, false, false, decMarkup, true, false, false, objInVehicle == null,
+                        await GetExpenseStringAsync("String_ExpensePurchaseCyberwareGear", token).ConfigureAwait(false), NuyenExpenseType.AddCyberwareGear,
+                        strForced, token).ConfigureAwait(false);
+                    break;
+                case WeaponAccessory objAccessory:
+                    (objGear, blnTooExpensive) = await frmCareer.BuyChildGearFromNodeAsync(
+                        objXmlGear, intRating, decQuantity, objAccessory, objAccessory.GearChildren, objInVehicle == null && objAccessory.Equipped,
+                        blnFree, false, decMarkup, "String_ExpensePurchaseWeaponGear", NuyenExpenseType.AddWeaponGear, false,
+                        objInVehicle == null ? (Func<Weapon, CancellationToken, Task>)null : (x, t) => objAccessory.Parent.Children.AddAsync(x, t),
+                        strForced, token).ConfigureAwait(false);
+                    break;
+                case Vehicle objVehicle:
+                    (objGear, blnTooExpensive) = await frmCareer.AddVehicleGearFromNodeAsync(objVehicle, objLocation, objXmlGear, intRating, decQuantity,
+                                                                                            blnFree, blnBlackMarket, false, true, strForced, token)
+                                                                 .ConfigureAwait(false);
+                    break;
+                default:
+                    throw new AgentToolException("Gear can't be put into " + await GetItemNameAsync(objParent, token).ConfigureAwait(false) + ".");
+            }
+
+            return (objGear, objGear == null && blnTooExpensive ? "Message_NotEnoughNuyen" : string.Empty);
+        }
+
+        /// <summary>
+        /// Refuse gear the parent's Select Gear dialog would not list: outside the categories or names the parent takes, needing a parent it
+        /// doesn't have, or failing the parent's own requirements.
+        /// </summary>
+        private static async Task EnsureGearFitsParentAsync(Character objCharacter, XmlNode objXmlGear, object objParent, bool blnInVehicle, CancellationToken token)
+        {
+            string strName = objXmlGear["name"]?.InnerText;
+            string strCategory = objXmlGear["category"]?.InnerText ?? string.Empty;
+            if (objParent == null)
+            {
+                if (objXmlGear["requireparent"] != null)
+                    throw new AgentToolException(strName + " has to go into another item; pass `parent`.");
+                return;
+            }
+
+            // The categories and names each Add Gear menu item lets its dialog show
+            HashSet<string> setCategories = new HashSet<string>();
+            HashSet<string> setNames = new HashSet<string>();
+            string strParentCapacity = null;
+            switch (objParent)
+            {
+                case Cyberware objCyberware:
+                    if (objCyberware.AllowGear == null)
+                        throw new AgentToolException(objCyberware.Name + " can't hold gear.");
+                    // Cyberware in a vehicle takes any of its gear categories; the character's own also honors gear names
+                    foreach (XmlNode objNode in blnInVehicle
+                                 ? objCyberware.AllowGear.ChildNodes.Cast<XmlNode>()
+                                 : objCyberware.AllowGear.SelectNodes("gearcategory")?.Cast<XmlNode>() ?? Enumerable.Empty<XmlNode>())
+                        setCategories.Add(objNode.InnerText);
+                    if (!blnInVehicle)
+                    {
+                        foreach (XmlNode objNode in objCyberware.AllowGear.SelectNodes("gearname")?.Cast<XmlNode>() ?? Enumerable.Empty<XmlNode>())
+                            setNames.Add(objNode.InnerText);
+                    }
+
+                    strParentCapacity = objCyberware.Capacity == "0" ? null : objCyberware.Capacity;
+                    break;
+                case WeaponAccessory objAccessory:
+                    if (objAccessory.AllowGear == null)
+                        throw new AgentToolException(objAccessory.Name + " can't hold gear.");
+                    foreach (XmlNode objNode in objAccessory.AllowGear.ChildNodes)
+                        setCategories.Add(objNode.InnerText);
+                    break;
+                case Vehicle _:
+                    break;
+                case IHasXmlDataNode objWithNode:
+                    XPathNavigator objParentNode = await objWithNode.GetNodeXPathAsync(token).ConfigureAwait(false);
+                    if (objParentNode != null)
+                    {
+                        foreach (XPathNavigator objCategory in objParentNode.Select("addoncategory"))
+                            setCategories.Add(objCategory.Value);
+                    }
+
+                    if (objParent is Gear objGearParent)
+                        strParentCapacity = objGearParent.Capacity;
+                    break;
+            }
+
+            if (setCategories.Count > 0 && !setCategories.Contains(strCategory))
+                throw new AgentToolException(strName + " (" + strCategory + ") doesn't go into " + await GetItemNameAsync(objParent, token).ConfigureAwait(false)
+                                             + ". It takes: " + string.Join(", ", setCategories.OrderBy(x => x)) + ".");
+            if (setNames.Count > 0 && !setNames.Contains(strName))
+                throw new AgentToolException(strName + " doesn't go into " + await GetItemNameAsync(objParent, token).ConfigureAwait(false) + ". It takes: "
+                                             + string.Join(", ", setNames.OrderBy(x => x)) + ".");
+            // A parent that provides capacity only takes items that use capacity
+            if (setCategories.Count > 0 && !string.IsNullOrEmpty(strParentCapacity)
+                                        && (!strParentCapacity.Contains('[') || strParentCapacity.Contains("/["))
+                                        && strCategory != "Custom" && objXmlGear["capacity"]?.InnerText.Contains('[') != true)
+                throw new AgentToolException(strName + " doesn't use capacity, so it can't be plugged into " + await GetItemNameAsync(objParent, token).ConfigureAwait(false) + ".");
+            if (objParent is Armor && strCategory != "Custom" && objXmlGear["armorcapacity"]?.InnerText.Contains('[') != true)
+                throw new AgentToolException(strName + " doesn't fit into armor (it has no armor capacity cost).");
+            if (!await SelectGear.GearFitsParentAsync(objXmlGear.CreateNavigator(), (objParent as IHasXmlDataNode) != null
+                                                          ? await ((IHasXmlDataNode)objParent).GetNodeXPathAsync(token).ConfigureAwait(false)
+                                                          : null, objCharacter, objParent, token).ConfigureAwait(false))
+                throw new AgentToolException(strName + " can't go into " + await GetItemNameAsync(objParent, token).ConfigureAwait(false)
+                                             + " (it or its parent doesn't meet the other's requirements).");
+        }
+
         private static async Task<object> AddCyberwareAsync(JObject objArgs, CancellationToken token)
         {
-            CharacterCreate frmCreate = await GetCreateFormAsync(objArgs, token).ConfigureAwait(false);
-            Character objCharacter = frmCreate.CharacterObject;
+            CharacterShared frmCharacter = await GetCharacterFormAsync(objArgs, token).ConfigureAwait(false);
+            CharacterCareer frmCareer = frmCharacter as CharacterCareer;
+            Character objCharacter = frmCharacter.CharacterObject;
+            decimal decMarkup = GetMarkup(objArgs, frmCharacter);
             bool blnIgnoreRules = await objCharacter.GetIgnoreRulesAsync(token).ConfigureAwait(false);
             string strId = RequiredString(objArgs, "id");
             bool blnBioware;
@@ -292,8 +754,47 @@ namespace Chummer.Agent
             string strFile = blnBioware ? "bioware.xml" : "cyberware.xml";
             string strPath = blnBioware ? "/chummer/biowares/bioware" : "/chummer/cyberwares/cyberware";
 
-            // Grades the character may use (banned grades are left out, as in the Select Cyberware dialog)
-            string strGrade = objArgs.Value<string>("grade")?.Trim();
+            // What it goes into: the character's own cyberware (as a plugin) or, on a vehicle, a vehicle mod or cyberware in one
+            Cyberware objParent = null;
+            VehicleMod objVehicleMod = null;
+            Vehicle objVehicle = null;
+            string strParent = objArgs.Value<string>("parent")?.Trim();
+            if (!string.IsNullOrEmpty(strParent))
+            {
+                OwnedItem objParentItem = await FindItemAsync(objCharacter, strParent, token).ConfigureAwait(false);
+                for (OwnedItem objLoop = objParentItem; objLoop != null; objLoop = objLoop.Parent)
+                {
+                    if (objVehicleMod == null && objLoop.Item is VehicleMod objLoopMod)
+                        objVehicleMod = objLoopMod;
+                    else if (objLoop.Item is Vehicle objLoopVehicle)
+                        objVehicle = objLoopVehicle;
+                }
+
+                switch (objParentItem.Item)
+                {
+                    case Cyberware objParentCyberware:
+                        objParent = objParentCyberware;
+                        // Add as Plugin: only the subsystem categories the parent takes
+                        if (string.IsNullOrWhiteSpace(objParent.AllowedSubsystems))
+                            throw new AgentToolException(objParent.Name + " doesn't take plugins.");
+                        break;
+                    case VehicleMod objMod:
+                        if (!objMod.AllowCyberware)
+                            throw new AgentToolException(objMod.Name + " can't hold cyberware.");
+                        break;
+                    default:
+                        throw new AgentToolException("Cyberware can be installed into other cyberware or a vehicle mod that holds cyberware, not into "
+                                                     + await GetItemNameAsync(objParentItem.Item, token).ConfigureAwait(false) + ".");
+                }
+
+                if (objVehicle != null && blnBioware)
+                    throw new AgentToolException("Vehicles can't have bioware.");
+            }
+
+            // Grades the character may use (banned grades are left out, as in the Select Cyberware dialog). Plugins take their parent's grade.
+            string strGrade = objParent != null
+                ? (await objParent.GetGradeAsync(token).ConfigureAwait(false))?.Name
+                : objArgs.Value<string>("grade")?.Trim();
             if (string.IsNullOrEmpty(strGrade))
                 strGrade = "Standard";
             List<Grade> lstGrades = await objCharacter.GetGradesListAsync(eSource, blnIgnoreRules, token).ConfigureAwait(false);
@@ -316,56 +817,112 @@ namespace Chummer.Agent
             objXmlCyberware = await GetBuyableNodeAsync(objCharacter, strFile, strPath, strId, Math.Max(1, intRating), objGrade.Avail, token)
                 .ConfigureAwait(false);
 
-            Cyberware objParent = null;
-            string strParent = objArgs.Value<string>("parent")?.Trim();
-            if (!string.IsNullOrEmpty(strParent))
+            if (!blnIgnoreRules)
             {
-                List<Cyberware> lstOwned = await (await objCharacter.GetCyberwareAsync(token).ConfigureAwait(false)).ToListAsync(token).ConfigureAwait(false);
-                objParent = await FindCyberwareAsync(lstOwned, strParent, token).ConfigureAwait(false)
-                            ?? await FindOwnedAsync(lstOwned, strParent, token).ConfigureAwait(false)
-                            ?? throw new AgentToolException("The character has no cyberware '" + strParent + "' to install this into.");
+                string strSubsystems = objParent != null ? objParent.AllowedSubsystems : objVehicleMod?.Subsystems;
+                if (!string.IsNullOrWhiteSpace(strSubsystems))
+                {
+                    HashSet<string> setSubsystems = new HashSet<string>(strSubsystems.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries).Select(x => x.Trim()));
+                    string strCategory = objXmlCyberware["category"]?.InnerText ?? string.Empty;
+                    if (!setSubsystems.Contains(strCategory))
+                        throw new AgentToolException(objXmlCyberware["name"]?.InnerText + " (" + strCategory + ") doesn't go into "
+                                                     + (objParent?.Name ?? objVehicleMod?.Name) + ". It takes: " + string.Join(", ", setSubsystems) + ".");
+                }
+            }
+
+            bool blnFree = objArgs.Value<bool?>("free") == true;
+            bool blnBlackMarket = objArgs.Value<bool?>("black_market") == true;
+            string strForced = objArgs.Value<string>("forced_value") ?? string.Empty;
+            string strNotInstalled = frmCareer != null
+                ? "Chummer did not install it (the character can't afford it, it doesn't fit, or a choice it needed was cancelled)."
+                : "Chummer did not install it (it may not fit, or a choice it needed was cancelled).";
+            if (objVehicle != null)
+            {
+                // The Vehicles tab's Add Cyberware
+                Cyberware objVehicleCyberware = await frmCharacter.AddVehicleCyberwareFromNodeAsync(objVehicle, objVehicleMod, objParent, objXmlCyberware, objGrade,
+                                                                                                    intRating, decMarkup, blnFree, blnBlackMarket, token, strForced,
+                                                                                                    false).ConfigureAwait(false)
+                                                ?? throw new AgentToolException(strNotInstalled);
+                return await FinishAnyEditAsync(frmCharacter, "Installed " + await objVehicleCyberware.GetCurrentDisplayNameAsync(token).ConfigureAwait(false)
+                                                              + " in " + objVehicle.Name + " (id " + objVehicleCyberware.InternalId + ").", token).ConfigureAwait(false);
             }
 
             decimal decOldEssence = await objCharacter.EssenceAsync(token: token).ConfigureAwait(false);
-            Cyberware objCyberware = await frmCreate.AddCyberwareFromNodeAsync(objXmlCyberware, eSource, objGrade, intRating, objParent,
-                                                                               blnFree: objArgs.Value<bool?>("free") == true,
-                                                                               blnBlackMarketDiscount: objArgs.Value<bool?>("black_market") == true,
-                                                                               blnPromptForBaseWeapon: false, token: token).ConfigureAwait(false)
-                                     ?? throw new AgentToolException("Chummer did not install it (it may not fit, or a choice it needed was cancelled).");
+            Cyberware objCyberware = (frmCareer != null
+                                         ? await frmCareer.AddCyberwareFromNodeAsync(objXmlCyberware, eSource, objGrade, intRating, objParent, decMarkup, blnFree,
+                                                                                     blnBlackMarket, blnPromptForBaseWeapon: false, token: token,
+                                                                                     strForceValue: strForced, blnShowNotEnoughNuyenMessage: false)
+                                                                 .ConfigureAwait(false)
+                                         : await ((CharacterCreate)frmCharacter).AddCyberwareFromNodeAsync(objXmlCyberware, eSource, objGrade, intRating, objParent,
+                                                                                                           blnFree: blnFree, blnBlackMarketDiscount: blnBlackMarket,
+                                                                                                           blnPromptForBaseWeapon: false, token: token,
+                                                                                                           strForceValue: strForced).ConfigureAwait(false))
+                                     ?? throw new AgentToolException(strNotInstalled);
             decimal decEssence = await objCharacter.EssenceAsync(token: token).ConfigureAwait(false);
-            return await FinishEditAsync(frmCreate, "Installed " + await objCyberware.GetCurrentDisplayNameAsync(token).ConfigureAwait(false)
-                                                    + " (id " + objCyberware.InternalId + "), essence "
-                                                    + decOldEssence.ToString(GlobalSettings.InvariantCultureInfo) + " -> "
-                                                    + decEssence.ToString(GlobalSettings.InvariantCultureInfo) + ".", token).ConfigureAwait(false);
+            return await FinishAnyEditAsync(frmCharacter, "Installed " + await objCyberware.GetCurrentDisplayNameAsync(token).ConfigureAwait(false)
+                                                          + " (id " + objCyberware.InternalId + "), essence "
+                                                          + decOldEssence.ToString(GlobalSettings.InvariantCultureInfo) + " -> "
+                                                          + decEssence.ToString(GlobalSettings.InvariantCultureInfo) + ".", token).ConfigureAwait(false);
         }
 
         private static async Task<object> AddVehicleAsync(JObject objArgs, CancellationToken token)
         {
-            CharacterCreate frmCreate = await GetCreateFormAsync(objArgs, token).ConfigureAwait(false);
-            XmlNode objXmlVehicle = await GetBuyableNodeAsync(frmCreate.CharacterObject, "vehicles.xml", "/chummer/vehicles/vehicle", RequiredString(objArgs, "id"),
+            CharacterShared frmCharacter = await GetCharacterFormAsync(objArgs, token).ConfigureAwait(false);
+            XmlNode objXmlVehicle = await GetBuyableNodeAsync(frmCharacter.CharacterObject, "vehicles.xml", "/chummer/vehicles/vehicle", RequiredString(objArgs, "id"),
                                                               token: token).ConfigureAwait(false);
-            Vehicle objVehicle = await frmCreate.AddVehicleFromNodeAsync(objXmlVehicle, objArgs.Value<bool?>("free") == true,
-                                                                         objArgs.Value<bool?>("black_market") == true, token: token).ConfigureAwait(false);
-            return await FinishEditAsync(frmCreate, "Added " + await objVehicle.GetCurrentDisplayNameAsync(token).ConfigureAwait(false)
-                                                    + " (id " + objVehicle.InternalId + ").", token).ConfigureAwait(false);
+            bool blnFree = objArgs.Value<bool?>("free") == true;
+            bool blnBlackMarket = objArgs.Value<bool?>("black_market") == true;
+            decimal decMarkup = GetMarkup(objArgs, frmCharacter);
+            Vehicle objVehicle;
+            bool blnTooExpensive = false;
+            if (frmCharacter is CharacterCareer frmCareer)
+            {
+                // The career Select Vehicle dialog can also buy it used
+                bool blnUsed = objArgs.Value<bool?>("used") == true;
+                decimal decUsedPercent = objArgs.Value<decimal?>("used_discount") ?? 0;
+                if (!blnUsed && decUsedPercent != 0)
+                    throw new AgentToolException("`used_discount` needs `used`.");
+                if (decUsedPercent < 0 || decUsedPercent > 100)
+                    throw new AgentToolException("`used_discount` must be from 0 to 100.");
+                string strUsedAvail = string.Empty;
+                decimal decUsedCost = 0;
+                if (blnUsed)
+                    (strUsedAvail, decUsedCost) = await SelectVehicle.GetUsedVehicleAvailAndCostAsync(objXmlVehicle.CreateNavigator(), frmCareer.CharacterObject,
+                                                                                                      decUsedPercent, token).ConfigureAwait(false);
+                (objVehicle, blnTooExpensive) = await frmCareer.AddVehicleFromNodeAsync(objXmlVehicle, blnFree, blnBlackMarket, decMarkup, blnUsed,
+                                                                                        strUsedAvail, decUsedCost, token: token).ConfigureAwait(false);
+            }
+            else
+            {
+                if (objArgs.Value<bool?>("used") == true)
+                    throw new AgentToolException("Used vehicles can only be bought in career mode.");
+                objVehicle = await ((CharacterCreate)frmCharacter).AddVehicleFromNodeAsync(objXmlVehicle, blnFree, blnBlackMarket, token: token).ConfigureAwait(false);
+            }
+
+            if (objVehicle == null)
+                throw new AgentToolException(blnTooExpensive ? "The character can't afford " + objXmlVehicle["name"]?.InnerText + "." : "The vehicle was not added.");
+            return await FinishAnyEditAsync(frmCharacter, "Added " + await objVehicle.GetCurrentDisplayNameAsync(token).ConfigureAwait(false)
+                                                          + " (id " + objVehicle.InternalId + ").", token).ConfigureAwait(false);
         }
 
         private static async Task<object> AddLifestyleAsync(JObject objArgs, CancellationToken token)
         {
             CharacterCreate frmCreate = await GetCreateFormAsync(objArgs, token).ConfigureAwait(false);
             Character objCharacter = frmCreate.CharacterObject;
-            XmlNode objXmlLifestyle = await GetDataNodeAsync(objCharacter, "lifestyles.xml", "/chummer/lifestyles/lifestyle", RequiredString(objArgs, "id"), token)
-                .ConfigureAwait(false);
-            string strSource = objXmlLifestyle["source"]?.InnerText;
-            if (!string.IsNullOrEmpty(strSource) && !await objCharacter.GetIgnoreRulesAsync(token).ConfigureAwait(false)
-                                                 && !await (await objCharacter.GetSettingsAsync(token).ConfigureAwait(false)).BookEnabledAsync(strSource, token).ConfigureAwait(false))
-                throw new AgentToolException(objXmlLifestyle["name"]?.InnerText + " is from " + strSource + ", which isn't enabled in this character's settings.");
+            bool blnAdvanced = objArgs.Value<bool?>("advanced") == true;
+            XmlNode objXmlLifestyle = await GetBaseLifestyleNodeAsync(objCharacter, RequiredString(objArgs, "id"), blnAdvanced, token).ConfigureAwait(false);
             int intMonths = Math.Max(1, OptionalInt(objArgs, "months") ?? 1);
-            // The same steps Chummer uses when it adds a lifestyle on its own (e.g. the free Street lifestyle)
+            // Add Lifestyle (or Add Advanced Lifestyle): a new lifestyle filled in through the Select Lifestyle dialog
             Lifestyle objLifestyle = new Lifestyle(objCharacter);
             try
             {
-                await objLifestyle.CreateAsync(objXmlLifestyle, token).ConfigureAwait(false);
+                await objLifestyle.SetStyleTypeAsync(blnAdvanced ? LifestyleType.Advanced : LifestyleType.Standard, token).ConfigureAwait(false);
+                await objLifestyle.SetBaseLifestyleAsync(objXmlLifestyle["name"]?.InnerText, token).ConfigureAwait(false);
+                await objLifestyle.SetNameAsync(objArgs.Value<string>("name")?.Trim() is string strName && strName.Length > 0
+                                                    ? strName
+                                                    : objXmlLifestyle["name"]?.InnerText, token).ConfigureAwait(false);
+                await AddLifestyleQualitiesAsync(objCharacter, objLifestyle, objArgs["qualities"] as JArray, token).ConfigureAwait(false);
+                await ApplyLifestyleArgsAsync(objCharacter, objLifestyle, objXmlLifestyle, objArgs, token).ConfigureAwait(false);
                 await objLifestyle.SetIncrementsAsync(intMonths, token).ConfigureAwait(false);
                 await objCharacter.Lifestyles.AddAsync(objLifestyle, token).ConfigureAwait(false);
             }
@@ -380,6 +937,138 @@ namespace Chummer.Agent
                                                     + objLifestyle.InternalId + ").", token).ConfigureAwait(false);
         }
 
+        private static async Task<object> EditLifestyleAsync(JObject objArgs, CancellationToken token)
+        {
+            CharacterCreate frmCreate = await GetCreateFormAsync(objArgs, token).ConfigureAwait(false);
+            Character objCharacter = frmCreate.CharacterObject;
+            OwnedItem objOwned = await FindItemAsync(objCharacter, RequiredString(objArgs, "id"), token).ConfigureAwait(false);
+            if (!(objOwned.Item is Lifestyle objLifestyle))
+                throw new AgentToolException("That isn't a lifestyle.");
+            bool blnAdvanced = await objLifestyle.GetStyleTypeAsync(token).ConfigureAwait(false) != LifestyleType.Standard;
+            string strBase = objArgs.Value<string>("base")?.Trim();
+            XmlNode objXmlLifestyle = await GetBaseLifestyleNodeAsync(objCharacter, string.IsNullOrEmpty(strBase)
+                                                                          ? await objLifestyle.GetBaseLifestyleAsync(token).ConfigureAwait(false)
+                                                                          : strBase, blnAdvanced, token).ConfigureAwait(false);
+            // The Select Lifestyle dialog edits the lifestyle in place
+            if (!string.IsNullOrEmpty(strBase))
+                await objLifestyle.SetBaseLifestyleAsync(objXmlLifestyle["name"]?.InnerText, token).ConfigureAwait(false);
+            string strName = objArgs.Value<string>("name")?.Trim();
+            if (!string.IsNullOrEmpty(strName))
+                await objLifestyle.SetNameAsync(strName, token).ConfigureAwait(false);
+            if (objArgs["remove_qualities"] is JArray objRemove)
+            {
+                List<LifestyleQuality> lstQualities = await objLifestyle.LifestyleQualities.ToListAsync(token).ConfigureAwait(false);
+                foreach (JToken objToken in objRemove)
+                {
+                    string strWanted = objToken.ToString().Trim();
+                    LifestyleQuality objQuality = lstQualities.Find(x => string.Equals(x.InternalId, strWanted, StringComparison.OrdinalIgnoreCase))
+                                                  ?? lstQualities.Find(x => string.Equals(x.Name, strWanted, StringComparison.OrdinalIgnoreCase))
+                                                  ?? throw new AgentToolException("The lifestyle has no quality '" + strWanted + "'.");
+                    // The dialog's Delete Quality button: built-in qualities stay
+                    if (await objQuality.GetOriginSourceAsync(token).ConfigureAwait(false) == QualitySource.BuiltIn)
+                        throw new AgentToolException(objQuality.Name + " comes with the base lifestyle and can't be removed.");
+                    await objQuality.RemoveAsync(false, token).ConfigureAwait(false);
+                }
+            }
+
+            await AddLifestyleQualitiesAsync(objCharacter, objLifestyle, objArgs["add_qualities"] as JArray, token).ConfigureAwait(false);
+            await ApplyLifestyleArgsAsync(objCharacter, objLifestyle, objXmlLifestyle, objArgs, token).ConfigureAwait(false);
+            return await FinishItemEditAsync(frmCreate, objLifestyle, "Updated " + await objLifestyle.GetCurrentDisplayNameAsync(token).ConfigureAwait(false) + ".", token)
+                .ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// A base lifestyle the Select Lifestyle dialog lists: in the enabled books, and for standard lifestyles from the core rulebook or a contract.
+        /// </summary>
+        private static async Task<XmlNode> GetBaseLifestyleNodeAsync(Character objCharacter, string strId, bool blnAdvanced, CancellationToken token)
+        {
+            XmlNode objXmlLifestyle = await GetDataNodeAsync(objCharacter, "lifestyles.xml", "/chummer/lifestyles/lifestyle", strId, token).ConfigureAwait(false);
+            if (!await objCharacter.GetIgnoreRulesAsync(token).ConfigureAwait(false))
+            {
+                await EnsureBookEnabledAsync(objXmlLifestyle, objCharacter, token).ConfigureAwait(false);
+                if (!blnAdvanced && objXmlLifestyle["source"]?.InnerText != "SR5" && objXmlLifestyle["category"]?.InnerText != "Contracts")
+                    throw new AgentToolException(objXmlLifestyle["name"]?.InnerText + " is only available as an advanced lifestyle (advanced=true).");
+            }
+
+            return objXmlLifestyle;
+        }
+
+        /// <summary>
+        /// Add lifestyle qualities by name or id, as the Select Lifestyle dialog's Add Quality does; "free:" before a name takes it for free.
+        /// </summary>
+        private static async Task AddLifestyleQualitiesAsync(Character objCharacter, Lifestyle objLifestyle, JArray objQualities, CancellationToken token)
+        {
+            if (objQualities == null)
+                return;
+            bool blnIgnoreRules = await objCharacter.GetIgnoreRulesAsync(token).ConfigureAwait(false);
+            bool blnStandard = await objLifestyle.GetStyleTypeAsync(token).ConfigureAwait(false) == LifestyleType.Standard;
+            foreach (JToken objToken in objQualities)
+            {
+                string strWanted = objToken.ToString().Trim();
+                bool blnFree = strWanted.StartsWith("free:", StringComparison.OrdinalIgnoreCase);
+                if (blnFree)
+                    strWanted = strWanted.Substring(5).Trim();
+                XmlNode objXmlQuality = await GetDataNodeAsync(objCharacter, "lifestyles.xml", "/chummer/qualities/quality", strWanted, token).ConfigureAwait(false);
+                if (!blnIgnoreRules)
+                {
+                    // The Select Lifestyle Quality list: enabled books, core-book or contract qualities for standard lifestyles, and requirements
+                    await EnsureBookEnabledAsync(objXmlQuality, objCharacter, token).ConfigureAwait(false);
+                    if (blnStandard && objXmlQuality["source"]?.InnerText != "SR5" && objXmlQuality["category"]?.InnerText != "Contracts")
+                        throw new AgentToolException(objXmlQuality["name"]?.InnerText + " needs an advanced lifestyle.");
+                    if (!await objXmlQuality.CreateNavigator().RequirementsMetAsync(objCharacter, objLifestyle, token: token).ConfigureAwait(false))
+                        throw new AgentToolException("The lifestyle doesn't meet the requirements for " + objXmlQuality["name"]?.InnerText + ".");
+                }
+
+                if (await SelectLifestyle.AddLifestyleQualityFromNodeAsync(objCharacter, objLifestyle, objXmlQuality, blnFree, token).ConfigureAwait(false) == null)
+                    throw new AgentToolException(objXmlQuality["name"]?.InnerText + " was not added (a choice it needed was cancelled).");
+            }
+        }
+
+        /// <summary>
+        /// Apply the dialog values passed (keeping the lifestyle's current ones otherwise) and finish the lifestyle as the dialog's OK does.
+        /// </summary>
+        private static async Task ApplyLifestyleArgsAsync(Character objCharacter, Lifestyle objLifestyle, XmlNode objXmlLifestyle, JObject objArgs,
+                                                          CancellationToken token)
+        {
+            bool blnAdvanced = await objLifestyle.GetStyleTypeAsync(token).ConfigureAwait(false) != LifestyleType.Standard;
+            async Task<int> GetPointsAsync(string strField, int intCurrent, Func<CancellationToken, Task<decimal>> funcMaximum)
+            {
+                int? intValue = OptionalInt(objArgs, strField);
+                if (!intValue.HasValue)
+                    return intCurrent;
+                if (!blnAdvanced)
+                    throw new AgentToolException("`" + strField + "` only applies to advanced lifestyles.");
+                decimal decMaximum = await funcMaximum(token).ConfigureAwait(false);
+                if (intValue.Value < 0 || intValue.Value > decMaximum)
+                    throw new AgentToolException("`" + strField + "` must be 0-" + decMaximum.ToString("0.##", GlobalSettings.InvariantCultureInfo) + " for this lifestyle.");
+                return intValue.Value;
+            }
+
+            int intArea = await GetPointsAsync("area", await objLifestyle.GetAreaAsync(token).ConfigureAwait(false), objLifestyle.GetAreaDeltaAsync).ConfigureAwait(false);
+            int intComforts = await GetPointsAsync("comforts", await objLifestyle.GetComfortsAsync(token).ConfigureAwait(false), objLifestyle.GetComfortsDeltaAsync)
+                .ConfigureAwait(false);
+            int intSecurity = await GetPointsAsync("security", await objLifestyle.GetSecurityAsync(token).ConfigureAwait(false), objLifestyle.GetSecurityDeltaAsync)
+                .ConfigureAwait(false);
+            int intBonusLP = OptionalInt(objArgs, "bonus_lp") ?? await objLifestyle.GetBonusLPAsync(token).ConfigureAwait(false);
+            if (!blnAdvanced && objArgs["bonus_lp"] != null)
+                throw new AgentToolException("`bonus_lp` only applies to advanced lifestyles.");
+            bool blnTrustFund = objArgs.Value<bool?>("trust_fund") ?? await objLifestyle.GetTrustFundAsync(token).ConfigureAwait(false);
+            if (blnTrustFund && !await objLifestyle.GetIsTrustFundEligibleAsync(token).ConfigureAwait(false))
+                throw new AgentToolException("The character has no Trust Fund that covers this lifestyle.");
+            int intRoommates = OptionalInt(objArgs, "roommates") ?? await objLifestyle.GetRoommatesAsync(token).ConfigureAwait(false);
+            if (intRoommates < 0)
+                throw new AgentToolException("`roommates` can't be negative.");
+            bool blnSplit = objArgs.Value<bool?>("split_cost") ?? await objLifestyle.GetSplitCostWithRoommatesAsync(token).ConfigureAwait(false);
+            decimal decPercentage = objArgs.Value<decimal?>("percentage") ?? await objLifestyle.GetPercentageAsync(token).ConfigureAwait(false);
+            string strRefusal = await SelectLifestyle.ApplyLifestyleAsync(objLifestyle, objXmlLifestyle, await objLifestyle.GetNameAsync(token).ConfigureAwait(false),
+                                                                          decPercentage, intArea, intComforts, intSecurity, blnTrustFund, intRoommates,
+                                                                          intRoommates > 0 && blnSplit, intBonusLP, token).ConfigureAwait(false);
+            if (strRefusal != null)
+                throw new AgentToolException(string.IsNullOrEmpty(strRefusal)
+                                                 ? "That base lifestyle doesn't exist."
+                                                 : await LanguageManager.GetStringAsync(strRefusal, GlobalSettings.DefaultLanguage, token: token).ConfigureAwait(false));
+        }
+
         /// <summary>
         /// Availability modifiers the character has for one item, as the selection dialogs apply them.
         /// </summary>
@@ -392,12 +1081,18 @@ namespace Chummer.Agent
 
         private static async Task<object> AddWeaponAccessoryAsync(JObject objArgs, CancellationToken token)
         {
-            CharacterCreate frmCreate = await GetCreateFormAsync(objArgs, token).ConfigureAwait(false);
-            Character objCharacter = frmCreate.CharacterObject;
+            CharacterShared frmCharacter = await GetCharacterFormAsync(objArgs, token).ConfigureAwait(false);
+            bool blnCareer = frmCharacter is CharacterCareer;
+            Character objCharacter = frmCharacter.CharacterObject;
+            decimal decMarkup = GetMarkup(objArgs, frmCharacter);
             string strWeapon = RequiredString(objArgs, "weapon");
-            Weapon objWeapon = await FindOwnedAsync(await (await objCharacter.GetWeaponsAsync(token).ConfigureAwait(false)).ToListAsync(token).ConfigureAwait(false),
-                                                    strWeapon, token).ConfigureAwait(false)
-                               ?? throw new AgentToolException("The character has no weapon '" + strWeapon + "'.");
+            // Any weapon the character has, including vehicle weapons and underbarrel weapons
+            OwnedItem objOwnedWeapon = await FindItemAsync(objCharacter, strWeapon, token).ConfigureAwait(false);
+            if (!(objOwnedWeapon.Item is Weapon objWeapon))
+                throw new AgentToolException("'" + strWeapon + "' isn't a weapon.");
+            bool blnVehicleWeapon = false;
+            for (OwnedItem objLoop = objOwnedWeapon.Parent; objLoop != null; objLoop = objLoop.Parent)
+                blnVehicleWeapon |= objLoop.Item is Vehicle;
             if (objWeapon.Cyberware)
                 throw new AgentToolException("Accessories can't be added to cyberweapons.");
             if (!objWeapon.AllowAccessory)
@@ -446,19 +1141,27 @@ namespace Chummer.Agent
                                 ?? throw new AgentToolException("'" + strExtraMount + "' is not a free second mount for " + strName + ". Options: "
                                                                 + string.Join(", ", lstExtraChoices) + ".");
 
-            WeaponAccessory objAccessory = await frmCreate.AddWeaponAccessoryFromNodeAsync(
+            WeaponAccessory objAccessory = await frmCharacter.AddWeaponAccessoryFromNodeAsync(
                                                objWeapon, xmlAccessory, new ValueTuple<string, string>(strMount, strExtraMount), intRating,
-                                               objArgs.Value<bool?>("free") == true, objArgs.Value<bool?>("black_market") == true, 0, false, string.Empty,
-                                               NuyenExpenseType.AddWeaponAccessory, true, false, token).ConfigureAwait(false)
-                                           ?? throw new AgentToolException("The accessory was not added.");
-            return await FinishEditAsync(frmCreate, "Fitted " + await objAccessory.GetCurrentDisplayNameAsync(token).ConfigureAwait(false)
+                                               objArgs.Value<bool?>("free") == true, objArgs.Value<bool?>("black_market") == true, decMarkup, blnCareer,
+                                               blnCareer
+                                                   ? await GetExpenseStringAsync(blnVehicleWeapon
+                                                                                     ? "String_ExpensePurchaseVehicleWeaponAccessory"
+                                                                                     : "String_ExpensePurchaseWeaponAccessory", token).ConfigureAwait(false)
+                                                   : string.Empty,
+                                               blnVehicleWeapon ? NuyenExpenseType.AddVehicleWeaponAccessory : NuyenExpenseType.AddWeaponAccessory,
+                                               !blnCareer, false, token).ConfigureAwait(false)
+                                           ?? throw new AgentToolException(blnCareer ? "The character can't afford " + strName + "." : "The accessory was not added.");
+            return await FinishAnyEditAsync(frmCharacter, "Fitted " + await objAccessory.GetCurrentDisplayNameAsync(token).ConfigureAwait(false)
                                                     + " to " + objWeapon.Name + " (" + strMount + ", id " + objAccessory.InternalId + ").", token).ConfigureAwait(false);
         }
 
         private static async Task<object> AddArmorModAsync(JObject objArgs, CancellationToken token)
         {
-            CharacterCreate frmCreate = await GetCreateFormAsync(objArgs, token).ConfigureAwait(false);
-            Character objCharacter = frmCreate.CharacterObject;
+            CharacterShared frmCharacter = await GetCharacterFormAsync(objArgs, token).ConfigureAwait(false);
+            bool blnCareer = frmCharacter is CharacterCareer;
+            Character objCharacter = frmCharacter.CharacterObject;
+            decimal decMarkup = GetMarkup(objArgs, frmCharacter);
             string strArmor = RequiredString(objArgs, "armor");
             Armor objArmor = await FindOwnedAsync(await (await objCharacter.GetArmorAsync(token).ConfigureAwait(false)).ToListAsync(token).ConfigureAwait(false),
                                                   strArmor, token).ConfigureAwait(false)
@@ -488,16 +1191,27 @@ namespace Chummer.Agent
 
             xmlMod = await GetBuyableNodeAsync(objCharacter, "armor.xml", "/chummer/mods/mod", strId, Math.Max(1, intRating),
                                                await GetAvailabilityModifierAsync(objCharacter, xmlMod, token).ConfigureAwait(false), token).ConfigureAwait(false);
-            ArmorMod objMod = await frmCreate.AddArmorModFromNodeAsync(objArmor, xmlMod, intRating, objArgs.Value<bool?>("free") == true, token).ConfigureAwait(false)
-                              ?? throw new AgentToolException("The mod was not added (a choice it needed was cancelled).");
-            return await FinishEditAsync(frmCreate, "Fitted " + await objMod.GetCurrentDisplayNameAsync(token).ConfigureAwait(false)
+            ArmorMod objMod;
+            string strRefusal = string.Empty;
+            if (frmCharacter is CharacterCareer frmCareer)
+                (objMod, strRefusal) = await frmCareer.AddArmorModFromNodeAsync(objArmor, xmlMod, intRating, objArgs.Value<bool?>("free") == true, decMarkup, token)
+                                                      .ConfigureAwait(false);
+            else
+                objMod = await ((CharacterCreate)frmCharacter).AddArmorModFromNodeAsync(objArmor, xmlMod, intRating, objArgs.Value<bool?>("free") == true, token)
+                                                              .ConfigureAwait(false);
+            if (objMod == null)
+                throw new AgentToolException(await GetRefusalMessageAsync(strRefusal, "The mod was not added (a choice it needed was cancelled).", token)
+                                                 .ConfigureAwait(false));
+            return await FinishAnyEditAsync(frmCharacter, "Fitted " + await objMod.GetCurrentDisplayNameAsync(token).ConfigureAwait(false)
                                                     + " to " + objArmor.Name + " (id " + objMod.InternalId + ").", token).ConfigureAwait(false);
         }
 
         private static async Task<object> AddVehicleModAsync(JObject objArgs, CancellationToken token)
         {
-            CharacterCreate frmCreate = await GetCreateFormAsync(objArgs, token).ConfigureAwait(false);
-            Character objCharacter = frmCreate.CharacterObject;
+            CharacterShared frmCharacter = await GetCharacterFormAsync(objArgs, token).ConfigureAwait(false);
+            bool blnCareer = frmCharacter is CharacterCareer;
+            Character objCharacter = frmCharacter.CharacterObject;
+            decimal decMarkup = GetMarkup(objArgs, frmCharacter);
             string strVehicle = RequiredString(objArgs, "vehicle");
             Vehicle objVehicle = await FindOwnedAsync(await (await objCharacter.GetVehiclesAsync(token).ConfigureAwait(false)).ToListAsync(token).ConfigureAwait(false),
                                                       strVehicle, token).ConfigureAwait(false)
@@ -535,12 +1249,18 @@ namespace Chummer.Agent
 
             xmlMod = await GetBuyableNodeAsync(objCharacter, "vehicles.xml", "/chummer/mods/mod", strId, Math.Max(1, intRating),
                                                await GetAvailabilityModifierAsync(objCharacter, xmlMod, token).ConfigureAwait(false), token).ConfigureAwait(false);
-            // Character creation doesn't enforce mod slots when adding (validation reports overfull vehicles)
-            VehicleMod objMod = await frmCreate.AddVehicleModFromNodeAsync(objVehicle, xmlMod, intRating, objArgs.Value<bool?>("free") == true,
-                                                                           objArgs.Value<bool?>("black_market") == true, 0, false, string.Empty,
-                                                                           NuyenExpenseType.AddVehicleMod, true, false, false, token).ConfigureAwait(false)
-                                ?? throw new AgentToolException("The mod was not installed.");
-            return await FinishEditAsync(frmCreate, "Installed " + await objMod.GetCurrentDisplayNameAsync(token).ConfigureAwait(false)
+            // Character creation doesn't enforce mod slots when adding (validation reports overfull vehicles);
+            // career mode checks them as the mod is bought, as the career editor does
+            VehicleMod objMod = await frmCharacter.AddVehicleModFromNodeAsync(objVehicle, xmlMod, intRating, objArgs.Value<bool?>("free") == true,
+                                                                              objArgs.Value<bool?>("black_market") == true, decMarkup, blnCareer,
+                                                                              blnCareer
+                                                                                  ? await GetExpenseStringAsync("String_ExpensePurchaseVehicleMod", token).ConfigureAwait(false)
+                                                                                  : string.Empty,
+                                                                              NuyenExpenseType.AddVehicleMod, !blnCareer, blnCareer, false, token).ConfigureAwait(false)
+                                ?? throw new AgentToolException(blnCareer
+                                                                    ? "The mod was not installed (the vehicle has no room for it, or the character can't afford it)."
+                                                                    : "The mod was not installed.");
+            return await FinishAnyEditAsync(frmCharacter, "Installed " + await objMod.GetCurrentDisplayNameAsync(token).ConfigureAwait(false)
                                                     + " in " + objVehicle.Name + " (id " + objMod.InternalId + ").", token).ConfigureAwait(false);
         }
 

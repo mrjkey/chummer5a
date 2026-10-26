@@ -683,6 +683,50 @@ namespace Chummer
         public bool AddAgain { get; private set; }
 
         /// <summary>
+        /// Whether a gear entry may go into a parent item, as the gear list checks each entry: the parent's details it requires or forbids, and
+        /// the gear's own requirements. Also used to buy gear into other items without the dialog (by the AI agent).
+        /// </summary>
+        /// <param name="objXmlGear">Gear data node.</param>
+        /// <param name="objParentNode">Data node of the parent item, if any.</param>
+        /// <param name="objCharacter">Character buying the gear.</param>
+        /// <param name="objGearParent">Parent item, if any.</param>
+        /// <param name="token">Cancellation token to listen to.</param>
+        internal static async Task<bool> GearFitsParentAsync(XPathNavigator objXmlGear, XPathNavigator objParentNode, Character objCharacter,
+                                                            object objGearParent, CancellationToken token = default)
+        {
+            XPathNavigator xmlTestNode
+                = objXmlGear.SelectSingleNodeAndCacheExpression("forbidden/parentdetails", token: token);
+            if (xmlTestNode != null && await objParentNode.ProcessFilterOperationNodeAsync(xmlTestNode, false, token: token).ConfigureAwait(false))
+            {
+                // Assumes topmost parent is an AND node
+                return false;
+            }
+
+            xmlTestNode = objXmlGear.SelectSingleNodeAndCacheExpression("required/parentdetails", token: token);
+            if (xmlTestNode != null && !await objParentNode.ProcessFilterOperationNodeAsync(xmlTestNode, false, token: token).ConfigureAwait(false))
+            {
+                // Assumes topmost parent is an AND node
+                return false;
+            }
+
+            xmlTestNode = objXmlGear.SelectSingleNodeAndCacheExpression("forbidden/geardetails", token: token);
+            if (xmlTestNode != null && await objParentNode.ProcessFilterOperationNodeAsync(xmlTestNode, false, token: token).ConfigureAwait(false))
+            {
+                // Assumes topmost parent is an AND node
+                return false;
+            }
+
+            xmlTestNode = objXmlGear.SelectSingleNodeAndCacheExpression("required/geardetails", token: token);
+            if (xmlTestNode != null && !await objParentNode.ProcessFilterOperationNodeAsync(xmlTestNode, false, token: token).ConfigureAwait(false))
+            {
+                // Assumes topmost parent is an AND node
+                return false;
+            }
+
+            return await objXmlGear.RequirementsMetAsync(objCharacter, objGearParent, token: token).ConfigureAwait(false);
+        }
+
+        /// <summary>
         /// Only items that grant Capacity should be shown.
         /// </summary>
         public bool ShowPositiveCapacityOnly
@@ -1468,36 +1512,7 @@ namespace Chummer
                 decimal decNuyen = blnFreeItem || !blnShowOnlyAffordItems ? decimal.MaxValue : await _objCharacter.GetAvailableNuyenAsync(token: token).ConfigureAwait(false);
                 foreach (XPathNavigator objXmlGear in _xmlBaseGearDataNode.Select("gears/gear" + strFilter))
                 {
-                    XPathNavigator xmlTestNode
-                        = objXmlGear.SelectSingleNodeAndCacheExpression("forbidden/parentdetails", token: token);
-                    if (xmlTestNode != null && await _objParentNode.ProcessFilterOperationNodeAsync(xmlTestNode, false, token: token).ConfigureAwait(false))
-                    {
-                        // Assumes topmost parent is an AND node
-                        continue;
-                    }
-
-                    xmlTestNode = objXmlGear.SelectSingleNodeAndCacheExpression("required/parentdetails", token: token);
-                    if (xmlTestNode != null && !await _objParentNode.ProcessFilterOperationNodeAsync(xmlTestNode, false, token: token).ConfigureAwait(false))
-                    {
-                        // Assumes topmost parent is an AND node
-                        continue;
-                    }
-
-                    xmlTestNode = objXmlGear.SelectSingleNodeAndCacheExpression("forbidden/geardetails", token: token);
-                    if (xmlTestNode != null && await _objParentNode.ProcessFilterOperationNodeAsync(xmlTestNode, false, token: token).ConfigureAwait(false))
-                    {
-                        // Assumes topmost parent is an AND node
-                        continue;
-                    }
-
-                    xmlTestNode = objXmlGear.SelectSingleNodeAndCacheExpression("required/geardetails", token: token);
-                    if (xmlTestNode != null && !await _objParentNode.ProcessFilterOperationNodeAsync(xmlTestNode, false, token: token).ConfigureAwait(false))
-                    {
-                        // Assumes topmost parent is an AND node
-                        continue;
-                    }
-
-                    if (!await objXmlGear.RequirementsMetAsync(_objCharacter, _objGearParent, token: token).ConfigureAwait(false))
+                    if (!await GearFitsParentAsync(objXmlGear, _objParentNode, _objCharacter, _objGearParent, token).ConfigureAwait(false))
                         continue;
 
                     if (!blnDoUIUpdate)

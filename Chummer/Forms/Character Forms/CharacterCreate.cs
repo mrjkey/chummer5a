@@ -5400,6 +5400,30 @@ namespace Chummer
             }
         }
 
+        /// <summary>
+        /// Show the character's current mugshots on the Description tab (count, selected index, main checkbox and picture), e.g. after mugshots
+        /// were added or removed without the tab's buttons.
+        /// </summary>
+        public override async Task RefreshMugshotPanelAsync(CancellationToken token = default)
+        {
+            int intMugshotCount = await (await CharacterObject.GetMugshotsAsync(token).ConfigureAwait(false)).GetCountAsync(token).ConfigureAwait(false);
+            string strText = await LanguageManager.GetStringAsync("String_Of", token: token).ConfigureAwait(false)
+                             + intMugshotCount.ToString(GlobalSettings.CultureInfo);
+            await lblNumMugshots.DoThreadSafeAsync(x => x.Text = strText, token).ConfigureAwait(false);
+            int intMugshotIndex = await nudMugshotIndex.DoThreadSafeFuncAsync(x =>
+            {
+                x.Minimum = intMugshotCount > 0 ? 1 : 0;
+                x.Maximum = intMugshotCount;
+                if (x.Value < x.Minimum)
+                    x.Value = x.Minimum;
+                return x.ValueAsInt;
+            }, token).ConfigureAwait(false);
+            int intMainMugshotIndex = await CharacterObject.GetMainMugshotIndexAsync(token).ConfigureAwait(false);
+            await chkIsMainMugshot.DoThreadSafeAsync(x => x.Checked = intMugshotIndex > 0 && intMugshotIndex - 1 == intMainMugshotIndex, token)
+                                  .ConfigureAwait(false);
+            await UpdateMugshot(picMugshot, intMugshotIndex - 1, token).ConfigureAwait(false);
+        }
+
         private async void cmdAddMugshot_Click(object sender, EventArgs e)
         {
             try
@@ -7474,14 +7498,12 @@ namespace Chummer
                     }
                 }
 
-                List<Weapon> lstWeapons = new List<Weapon>(1);
                 CursorWait objCursorWait = await CursorWait.NewAsync(this, token: GenericToken).ConfigureAwait(false);
                 try
                 {
                     bool blnAddAgain;
                     do
                     {
-                        lstWeapons.Clear();
                         IAsyncDisposable objLocker =
                             await CharacterObject.LockObject.EnterUpgradeableReadLockAsync(GenericToken).ConfigureAwait(false);
                         try
@@ -7508,24 +7530,18 @@ namespace Chummer
                                     = objXmlDocument.TryGetNodeByNameOrId("/chummer/gears/gear",
                                         frmPickGear.MyForm.SelectedGear);
 
-                                // Create the new piece of Gear.
-                                objGear = new Gear(CharacterObject);
-                                await objGear.CreateAsync(objXmlGear, frmPickGear.MyForm.SelectedRating, lstWeapons,
-                                    string.Empty,
-                                    false, objParent: objSensor, token: GenericToken).ConfigureAwait(false);
-
-                                if (objGear.InternalId.IsEmptyGuid())
+                                objGear = await AddChildGearFromNodeAsync(objXmlGear, frmPickGear.MyForm.SelectedRating, frmPickGear.MyForm.SelectedQty,
+                                                                          objSensor, objSensor.Children, false, frmPickGear.MyForm.FreeCost, null,
+                                                                          frmPickGear.MyForm.DoItYourself, async (x, t) =>
+                                                                          {
+                                                                              Vehicle objVehicle =
+                                                                                  (await CharacterObject.Vehicles.FindVehicleGearAsync(objSensor.InternalId,
+                                                                                      t).ConfigureAwait(false)).Item2;
+                                                                              if (objVehicle != null)
+                                                                                  await objVehicle.Weapons.AddAsync(x, t).ConfigureAwait(false);
+                                                                          }, token: GenericToken).ConfigureAwait(false);
+                                if (objGear == null)
                                     continue;
-                                await objGear.SetQuantityAsync(frmPickGear.MyForm.SelectedQty, GenericToken).ConfigureAwait(false);
-
-                                // Reduce the cost for Do It Yourself components.
-                                if (frmPickGear.MyForm.DoItYourself)
-                                    objGear.Cost = "(" + objGear.Cost + ") * 0.5";
-                                // If the item was marked as free, change its cost.
-                                if (frmPickGear.MyForm.FreeCost)
-                                {
-                                    objGear.Cost = "0";
-                                }
                             }
 
                             IsRefreshing = true;
@@ -7537,23 +7553,6 @@ namespace Chummer
                             finally
                             {
                                 IsRefreshing = false;
-                            }
-
-                            await objSensor.Children.AddAsync(objGear, GenericToken).ConfigureAwait(false);
-
-                            if (lstWeapons.Count > 0)
-                            {
-                                Vehicle objVehicle =
-                                    (await CharacterObject.Vehicles.FindVehicleGearAsync(objSensor.InternalId,
-                                        GenericToken).ConfigureAwait(false)).Item2;
-                                if (objVehicle != null)
-                                {
-                                    foreach (Weapon objWeapon in lstWeapons)
-                                    {
-                                        await objVehicle.Weapons.AddAsync(objWeapon, GenericToken)
-                                            .ConfigureAwait(false);
-                                    }
-                                }
                             }
                         }
                         finally
@@ -8730,40 +8729,13 @@ namespace Chummer
                                     = objXmlDocument.TryGetNodeByNameOrId("/chummer/gears/gear",
                                         frmPickGear.MyForm.SelectedGear);
 
-                                // Create the new piece of Gear.
-                                List<Weapon> lstWeapons = new List<Weapon>(1);
-
-                                Gear objGear = new Gear(CharacterObject);
-                                await objGear.CreateAsync(objXmlGear, frmPickGear.MyForm.SelectedRating, lstWeapons,
-                                    string.Empty,
-                                    (objSensor.Parent as Gear)?.Equipped
-                                    ?? objCyberware != null && await objCyberware
-                                        .GetIsModularCurrentlyEquippedAsync(GenericToken).ConfigureAwait(false),
-                                    objParent: objSensor, token: GenericToken).ConfigureAwait(false);
-
-                                if (objGear.InternalId.IsEmptyGuid())
-                                    continue;
-
-                                await objGear.SetQuantityAsync(frmPickGear.MyForm.SelectedQty, GenericToken).ConfigureAwait(false);
-
-                                objGear.DiscountCost = frmPickGear.MyForm.BlackMarketDiscount;
-
-                                // Reduce the cost for Do It Yourself components.
-                                if (frmPickGear.MyForm.DoItYourself)
-                                    objGear.Cost = "(" + objGear.Cost + ") * 0.5";
-                                // If the item was marked as free, change its cost.
-                                if (frmPickGear.MyForm.FreeCost)
-                                {
-                                    objGear.Cost = "0";
-                                }
-
-                                await objSensor.Children.AddAsync(objGear, GenericToken).ConfigureAwait(false);
-
-                                foreach (Weapon objWeapon in lstWeapons)
-                                {
-                                    await CharacterObject.Weapons.AddAsync(objWeapon, GenericToken)
-                                        .ConfigureAwait(false);
-                                }
+                                await AddChildGearFromNodeAsync(objXmlGear, frmPickGear.MyForm.SelectedRating, frmPickGear.MyForm.SelectedQty,
+                                                                objSensor, objSensor.Children,
+                                                                (objSensor.Parent as Gear)?.Equipped
+                                                                ?? objCyberware != null && await objCyberware
+                                                                    .GetIsModularCurrentlyEquippedAsync(GenericToken).ConfigureAwait(false),
+                                                                frmPickGear.MyForm.FreeCost, frmPickGear.MyForm.BlackMarketDiscount,
+                                                                frmPickGear.MyForm.DoItYourself, token: GenericToken).ConfigureAwait(false);
                             }
                         }
                         finally
@@ -8858,36 +8830,10 @@ namespace Chummer
                                         frmPickGear.MyForm.SelectedGear);
 
                                 // Create the new piece of Gear.
-                                List<Weapon> lstWeapons = new List<Weapon>(1);
-
-                                Gear objGear = new Gear(CharacterObject);
-                                await objGear.CreateAsync(objXmlGear, frmPickGear.MyForm.SelectedRating, lstWeapons,
-                                    string.Empty,
-                                    false, objParent: objSensor, token: GenericToken).ConfigureAwait(false);
-
-                                if (objGear.InternalId.IsEmptyGuid())
-                                    continue;
-
-                                await objGear.SetQuantityAsync(frmPickGear.MyForm.SelectedQty, GenericToken).ConfigureAwait(false);
-
-                                objGear.DiscountCost = frmPickGear.MyForm.BlackMarketDiscount;
-
-                                // Reduce the cost for Do It Yourself components.
-                                if (frmPickGear.MyForm.DoItYourself)
-                                    objGear.Cost = "(" + objGear.Cost + ") * 0.5";
-                                // If the item was marked as free, change its cost.
-                                if (frmPickGear.MyForm.FreeCost)
-                                {
-                                    objGear.Cost = "0";
-                                }
-
-                                await objSensor.Children.AddAsync(objGear, GenericToken).ConfigureAwait(false);
-
-                                foreach (Weapon objWeapon in lstWeapons)
-                                {
-                                    await CharacterObject.Weapons.AddAsync(objWeapon, GenericToken)
-                                        .ConfigureAwait(false);
-                                }
+                                await AddChildGearFromNodeAsync(objXmlGear, frmPickGear.MyForm.SelectedRating, frmPickGear.MyForm.SelectedQty,
+                                                                objSensor, objSensor.Children, false, frmPickGear.MyForm.FreeCost,
+                                                                frmPickGear.MyForm.BlackMarketDiscount, frmPickGear.MyForm.DoItYourself,
+                                                                token: GenericToken).ConfigureAwait(false);
                             }
                         }
                         finally
@@ -8962,38 +8908,10 @@ namespace Chummer
                                     = objXmlDocument.TryGetNodeByNameOrId("/chummer/gears/gear",
                                         frmPickGear.MyForm.SelectedGear);
 
-                                // Create the new piece of Gear.
-                                List<Weapon> lstWeapons = new List<Weapon>(1);
-
-                                Gear objGear = new Gear(CharacterObject);
-                                await objGear.CreateAsync(objXmlGear, frmPickGear.MyForm.SelectedRating, lstWeapons,
-                                    string.Empty,
-                                    objAccessory.Equipped, objParent: objAccessory, token: GenericToken).ConfigureAwait(false);
-
-                                if (objGear.InternalId.IsEmptyGuid())
-                                    continue;
-
-                                await objGear.SetQuantityAsync(frmPickGear.MyForm.SelectedQty, GenericToken).ConfigureAwait(false);
-
-                                objGear.DiscountCost = frmPickGear.MyForm.BlackMarketDiscount;
-
-                                // Reduce the cost for Do It Yourself components.
-                                if (frmPickGear.MyForm.DoItYourself)
-                                    objGear.Cost = "(" + objGear.Cost + ") * 0.5";
-                                // If the item was marked as free, change its cost.
-                                if (frmPickGear.MyForm.FreeCost)
-                                {
-                                    objGear.Cost = "0";
-                                }
-
-                                await objAccessory.GearChildren.AddAsync(objGear, GenericToken).ConfigureAwait(false);
-
-                                // Create any Weapons that came with this Gear.
-                                foreach (Weapon objWeapon in lstWeapons)
-                                {
-                                    await CharacterObject.Weapons.AddAsync(objWeapon, GenericToken)
-                                        .ConfigureAwait(false);
-                                }
+                                await AddChildGearFromNodeAsync(objXmlGear, frmPickGear.MyForm.SelectedRating, frmPickGear.MyForm.SelectedQty,
+                                                                objAccessory, objAccessory.GearChildren, objAccessory.Equipped,
+                                                                frmPickGear.MyForm.FreeCost, frmPickGear.MyForm.BlackMarketDiscount,
+                                                                frmPickGear.MyForm.DoItYourself, token: GenericToken).ConfigureAwait(false);
                             }
                         }
                         finally
@@ -9081,39 +8999,11 @@ namespace Chummer
                                     = objXmlDocument.TryGetNodeByNameOrId("/chummer/gears/gear",
                                         frmPickGear.MyForm.SelectedGear);
 
-                                // Create the new piece of Gear.
-                                List<Weapon> lstWeapons = new List<Weapon>(1);
-
-                                Gear objGear = new Gear(CharacterObject);
-                                await objGear.CreateAsync(objXmlGear, frmPickGear.MyForm.SelectedRating, lstWeapons,
-                                    string.Empty,
-                                    (objSensor.Parent as Gear)?.Equipped ?? objAccessory?.Equipped == true,
-                                    objParent: objSensor, token: GenericToken).ConfigureAwait(false);
-
-                                if (objGear.InternalId.IsEmptyGuid())
-                                    continue;
-
-                                await objGear.SetQuantityAsync(frmPickGear.MyForm.SelectedQty, GenericToken).ConfigureAwait(false);
-
-                                objGear.DiscountCost = frmPickGear.MyForm.BlackMarketDiscount;
-
-                                // Reduce the cost for Do It Yourself components.
-                                if (frmPickGear.MyForm.DoItYourself)
-                                    objGear.Cost = "(" + objGear.Cost + ") * 0.5";
-                                // If the item was marked as free, change its cost.
-                                if (frmPickGear.MyForm.FreeCost)
-                                {
-                                    objGear.Cost = "0";
-                                }
-
-                                await objSensor.Children.AddAsync(objGear, GenericToken).ConfigureAwait(false);
-
-                                // Create any Weapons that came with this Gear.
-                                foreach (Weapon objWeapon in lstWeapons)
-                                {
-                                    await CharacterObject.Weapons.AddAsync(objWeapon, GenericToken)
-                                        .ConfigureAwait(false);
-                                }
+                                await AddChildGearFromNodeAsync(objXmlGear, frmPickGear.MyForm.SelectedRating, frmPickGear.MyForm.SelectedQty,
+                                                                objSensor, objSensor.Children,
+                                                                (objSensor.Parent as Gear)?.Equipped ?? objAccessory?.Equipped == true,
+                                                                frmPickGear.MyForm.FreeCost, frmPickGear.MyForm.BlackMarketDiscount,
+                                                                frmPickGear.MyForm.DoItYourself, token: GenericToken).ConfigureAwait(false);
                             }
                         }
                         finally
@@ -9267,43 +9157,16 @@ namespace Chummer
                                         frmPickGear.MyForm.SelectedGear);
 
                                 // Create the new piece of Gear.
-                                List<Weapon> lstWeapons = new List<Weapon>(1);
-
-                                Gear objGear = new Gear(CharacterObject);
-                                await objGear.CreateAsync(objXmlGear, frmPickGear.MyForm.SelectedRating, lstWeapons,
-                                    string.Empty,
-                                    false, objParent: objSensor, token: GenericToken).ConfigureAwait(false);
-
-                                if (objGear.InternalId.IsEmptyGuid())
-                                    continue;
-
-                                await objGear.SetQuantityAsync(frmPickGear.MyForm.SelectedQty, GenericToken).ConfigureAwait(false);
-
-                                objGear.DiscountCost = frmPickGear.MyForm.BlackMarketDiscount;
-
-                                // Reduce the cost for Do It Yourself components.
-                                if (frmPickGear.MyForm.DoItYourself)
-                                    objGear.Cost = "(" + objGear.Cost + ") * 0.5";
-                                // If the item was marked as free, change its cost.
-                                if (frmPickGear.MyForm.FreeCost)
-                                {
-                                    objGear.Cost = "0";
-                                }
-
-                                await objSensor.Children.AddAsync(objGear, GenericToken).ConfigureAwait(false);
-
-                                // Create any Weapons that came with this Gear.
-                                if (lstWeapons.Count > 0)
-                                {
-                                    Vehicle objVehicle =
-                                        (await CharacterObject.Vehicles.FindVehicleGearAsync(objGear.InternalId,
-                                            GenericToken).ConfigureAwait(false)).Item2;
-                                    foreach (Weapon objWeapon in lstWeapons)
-                                    {
-                                        await objVehicle.Weapons.AddAsync(objWeapon, GenericToken)
-                                            .ConfigureAwait(false);
-                                    }
-                                }
+                                await AddChildGearFromNodeAsync(objXmlGear, frmPickGear.MyForm.SelectedRating, frmPickGear.MyForm.SelectedQty,
+                                                                objSensor, objSensor.Children, false, frmPickGear.MyForm.FreeCost,
+                                                                frmPickGear.MyForm.BlackMarketDiscount, frmPickGear.MyForm.DoItYourself,
+                                                                async (x, t) =>
+                                                                {
+                                                                    Vehicle objVehicle =
+                                                                        (await CharacterObject.Vehicles.FindVehicleGearAsync(objSensor.InternalId,
+                                                                            t).ConfigureAwait(false)).Item2;
+                                                                    await objVehicle.Weapons.AddAsync(x, t).ConfigureAwait(false);
+                                                                }, token: GenericToken).ConfigureAwait(false);
                             }
                         }
                         finally
@@ -9376,35 +9239,11 @@ namespace Chummer
                                 = objXmlDocument.TryGetNodeByNameOrId("/chummer/gears/gear", frmPickGear.MyForm.SelectedGear);
 
                             // Create the new piece of Gear.
-                            List<Weapon> lstWeapons = new List<Weapon>(1);
-
-                            Gear objNewGear = new Gear(CharacterObject);
-                            await objNewGear.CreateAsync(objXmlGear, frmPickGear.MyForm.SelectedRating, lstWeapons, string.Empty,
-                                false, objParent: objAccessory, token: GenericToken).ConfigureAwait(false);
-
-                            if (objNewGear.InternalId.IsEmptyGuid())
-                                continue;
-
-                            await objNewGear.SetQuantityAsync(frmPickGear.MyForm.SelectedQty, GenericToken).ConfigureAwait(false);
-
-                            objNewGear.DiscountCost = frmPickGear.MyForm.BlackMarketDiscount;
-
-                            // Reduce the cost for Do It Yourself components.
-                            if (frmPickGear.MyForm.DoItYourself)
-                                objNewGear.Cost = "(" + objNewGear.Cost + ") * 0.5";
-                            // If the item was marked as free, change its cost.
-                            if (frmPickGear.MyForm.FreeCost)
-                            {
-                                objNewGear.Cost = "0";
-                            }
-
-                            await objAccessory.GearChildren.AddAsync(objNewGear, GenericToken).ConfigureAwait(false);
-
-                            // Create any Weapons that came with this Gear.
-                            foreach (Weapon objLoopWeapon in lstWeapons)
-                            {
-                                await objAccessory.Parent.Children.AddAsync(objLoopWeapon, GenericToken).ConfigureAwait(false);
-                            }
+                            await AddChildGearFromNodeAsync(objXmlGear, frmPickGear.MyForm.SelectedRating, frmPickGear.MyForm.SelectedQty,
+                                                            objAccessory, objAccessory.GearChildren, false, frmPickGear.MyForm.FreeCost,
+                                                            frmPickGear.MyForm.BlackMarketDiscount, frmPickGear.MyForm.DoItYourself,
+                                                            (x, t) => objAccessory.Parent.Children.AddAsync(x, t), token: GenericToken)
+                                                        .ConfigureAwait(false);
                         }
                     } while (blnAddAgain);
                 }
@@ -9874,6 +9713,107 @@ namespace Chummer
             }
         }
 
+        /// <summary>
+        /// Change a piece of Cyberware's rating as the Cyberware tab's rating box does, recreating its (and its pairs') bonuses if they depend on the rating.
+        /// </summary>
+        public async Task SetCyberwareRatingAsync(Cyberware objCyberware, int intRating, CancellationToken token = default)
+        {
+            IAsyncDisposable objLocker =
+                await objCyberware.LockObject.EnterUpgradeableReadLockAsync(token).ConfigureAwait(false);
+            try
+            {
+                token.ThrowIfCancellationRequested();
+                // Update the selected Cyberware Rating.
+                await objCyberware.SetRatingAsync(intRating, token).ConfigureAwait(false);
+
+                // See if a Bonus node exists.
+                if (objCyberware.Bonus?.InnerXmlContentContains("Rating", token) == true
+                    || objCyberware.PairBonus?.InnerXmlContentContains("Rating", token) == true ||
+                    objCyberware.WirelessOn
+                    && objCyberware.WirelessBonus?.InnerXmlContentContains("Rating", token) == true)
+                {
+                    // If the Bonus contains "Rating", remove the existing Improvements and create new ones.
+                    await ImprovementManager
+                        .RemoveImprovementsAsync(CharacterObject, objCyberware.SourceType,
+                            objCyberware.InternalId, token: token).ConfigureAwait(false);
+                    if (objCyberware.Bonus != null)
+                        await ImprovementManager.CreateImprovementsAsync(
+                            CharacterObject, objCyberware.SourceType, objCyberware.InternalId,
+                            objCyberware.Bonus,
+                            await objCyberware.GetRatingAsync(token).ConfigureAwait(false),
+                            await objCyberware.GetCurrentDisplayNameShortAsync(token)
+                                .ConfigureAwait(false), token: token).ConfigureAwait(false);
+                    if (objCyberware.WirelessOn && objCyberware.WirelessBonus != null)
+                        await ImprovementManager.CreateImprovementsAsync(
+                            CharacterObject, objCyberware.SourceType, objCyberware.InternalId,
+                            objCyberware.WirelessBonus,
+                            await objCyberware.GetRatingAsync(token).ConfigureAwait(false),
+                            await objCyberware.GetCurrentDisplayNameShortAsync(token)
+                                .ConfigureAwait(false), token: token).ConfigureAwait(false);
+
+                    if (objCyberware.PairBonus != null)
+                    {
+                        List<Cyberware> lstPairableCyberwares = await CharacterObject.Cyberware
+                            .DeepWhereAsync((x, t) => x.GetChildrenAsync(t),
+                                async (x, t) => objCyberware.IncludePair.Contains(x.Name)
+                                           && x.Extra == objCyberware.Extra &&
+                                           await x.GetIsModularCurrentlyEquippedAsync(t)
+                                               .ConfigureAwait(false),
+                                token).ConfigureAwait(false);
+                        int intCyberwaresCount = lstPairableCyberwares.Count;
+                        // Need to use slightly different logic if this cyberware has a location (Left or Right) and only pairs with itself because Lefts can only be paired with Rights and Rights only with Lefts
+                        if (!string.IsNullOrEmpty(objCyberware.Location)
+                            && objCyberware.IncludePair.All(x => x == objCyberware.Name))
+                        {
+                            int intMatchLocationCount = 0;
+                            int intNotMatchLocationCount = 0;
+                            foreach (Cyberware objPairableCyberware in lstPairableCyberwares)
+                            {
+                                if (objPairableCyberware.Location != objCyberware.Location)
+                                    ++intNotMatchLocationCount;
+                                else
+                                    ++intMatchLocationCount;
+                            }
+
+                            // Set the count to the total number of cyberwares in matching pairs, which would mean 2x the number of whichever location contains the fewest members (since every single one of theirs would have a pair)
+                            intCyberwaresCount = Math.Min(intNotMatchLocationCount, intMatchLocationCount) *
+                                                 2;
+                        }
+
+                        foreach (Cyberware objLoopCyberware in lstPairableCyberwares)
+                        {
+                            await ImprovementManager
+                                .RemoveImprovementsAsync(CharacterObject, objLoopCyberware.SourceType,
+                                    objLoopCyberware.InternalId + "Pair", token: token)
+                                .ConfigureAwait(false);
+                            // Go down the list and create pair bonuses for every second item
+                            if (intCyberwaresCount > 0 && (intCyberwaresCount & 1) == 0)
+                            {
+                                await ImprovementManager.CreateImprovementsAsync(
+                                    CharacterObject, objLoopCyberware.SourceType,
+                                    objLoopCyberware.InternalId + "Pair", objLoopCyberware.PairBonus,
+                                    await objLoopCyberware.GetRatingAsync(token)
+                                        .ConfigureAwait(false),
+                                    await objLoopCyberware.GetCurrentDisplayNameShortAsync(token)
+                                        .ConfigureAwait(false), token: token).ConfigureAwait(false);
+                            }
+
+                            --intCyberwaresCount;
+                        }
+                    }
+
+                    if (!await objCyberware.GetIsModularCurrentlyEquippedAsync(token)
+                            .ConfigureAwait(false))
+                        await objCyberware.ChangeModularEquipAsync(false, token: token)
+                            .ConfigureAwait(false);
+                }
+            }
+            finally
+            {
+                await objLocker.DisposeAsync().ConfigureAwait(false);
+            }
+        }
+
         private async void nudCyberwareRating_ValueChanged(object sender, EventArgs e)
         {
             if (IsRefreshing || SkipUpdate)
@@ -9887,108 +9827,12 @@ namespace Chummer
                     // Locate the selected piece of Cyberware.
                     case Cyberware objCyberware:
                     {
-                        IAsyncDisposable objLocker =
-                            await objCyberware.LockObject.EnterUpgradeableReadLockAsync(GenericToken).ConfigureAwait(false);
-                        try
-                        {
-                            GenericToken.ThrowIfCancellationRequested();
-                            // Update the selected Cyberware Rating.
-                            await objCyberware.SetRatingAsync(await nudCyberwareRating
-                                .DoThreadSafeFuncAsync(x => x.ValueAsInt, GenericToken)
-                                .ConfigureAwait(false), GenericToken).ConfigureAwait(false);
-
-                            // See if a Bonus node exists.
-                            if (objCyberware.Bonus?.InnerXmlContentContains("Rating", GenericToken) == true
-                                || objCyberware.PairBonus?.InnerXmlContentContains("Rating", GenericToken) == true ||
-                                objCyberware.WirelessOn
-                                && objCyberware.WirelessBonus?.InnerXmlContentContains("Rating", GenericToken) == true)
-                            {
-                                // If the Bonus contains "Rating", remove the existing Improvements and create new ones.
-                                await ImprovementManager
-                                    .RemoveImprovementsAsync(CharacterObject, objCyberware.SourceType,
-                                        objCyberware.InternalId, token: GenericToken).ConfigureAwait(false);
-                                if (objCyberware.Bonus != null)
-                                    await ImprovementManager.CreateImprovementsAsync(
-                                        CharacterObject, objCyberware.SourceType, objCyberware.InternalId,
-                                        objCyberware.Bonus,
-                                        await objCyberware.GetRatingAsync(GenericToken).ConfigureAwait(false),
-                                        await objCyberware.GetCurrentDisplayNameShortAsync(GenericToken)
-                                            .ConfigureAwait(false), token: GenericToken).ConfigureAwait(false);
-                                if (objCyberware.WirelessOn && objCyberware.WirelessBonus != null)
-                                    await ImprovementManager.CreateImprovementsAsync(
-                                        CharacterObject, objCyberware.SourceType, objCyberware.InternalId,
-                                        objCyberware.WirelessBonus,
-                                        await objCyberware.GetRatingAsync(GenericToken).ConfigureAwait(false),
-                                        await objCyberware.GetCurrentDisplayNameShortAsync(GenericToken)
-                                            .ConfigureAwait(false), token: GenericToken).ConfigureAwait(false);
-
-                                if (objCyberware.PairBonus != null)
-                                {
-                                    List<Cyberware> lstPairableCyberwares = await CharacterObject.Cyberware
-                                        .DeepWhereAsync((x, t) => x.GetChildrenAsync(t),
-                                            async (x, t) => objCyberware.IncludePair.Contains(x.Name)
-                                                       && x.Extra == objCyberware.Extra &&
-                                                       await x.GetIsModularCurrentlyEquippedAsync(t)
-                                                           .ConfigureAwait(false),
-                                            GenericToken).ConfigureAwait(false);
-                                    int intCyberwaresCount = lstPairableCyberwares.Count;
-                                    // Need to use slightly different logic if this cyberware has a location (Left or Right) and only pairs with itself because Lefts can only be paired with Rights and Rights only with Lefts
-                                    if (!string.IsNullOrEmpty(objCyberware.Location)
-                                        && objCyberware.IncludePair.All(x => x == objCyberware.Name))
-                                    {
-                                        int intMatchLocationCount = 0;
-                                        int intNotMatchLocationCount = 0;
-                                        foreach (Cyberware objPairableCyberware in lstPairableCyberwares)
-                                        {
-                                            if (objPairableCyberware.Location != objCyberware.Location)
-                                                ++intNotMatchLocationCount;
-                                            else
-                                                ++intMatchLocationCount;
-                                        }
-
-                                        // Set the count to the total number of cyberwares in matching pairs, which would mean 2x the number of whichever location contains the fewest members (since every single one of theirs would have a pair)
-                                        intCyberwaresCount = Math.Min(intNotMatchLocationCount, intMatchLocationCount) *
-                                                             2;
-                                    }
-
-                                    foreach (Cyberware objLoopCyberware in lstPairableCyberwares)
-                                    {
-                                        await ImprovementManager
-                                            .RemoveImprovementsAsync(CharacterObject, objLoopCyberware.SourceType,
-                                                objLoopCyberware.InternalId + "Pair", token: GenericToken)
-                                            .ConfigureAwait(false);
-                                        // Go down the list and create pair bonuses for every second item
-                                        if (intCyberwaresCount > 0 && (intCyberwaresCount & 1) == 0)
-                                        {
-                                            await ImprovementManager.CreateImprovementsAsync(
-                                                CharacterObject, objLoopCyberware.SourceType,
-                                                objLoopCyberware.InternalId + "Pair", objLoopCyberware.PairBonus,
-                                                await objLoopCyberware.GetRatingAsync(GenericToken)
-                                                    .ConfigureAwait(false),
-                                                await objLoopCyberware.GetCurrentDisplayNameShortAsync(GenericToken)
-                                                    .ConfigureAwait(false), token: GenericToken).ConfigureAwait(false);
-                                        }
-
-                                        --intCyberwaresCount;
-                                    }
-                                }
-
-                                if (!await objCyberware.GetIsModularCurrentlyEquippedAsync(GenericToken)
-                                        .ConfigureAwait(false))
-                                    await objCyberware.ChangeModularEquipAsync(false, token: GenericToken)
-                                        .ConfigureAwait(false);
-                            }
-
-                            string strText = await objCyberware.GetCurrentDisplayNameAsync(GenericToken)
-                                .ConfigureAwait(false);
-                            await treCyberware.DoThreadSafeAsync(() => objSelectedNode.Text = strText, GenericToken)
-                                .ConfigureAwait(false);
-                        }
-                        finally
-                        {
-                            await objLocker.DisposeAsync().ConfigureAwait(false);
-                        }
-
+                        await SetCyberwareRatingAsync(objCyberware, await nudCyberwareRating.DoThreadSafeFuncAsync(x => x.ValueAsInt, GenericToken)
+                                                                                            .ConfigureAwait(false), GenericToken).ConfigureAwait(false);
+                        string strText = await objCyberware.GetCurrentDisplayNameAsync(GenericToken)
+                            .ConfigureAwait(false);
+                        await treCyberware.DoThreadSafeAsync(() => objSelectedNode.Text = strText, GenericToken)
+                            .ConfigureAwait(false);
                         break;
                     }
                     case Gear objGear:
@@ -10252,68 +10096,22 @@ namespace Chummer
                                    .ConfigureAwait(false) is Gear objGear))
                     return;
 
-                if (objGear.Category == "Foci" || objGear.Category == "Metamagic Foci"
-                                               || objGear.Category == "Stacked Focus")
+                if (!await SetGearRatingAsync(objGear, await nudGearRating.DoThreadSafeFuncAsync(x => x.ValueAsInt, GenericToken)
+                                                                          .ConfigureAwait(false), GenericToken).ConfigureAwait(false))
                 {
-                    if (!await objGear
-                               .RefreshSingleFocusRating(
-                                   treFoci,
-                                   await nudGearRating.DoThreadSafeFuncAsync(x => x.ValueAsInt, GenericToken)
-                                                      .ConfigureAwait(false), GenericToken).ConfigureAwait(false))
+                    int intRating = await objGear.GetRatingAsync(GenericToken).ConfigureAwait(false);
+                    IsRefreshing = true;
+                    try
                     {
-                        int intRating = await objGear.GetRatingAsync(GenericToken).ConfigureAwait(false);
-                        IsRefreshing = true;
-                        try
-                        {
-                            await nudGearRating.DoThreadSafeAsync(x => x.Value = intRating, GenericToken)
-                                               .ConfigureAwait(false);
-                        }
-                        finally
-                        {
-                            IsRefreshing = false;
-                        }
-
-                        return;
+                        await nudGearRating.DoThreadSafeAsync(x => x.Value = intRating, GenericToken)
+                                           .ConfigureAwait(false);
                     }
-                }
-                else
-                    await objGear.SetRatingAsync(await nudGearRating
-                        .DoThreadSafeFuncAsync(x => x.ValueAsInt, GenericToken)
-                        .ConfigureAwait(false), GenericToken).ConfigureAwait(false);
-
-                if (objGear.Bonus != null || objGear.WirelessOn && objGear.WirelessBonus != null)
-                {
-                    await ImprovementManager.RemoveImprovementsAsync(CharacterObject,
-                                                                     Improvement.ImprovementSource.Gear,
-                                                                     objGear.InternalId, token: GenericToken).ConfigureAwait(false);
-                    if (!string.IsNullOrEmpty(objGear.Extra))
+                    finally
                     {
-                        ImprovementManager.SetForcedValue(objGear.Extra.TrimEndOnce(", Hacked"), CharacterObject);
+                        IsRefreshing = false;
                     }
 
-                    if (objGear.Bonded || (objGear.Category != "Foci" && objGear.Category != "Metamagic Foci"
-                                                                      && objGear.Category != "Stacked Focus"))
-                    {
-                        if (objGear.Bonus != null)
-                            await ImprovementManager.CreateImprovementsAsync(
-                                                        CharacterObject, Improvement.ImprovementSource.Gear,
-                                                        objGear.InternalId, objGear.Bonus,
-                                                        await objGear.GetRatingAsync(GenericToken).ConfigureAwait(false),
-                                                        await objGear.GetCurrentDisplayNameShortAsync(GenericToken)
-                                                                     .ConfigureAwait(false), token: GenericToken)
-                                                    .ConfigureAwait(false);
-                        if (objGear.WirelessOn && objGear.WirelessBonus != null)
-                            await ImprovementManager.CreateImprovementsAsync(
-                                                        CharacterObject, Improvement.ImprovementSource.Gear,
-                                                        objGear.InternalId,
-                                                        objGear.WirelessBonus, await objGear.GetRatingAsync(GenericToken).ConfigureAwait(false),
-                                                        await objGear.GetCurrentDisplayNameShortAsync(GenericToken)
-                                                                     .ConfigureAwait(false), token: GenericToken)
-                                                    .ConfigureAwait(false);
-                    }
-
-                    if (!objGear.Equipped)
-                        await objGear.ChangeEquippedStatusAsync(false, token: GenericToken).ConfigureAwait(false);
+                    return;
                 }
 
                 await MakeDirtyWithCharacterUpdate(GenericToken).ConfigureAwait(false);
@@ -10322,6 +10120,59 @@ namespace Chummer
             {
                 //swallow this
             }
+        }
+
+        /// <summary>
+        /// Change a piece of Gear's rating as the Gear tab's rating box does, recreating the bonuses that depend on it.
+        /// Returns false if the Gear is a focus whose new rating was refused (e.g. over the bonded foci limit).
+        /// </summary>
+        public async Task<bool> SetGearRatingAsync(Gear objGear, int intRating, CancellationToken token = default)
+        {
+            if (objGear.Category == "Foci" || objGear.Category == "Metamagic Foci"
+                                           || objGear.Category == "Stacked Focus")
+            {
+                if (!await objGear.RefreshSingleFocusRating(treFoci, intRating, token).ConfigureAwait(false))
+                    return false;
+            }
+            else
+                await objGear.SetRatingAsync(intRating, token).ConfigureAwait(false);
+
+            if (objGear.Bonus != null || objGear.WirelessOn && objGear.WirelessBonus != null)
+            {
+                await ImprovementManager.RemoveImprovementsAsync(CharacterObject,
+                                                                 Improvement.ImprovementSource.Gear,
+                                                                 objGear.InternalId, token: token).ConfigureAwait(false);
+                if (!string.IsNullOrEmpty(objGear.Extra))
+                {
+                    ImprovementManager.SetForcedValue(objGear.Extra.TrimEndOnce(", Hacked"), CharacterObject);
+                }
+
+                if (objGear.Bonded || (objGear.Category != "Foci" && objGear.Category != "Metamagic Foci"
+                                                                  && objGear.Category != "Stacked Focus"))
+                {
+                    if (objGear.Bonus != null)
+                        await ImprovementManager.CreateImprovementsAsync(
+                                                    CharacterObject, Improvement.ImprovementSource.Gear,
+                                                    objGear.InternalId, objGear.Bonus,
+                                                    await objGear.GetRatingAsync(token).ConfigureAwait(false),
+                                                    await objGear.GetCurrentDisplayNameShortAsync(token)
+                                                                 .ConfigureAwait(false), token: token)
+                                                .ConfigureAwait(false);
+                    if (objGear.WirelessOn && objGear.WirelessBonus != null)
+                        await ImprovementManager.CreateImprovementsAsync(
+                                                    CharacterObject, Improvement.ImprovementSource.Gear,
+                                                    objGear.InternalId,
+                                                    objGear.WirelessBonus, await objGear.GetRatingAsync(token).ConfigureAwait(false),
+                                                    await objGear.GetCurrentDisplayNameShortAsync(token)
+                                                                 .ConfigureAwait(false), token: token)
+                                                .ConfigureAwait(false);
+                }
+
+                if (!objGear.Equipped)
+                    await objGear.ChangeEquippedStatusAsync(false, token: token).ConfigureAwait(false);
+            }
+
+            return true;
         }
 
         private async void nudGearQty_ValueChanged(object sender, EventArgs e)
@@ -11446,46 +11297,292 @@ namespace Chummer
                 return;
             try
             {
-                string strFindId = objId.InternalId;
-                Focus objFocus
-                    = await CharacterObject.Foci.FindAsync(x => x.GearObject?.InternalId == strFindId,
-                          GenericToken).ConfigureAwait(false)
-                      ?? await CharacterObject.Foci.FindAsync(x => x.InternalId == strFindId,
-                          GenericToken).ConfigureAwait(false);
-
-                // Mark the Gear as not Bonded and remove any Improvements.
-                Gear objGear = objFocus?.GearObject;
-
-                if (objGear != null)
-                {
-                    objGear.Bonded = false;
-                    await ImprovementManager
-                        .RemoveImprovementsAsync(CharacterObject, Improvement.ImprovementSource.Gear,
-                            objGear.InternalId, token: GenericToken).ConfigureAwait(false);
-                    await CharacterObject.Foci.RemoveAsync(objFocus, GenericToken).ConfigureAwait(false);
-                }
-                else
-                {
-                    // This is a Stacked Focus.
-                    StackedFocus objStack = await CharacterObject.StackedFoci
-                        .FindAsync(x => x.InternalId == objId.InternalId, GenericToken)
-                        .ConfigureAwait(false);
-
-                    if (objStack != null)
-                    {
-                        objStack.Bonded = false;
-                        await ImprovementManager
-                            .RemoveImprovementsAsync(CharacterObject, Improvement.ImprovementSource.StackedFocus,
-                                objStack.InternalId, token: GenericToken).ConfigureAwait(false);
-                    }
-                }
-
+                await UnbondFocusAsync(objId.InternalId, GenericToken).ConfigureAwait(false);
                 await MakeDirtyWithCharacterUpdate(GenericToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
                 //swallow this
             }
+        }
+
+        /// <summary>
+        /// Bond a focus (or stacked focus), as checking it in the Magic tab's foci list does: refused if bonding it would take the character
+        /// past their Magic limits on bonded foci, otherwise its bonuses start applying.
+        /// </summary>
+        /// <param name="strSelectedId">Id of the focus gear or stacked focus.</param>
+        /// <param name="lstBondedIds">Ids of the foci and stacked foci that are already bonded.</param>
+        /// <param name="token">Cancellation token to listen to.</param>
+        /// <returns>Null when bonded; otherwise the language key of the reason it was refused, or empty if a choice it needed was cancelled.</returns>
+        public async Task<string> BondFocusAsync(string strSelectedId, IReadOnlyCollection<string> lstBondedIds, CancellationToken token = default)
+        {
+            IAsyncDisposable objLocker = await CharacterObject.LockObject.EnterUpgradeableReadLockAsync(token).ConfigureAwait(false);
+            try
+            {
+                // Locate the Focus that is being touched.
+                Gear objSelectedFocus = await CharacterObject.Gear.DeepFindByIdAsync(strSelectedId, token).ConfigureAwait(false);
+
+                // Set the Focus count to 1 and get its current Rating (Force). This number isn't used in the following loops because it isn't yet checked or unchecked.
+                int intFociCount = 1;
+                int intFociTotal;
+
+                if (objSelectedFocus != null)
+                    intFociTotal = await objSelectedFocus.GetRatingAsync(token).ConfigureAwait(false);
+                else
+                {
+                    // This is a Stacked Focus.
+                    intFociTotal = (await CharacterObject.StackedFoci
+                            .FindAsync(x => x.InternalId == strSelectedId, token)
+                            .ConfigureAwait(false))
+                        ?.TotalForce ?? 0;
+                }
+
+                intFociCount += lstBondedIds.Count;
+
+                foreach (string strNodeId in lstBondedIds)
+                {
+                    Gear objGear = await CharacterObject.Gear.FindByIdAsync(strNodeId, token).ConfigureAwait(false);
+                    if (objGear?.Bonded == true)
+                        intFociTotal += await objGear.GetRatingAsync(token).ConfigureAwait(false);
+                    StackedFocus objFocus = await CharacterObject.StackedFoci.FindAsync(x => x.InternalId == strNodeId && x.Bonded, token).ConfigureAwait(false);
+                    if (objFocus != null)
+                        intFociTotal += await objFocus.GetTotalForceAsync(token).ConfigureAwait(false);
+                }
+
+                if (!await CharacterObject.GetIgnoreRulesAsync(token).ConfigureAwait(false))
+                {
+                    if (intFociTotal > await (await CharacterObject
+                                .GetAttributeAsync("MAG", token: token)
+                                .ConfigureAwait(false))
+                            .GetTotalValueAsync(token).ConfigureAwait(false) * 5 ||
+                        await CharacterObjectSettings.GetMysAdeptSecondMAGAttributeAsync(token).ConfigureAwait(false)
+                        && await CharacterObject.GetIsMysticAdeptAsync(token).ConfigureAwait(false)
+                        && await CharacterObject.GetInitiateGradeAsync(token).ConfigureAwait(false) + 1
+                        > await (await CharacterObject
+                                .GetAttributeAsync(
+                                    "MAGAdept",
+                                    token: token)
+                                .ConfigureAwait(false))
+                            .GetTotalValueAsync(token)
+                            .ConfigureAwait(false))
+                    {
+                        return "Message_FocusMaximumForce";
+                    }
+
+                    if (intFociCount > await (await CharacterObject
+                                .GetAttributeAsync("MAG", token: token)
+                                .ConfigureAwait(false))
+                            .GetTotalValueAsync(token).ConfigureAwait(false) ||
+                        await CharacterObjectSettings.GetMysAdeptSecondMAGAttributeAsync(token).ConfigureAwait(false)
+                        && await CharacterObject.GetIsMysticAdeptAsync(token).ConfigureAwait(false)
+                        && intFociCount
+                        > await (await CharacterObject
+                                .GetAttributeAsync(
+                                    "MAGAdept",
+                                    token: token)
+                                .ConfigureAwait(false))
+                            .GetTotalValueAsync(token)
+                            .ConfigureAwait(false))
+                    {
+                        return "Message_FocusMaximumNumber";
+                    }
+                }
+
+                IAsyncDisposable objLocker2 = await CharacterObject.LockObject.EnterWriteLockAsync(token)
+                    .ConfigureAwait(false);
+                try
+                {
+                    bool blnCancel = false;
+                    if (objSelectedFocus != null)
+                    {
+                        Focus objFocus = new Focus(CharacterObject)
+                        {
+                            GearObject = objSelectedFocus
+                        };
+
+                        if (objSelectedFocus.Equipped
+                            && (objSelectedFocus.Bonus != null || objSelectedFocus.WirelessOn &&
+                                objSelectedFocus.WirelessBonus != null))
+                        {
+                            if (!string.IsNullOrEmpty(objSelectedFocus.Extra))
+                                ImprovementManager.SetForcedValue(objSelectedFocus.Extra, CharacterObject);
+                            if (objSelectedFocus.Bonus != null)
+                            {
+                                if (!await ImprovementManager.CreateImprovementsAsync(
+                                        CharacterObject, Improvement.ImprovementSource.Gear,
+                                        objSelectedFocus.InternalId,
+                                        objSelectedFocus.Bonus,
+                                        await objSelectedFocus.GetRatingAsync(token)
+                                            .ConfigureAwait(false),
+                                        await objSelectedFocus.GetCurrentDisplayNameShortAsync(token)
+                                            .ConfigureAwait(false), token: token).ConfigureAwait(false))
+                                {
+                                    // Clear created improvements
+                                    await objSelectedFocus.ChangeEquippedStatusAsync(false, token: token)
+                                        .ConfigureAwait(false);
+                                    await objSelectedFocus.ChangeEquippedStatusAsync(true, token: token)
+                                        .ConfigureAwait(false);
+                                    return string.Empty;
+                                }
+
+                                objSelectedFocus.Extra = ImprovementManager.GetSelectedValue(CharacterObject);
+                            }
+
+                            if (objSelectedFocus.WirelessOn
+                                && objSelectedFocus.WirelessBonus != null
+                                && !await ImprovementManager.CreateImprovementsAsync(
+                                    CharacterObject, Improvement.ImprovementSource.Gear,
+                                    objSelectedFocus.InternalId,
+                                    objSelectedFocus.WirelessBonus,
+                                    await objSelectedFocus.GetRatingAsync(token).ConfigureAwait(false),
+                                    await objSelectedFocus.GetCurrentDisplayNameShortAsync(token)
+                                        .ConfigureAwait(false), token: token).ConfigureAwait(false))
+                            {
+                                // Clear created improvements
+                                await objSelectedFocus.ChangeEquippedStatusAsync(false, token: token)
+                                    .ConfigureAwait(false);
+                                await objSelectedFocus.ChangeEquippedStatusAsync(true, token: token)
+                                    .ConfigureAwait(false);
+                                return string.Empty;
+                            }
+                        }
+
+                        await CharacterObject.Foci.AddAsync(objFocus, token).ConfigureAwait(false);
+                        objSelectedFocus.Bonded = true;
+                    }
+                    else
+                    {
+                        // This is a Stacked Focus.
+                        StackedFocus objStack
+                            = await CharacterObject.StackedFoci
+                                .FindAsync(x => x.InternalId == strSelectedId, token)
+                                .ConfigureAwait(false);
+                        if (objStack != null)
+                        {
+                            Gear objStackGear = await CharacterObject.Gear.DeepFindByIdAsync(objStack.GearId, token).ConfigureAwait(false);
+                            if (objStackGear.Equipped)
+                            {
+                                await objStack.Gear.ForEachWithSideEffectsWithBreakAsync(async (objGear, t) =>
+                                {
+                                    if (objGear.Bonus == null &&
+                                        (!objGear.WirelessOn || objGear.WirelessBonus == null))
+                                        return true;
+                                    if (!string.IsNullOrEmpty(objGear.Extra))
+                                        ImprovementManager.SetForcedValue(objGear.Extra, CharacterObject);
+                                    if (objGear.Bonus != null)
+                                    {
+                                        if (!await ImprovementManager.CreateImprovementsAsync(
+                                                    CharacterObject, Improvement.ImprovementSource.StackedFocus,
+                                                    objStack.InternalId, objGear.Bonus,
+                                                    await objGear.GetRatingAsync(t)
+                                                        .ConfigureAwait(false),
+                                                    await objGear.GetCurrentDisplayNameShortAsync(t)
+                                                        .ConfigureAwait(false), token: t)
+                                                .ConfigureAwait(false))
+                                        {
+                                            // Clear created improvements
+                                            await objStackGear
+                                                .ChangeEquippedStatusAsync(false, token: t)
+                                                .ConfigureAwait(false);
+                                            await objStackGear
+                                                .ChangeEquippedStatusAsync(true, token: t)
+                                                .ConfigureAwait(false);
+                                            blnCancel = true;
+                                            return false;
+                                        }
+
+                                        objGear.Extra = ImprovementManager.GetSelectedValue(CharacterObject);
+                                    }
+
+                                    if (objGear.WirelessOn
+                                        && objGear.WirelessBonus != null
+                                        && !await ImprovementManager.CreateImprovementsAsync(
+                                                CharacterObject, Improvement.ImprovementSource.StackedFocus,
+                                                objStack.InternalId, objGear.WirelessBonus,
+                                                await objGear.GetRatingAsync(t)
+                                                    .ConfigureAwait(false),
+                                                await objGear.GetCurrentDisplayNameShortAsync(t)
+                                                    .ConfigureAwait(false), token: t)
+                                            .ConfigureAwait(false))
+                                    {
+                                        // Clear created improvements
+                                        await objStackGear.ChangeEquippedStatusAsync(false, token: t)
+                                            .ConfigureAwait(false);
+                                        await objStackGear.ChangeEquippedStatusAsync(true, token: t)
+                                            .ConfigureAwait(false);
+                                        blnCancel = true;
+                                        return false;
+                                    }
+
+                                    return true;
+                                }, token).ConfigureAwait(false);
+                                if (blnCancel)
+                                    return string.Empty;
+                            }
+
+                            objStack.Bonded = true;
+                        }
+                    }
+                    return null;
+                }
+                finally
+                {
+                    await objLocker2.DisposeAsync().ConfigureAwait(false);
+                }
+            }
+            finally
+            {
+                await objLocker.DisposeAsync().ConfigureAwait(false);
+            }
+        }
+
+        /// <summary>
+        /// Unbond a focus (or stacked focus), as unchecking it in the Magic tab's foci list does, removing its bonuses.
+        /// </summary>
+        /// <param name="strFindId">Id of the focus gear or stacked focus.</param>
+        /// <param name="token">Cancellation token to listen to.</param>
+        public async Task UnbondFocusAsync(string strFindId, CancellationToken token = default)
+        {
+            Focus objFocus
+                = await CharacterObject.Foci.FindAsync(x => x.GearObject?.InternalId == strFindId,
+                      token).ConfigureAwait(false)
+                  ?? await CharacterObject.Foci.FindAsync(x => x.InternalId == strFindId,
+                      token).ConfigureAwait(false);
+
+            // Mark the Gear as not Bonded and remove any Improvements.
+            Gear objGear = objFocus?.GearObject;
+
+            if (objGear != null)
+            {
+                objGear.Bonded = false;
+                await ImprovementManager
+                    .RemoveImprovementsAsync(CharacterObject, Improvement.ImprovementSource.Gear,
+                        objGear.InternalId, token: token).ConfigureAwait(false);
+                await CharacterObject.Foci.RemoveAsync(objFocus, token).ConfigureAwait(false);
+            }
+            else
+            {
+                // This is a Stacked Focus.
+                StackedFocus objStack = await CharacterObject.StackedFoci
+                    .FindAsync(x => x.InternalId == strFindId, token)
+                    .ConfigureAwait(false);
+
+                if (objStack != null)
+                {
+                    objStack.Bonded = false;
+                    await ImprovementManager
+                        .RemoveImprovementsAsync(CharacterObject, Improvement.ImprovementSource.StackedFocus,
+                            objStack.InternalId, token: token).ConfigureAwait(false);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Rebuild the Magic tab's foci list from the character's gear, e.g. after foci were bonded without clicking it.
+        /// </summary>
+        public async Task RefreshFociListAsync(CancellationToken token = default)
+        {
+            await RefreshFociFromGear(treFoci, null, token: token).ConfigureAwait(false);
         }
 
         private async void treFoci_BeforeCheck(object sender, TreeViewCancelEventArgs e)
@@ -11514,24 +11611,6 @@ namespace Chummer
                                 .ConfigureAwait(false) as IHasInternalId)
                             ?.InternalId ?? string.Empty;
 
-                        // Locate the Focus that is being touched.
-                        Gear objSelectedFocus = await CharacterObject.Gear.DeepFindByIdAsync(strSelectedId, GenericToken).ConfigureAwait(false);
-
-                        // Set the Focus count to 1 and get its current Rating (Force). This number isn't used in the following loops because it isn't yet checked or unchecked.
-                        int intFociCount = 1;
-                        int intFociTotal;
-
-                        if (objSelectedFocus != null)
-                            intFociTotal = await objSelectedFocus.GetRatingAsync(GenericToken).ConfigureAwait(false);
-                        else
-                        {
-                            // This is a Stacked Focus.
-                            intFociTotal = (await CharacterObject.StackedFoci
-                                    .FindAsync(x => x.InternalId == strSelectedId, GenericToken)
-                                    .ConfigureAwait(false))
-                                ?.TotalForce ?? 0;
-                        }
-
                         List<string> lstActiveIds = await treViewToUse.DoThreadSafeFuncAsync(y =>
                         {
                             List<string> lstInnerReturn = new List<string>(y.Nodes.Count);
@@ -11545,227 +11624,37 @@ namespace Chummer
                             }
                             return lstInnerReturn;
                         }, GenericToken).ConfigureAwait(false);
-                        intFociCount += lstActiveIds.Count;
-
-                        foreach (string strNodeId in lstActiveIds)
+                        string strRefusal = await BondFocusAsync(strSelectedId, lstActiveIds, GenericToken).ConfigureAwait(false);
+                        if (strRefusal != null)
                         {
-                            Gear objGear = await CharacterObject.Gear.FindByIdAsync(strNodeId, GenericToken).ConfigureAwait(false);
-                            if (objGear?.Bonded == true)
-                                intFociTotal += await objGear.GetRatingAsync(GenericToken).ConfigureAwait(false);
-                            StackedFocus objFocus = await CharacterObject.StackedFoci.FindAsync(x => x.InternalId == strNodeId && x.Bonded, GenericToken).ConfigureAwait(false);
-                            if (objFocus != null)
-                                intFociTotal += await objFocus.GetTotalForceAsync(GenericToken).ConfigureAwait(false);
-                        }
-
-                        if (!await CharacterObject.GetIgnoreRulesAsync(GenericToken).ConfigureAwait(false))
-                        {
-                            if (intFociTotal > await (await CharacterObject
-                                        .GetAttributeAsync("MAG", token: GenericToken)
-                                        .ConfigureAwait(false))
-                                    .GetTotalValueAsync(GenericToken).ConfigureAwait(false) * 5 ||
-                                await CharacterObjectSettings.GetMysAdeptSecondMAGAttributeAsync(GenericToken).ConfigureAwait(false)
-                                && await CharacterObject.GetIsMysticAdeptAsync(GenericToken).ConfigureAwait(false)
-                                && await CharacterObject.GetInitiateGradeAsync(GenericToken).ConfigureAwait(false) + 1
-                                > await (await CharacterObject
-                                        .GetAttributeAsync(
-                                            "MAGAdept",
-                                            token: GenericToken)
-                                        .ConfigureAwait(false))
-                                    .GetTotalValueAsync(GenericToken)
-                                    .ConfigureAwait(false))
+                            if (!string.IsNullOrEmpty(strRefusal))
                             {
                                 await Program.ShowScrollableMessageBoxAsync(
                                     this,
-                                    await LanguageManager
-                                        .GetStringAsync("Message_FocusMaximumForce", token: GenericToken)
-                                        .ConfigureAwait(false),
-                                    await LanguageManager
-                                        .GetStringAsync("MessageTitle_FocusMaximum", token: GenericToken)
-                                        .ConfigureAwait(false),
+                                    await LanguageManager.GetStringAsync(strRefusal, token: GenericToken).ConfigureAwait(false),
+                                    await LanguageManager.GetStringAsync("MessageTitle_FocusMaximum", token: GenericToken).ConfigureAwait(false),
                                     MessageBoxButtons.OK, MessageBoxIcon.Information, token: GenericToken).ConfigureAwait(false);
-                                e.Cancel = true;
-                                return;
                             }
 
-                            if (intFociCount > await (await CharacterObject
-                                        .GetAttributeAsync("MAG", token: GenericToken)
-                                        .ConfigureAwait(false))
-                                    .GetTotalValueAsync(GenericToken).ConfigureAwait(false) ||
-                                await CharacterObjectSettings.GetMysAdeptSecondMAGAttributeAsync(GenericToken).ConfigureAwait(false)
-                                && await CharacterObject.GetIsMysticAdeptAsync(GenericToken).ConfigureAwait(false)
-                                && intFociCount
-                                > await (await CharacterObject
-                                        .GetAttributeAsync(
-                                            "MAGAdept",
-                                            token: GenericToken)
-                                        .ConfigureAwait(false))
-                                    .GetTotalValueAsync(GenericToken)
-                                    .ConfigureAwait(false))
-                            {
-                                await Program.ShowScrollableMessageBoxAsync(
-                                    this,
-                                    await LanguageManager
-                                        .GetStringAsync("Message_FocusMaximumNumber", token: GenericToken)
-                                        .ConfigureAwait(false),
-                                    await LanguageManager
-                                        .GetStringAsync("MessageTitle_FocusMaximum", token: GenericToken)
-                                        .ConfigureAwait(false),
-                                    MessageBoxButtons.OK, MessageBoxIcon.Information, token: GenericToken).ConfigureAwait(false);
-                                e.Cancel = true;
-                                return;
-                            }
+                            e.Cancel = true;
+                            return;
                         }
 
-                        IAsyncDisposable objLocker2 = await CharacterObject.LockObject.EnterWriteLockAsync(GenericToken)
-                            .ConfigureAwait(false);
-                        try
+                        Gear objFocusGear = await CharacterObject.Gear.DeepFindByIdAsync(strSelectedId, GenericToken).ConfigureAwait(false);
+                        if (objFocusGear == null)
                         {
-                            if (objSelectedFocus != null)
-                            {
-                                Focus objFocus = new Focus(CharacterObject)
-                                {
-                                    GearObject = objSelectedFocus
-                                };
-
-                                if (objSelectedFocus.Equipped
-                                    && (objSelectedFocus.Bonus != null || objSelectedFocus.WirelessOn &&
-                                        objSelectedFocus.WirelessBonus != null))
-                                {
-                                    if (!string.IsNullOrEmpty(objSelectedFocus.Extra))
-                                        ImprovementManager.SetForcedValue(objSelectedFocus.Extra, CharacterObject);
-                                    if (objSelectedFocus.Bonus != null)
-                                    {
-                                        if (!await ImprovementManager.CreateImprovementsAsync(
-                                                CharacterObject, Improvement.ImprovementSource.Gear,
-                                                objSelectedFocus.InternalId,
-                                                objSelectedFocus.Bonus,
-                                                await objSelectedFocus.GetRatingAsync(GenericToken)
-                                                    .ConfigureAwait(false),
-                                                await objSelectedFocus.GetCurrentDisplayNameShortAsync(GenericToken)
-                                                    .ConfigureAwait(false), token: GenericToken).ConfigureAwait(false))
-                                        {
-                                            // Clear created improvements
-                                            await objSelectedFocus.ChangeEquippedStatusAsync(false, token: GenericToken)
-                                                .ConfigureAwait(false);
-                                            await objSelectedFocus.ChangeEquippedStatusAsync(true, token: GenericToken)
-                                                .ConfigureAwait(false);
-                                            e.Cancel = true;
-                                            return;
-                                        }
-
-                                        objSelectedFocus.Extra = ImprovementManager.GetSelectedValue(CharacterObject);
-                                    }
-
-                                    if (objSelectedFocus.WirelessOn
-                                        && objSelectedFocus.WirelessBonus != null
-                                        && !await ImprovementManager.CreateImprovementsAsync(
-                                            CharacterObject, Improvement.ImprovementSource.Gear,
-                                            objSelectedFocus.InternalId,
-                                            objSelectedFocus.WirelessBonus,
-                                            await objSelectedFocus.GetRatingAsync(GenericToken).ConfigureAwait(false),
-                                            await objSelectedFocus.GetCurrentDisplayNameShortAsync(GenericToken)
-                                                .ConfigureAwait(false), token: GenericToken).ConfigureAwait(false))
-                                    {
-                                        // Clear created improvements
-                                        await objSelectedFocus.ChangeEquippedStatusAsync(false, token: GenericToken)
-                                            .ConfigureAwait(false);
-                                        await objSelectedFocus.ChangeEquippedStatusAsync(true, token: GenericToken)
-                                            .ConfigureAwait(false);
-                                        e.Cancel = true;
-                                        return;
-                                    }
-                                }
-
-                                string strName = await objSelectedFocus.GetCurrentDisplayNameAsync(GenericToken)
-                                    .ConfigureAwait(false);
-                                await treViewToUse.DoThreadSafeFuncAsync(() => e.Node.Text = strName, GenericToken)
-                                    .ConfigureAwait(false);
-                                await CharacterObject.Foci.AddAsync(objFocus, GenericToken).ConfigureAwait(false);
-                                objSelectedFocus.Bonded = true;
-                            }
-                            else
-                            {
-                                // This is a Stacked Focus.
-                                StackedFocus objStack
-                                    = await CharacterObject.StackedFoci
-                                        .FindAsync(x => x.InternalId == strSelectedId, GenericToken)
-                                        .ConfigureAwait(false);
-                                if (objStack != null)
-                                {
-                                    Gear objStackGear = await CharacterObject.Gear.DeepFindByIdAsync(objStack.GearId, GenericToken).ConfigureAwait(false);
-                                    if (objStackGear.Equipped)
-                                    {
-                                        await objStack.Gear.ForEachWithSideEffectsWithBreakAsync(async (objGear, t) =>
-                                        {
-                                            if (objGear.Bonus == null &&
-                                                (!objGear.WirelessOn || objGear.WirelessBonus == null))
-                                                return true;
-                                            if (!string.IsNullOrEmpty(objGear.Extra))
-                                                ImprovementManager.SetForcedValue(objGear.Extra, CharacterObject);
-                                            if (objGear.Bonus != null)
-                                            {
-                                                if (!await ImprovementManager.CreateImprovementsAsync(
-                                                            CharacterObject, Improvement.ImprovementSource.StackedFocus,
-                                                            objStack.InternalId, objGear.Bonus,
-                                                            await objGear.GetRatingAsync(t)
-                                                                .ConfigureAwait(false),
-                                                            await objGear.GetCurrentDisplayNameShortAsync(t)
-                                                                .ConfigureAwait(false), token: t)
-                                                        .ConfigureAwait(false))
-                                                {
-                                                    // Clear created improvements
-                                                    await objStackGear
-                                                        .ChangeEquippedStatusAsync(false, token: t)
-                                                        .ConfigureAwait(false);
-                                                    await objStackGear
-                                                        .ChangeEquippedStatusAsync(true, token: t)
-                                                        .ConfigureAwait(false);
-                                                    e.Cancel = true;
-                                                    return false;
-                                                }
-
-                                                objGear.Extra = ImprovementManager.GetSelectedValue(CharacterObject);
-                                            }
-
-                                            if (objGear.WirelessOn
-                                                && objGear.WirelessBonus != null
-                                                && !await ImprovementManager.CreateImprovementsAsync(
-                                                        CharacterObject, Improvement.ImprovementSource.StackedFocus,
-                                                        objStack.InternalId, objGear.WirelessBonus,
-                                                        await objGear.GetRatingAsync(t)
-                                                            .ConfigureAwait(false),
-                                                        await objGear.GetCurrentDisplayNameShortAsync(t)
-                                                            .ConfigureAwait(false), token: t)
-                                                    .ConfigureAwait(false))
-                                            {
-                                                // Clear created improvements
-                                                await objStackGear.ChangeEquippedStatusAsync(false, token: t)
-                                                    .ConfigureAwait(false);
-                                                await objStackGear.ChangeEquippedStatusAsync(true, token: t)
-                                                    .ConfigureAwait(false);
-                                                e.Cancel = true;
-                                                return false;
-                                            }
-
-                                            return true;
-                                        }, GenericToken).ConfigureAwait(false);
-                                        if (e.Cancel)
-                                            return;
-                                    }
-
-                                    objStack.Bonded = true;
-                                    string strName = await objStackGear.GetCurrentDisplayNameAsync(GenericToken)
-                                        .ConfigureAwait(false);
-                                    await treViewToUse.DoThreadSafeAsync(() => e.Node.Text = strName, GenericToken)
-                                        .ConfigureAwait(false);
-                                }
-                            }
-                            await MakeDirtyWithCharacterUpdate(GenericToken).ConfigureAwait(false);
+                            StackedFocus objStack = await CharacterObject.StackedFoci.FindAsync(x => x.InternalId == strSelectedId, GenericToken).ConfigureAwait(false);
+                            if (objStack != null)
+                                objFocusGear = await CharacterObject.Gear.DeepFindByIdAsync(objStack.GearId, GenericToken).ConfigureAwait(false);
                         }
-                        finally
+
+                        if (objFocusGear != null)
                         {
-                            await objLocker2.DisposeAsync().ConfigureAwait(false);
+                            string strName = await objFocusGear.GetCurrentDisplayNameAsync(GenericToken).ConfigureAwait(false);
+                            await treViewToUse.DoThreadSafeAsync(() => e.Node.Text = strName, GenericToken).ConfigureAwait(false);
                         }
+
+                        await MakeDirtyWithCharacterUpdate(GenericToken).ConfigureAwait(false);
                     }
                     finally
                     {
@@ -11783,6 +11672,40 @@ namespace Chummer
             }
         }
 
+        /// <summary>
+        /// Change an Armor Mod's rating as the Armor tab's rating box does, recreating its bonuses if they depend on the rating.
+        /// </summary>
+        public async Task SetArmorModRatingAsync(ArmorMod objMod, int intRating, CancellationToken token = default)
+        {
+            await objMod.SetRatingAsync(intRating, token).ConfigureAwait(false);
+            // See if a Bonus node exists.
+            if (objMod.Bonus?.InnerXmlContentContains("Rating", token) == true || objMod.WirelessOn
+                && objMod.WirelessBonus?.InnerXmlContentContains("Rating", token) == true)
+            {
+                // If the Bonus contains "Rating", remove the existing Improvements and create new ones.
+                await ImprovementManager.RemoveImprovementsAsync(
+                                            CharacterObject, Improvement.ImprovementSource.ArmorMod,
+                                            objMod.InternalId, token)
+                                        .ConfigureAwait(false);
+                if (objMod.Bonus != null)
+                    await ImprovementManager.CreateImprovementsAsync(
+                                                CharacterObject, Improvement.ImprovementSource.ArmorMod,
+                                                objMod.InternalId,
+                                                objMod.Bonus, await objMod.GetRatingAsync(token).ConfigureAwait(false),
+                                                await objMod.GetCurrentDisplayNameShortAsync(token)
+                                                            .ConfigureAwait(false), token: token)
+                                            .ConfigureAwait(false);
+                if (objMod.WirelessOn && objMod.WirelessBonus != null)
+                    await ImprovementManager.CreateImprovementsAsync(
+                                                CharacterObject, Improvement.ImprovementSource.ArmorMod,
+                                                objMod.InternalId,
+                                                objMod.WirelessBonus, await objMod.GetRatingAsync(token).ConfigureAwait(false),
+                                                await objMod.GetCurrentDisplayNameShortAsync(token)
+                                                            .ConfigureAwait(false), token: token)
+                                            .ConfigureAwait(false);
+            }
+        }
+
         private async void nudArmorRating_ValueChanged(object sender, EventArgs e)
         {
             if (IsRefreshing || SkipUpdate)
@@ -11797,39 +11720,11 @@ namespace Chummer
                     // Locate the selected ArmorMod.
                     case ArmorMod objMod:
                     {
-                        await objMod.SetRatingAsync(await nudArmorRating.DoThreadSafeFuncAsync(x => x.ValueAsInt, GenericToken)
-                                                            .ConfigureAwait(false), GenericToken).ConfigureAwait(false);
+                        await SetArmorModRatingAsync(objMod, await nudArmorRating.DoThreadSafeFuncAsync(x => x.ValueAsInt, GenericToken)
+                                                                                 .ConfigureAwait(false), GenericToken).ConfigureAwait(false);
                         string strText = await objMod.GetCurrentDisplayNameAsync(GenericToken).ConfigureAwait(false);
                         await treArmor.DoThreadSafeAsync(() => objSelectedNode.Text = strText, GenericToken)
                                       .ConfigureAwait(false);
-
-                        // See if a Bonus node exists.
-                        if (objMod.Bonus?.InnerXmlContentContains("Rating", GenericToken) == true || objMod.WirelessOn
-                            && objMod.WirelessBonus?.InnerXmlContentContains("Rating", GenericToken) == true)
-                        {
-                            // If the Bonus contains "Rating", remove the existing Improvements and create new ones.
-                            await ImprovementManager.RemoveImprovementsAsync(
-                                                        CharacterObject, Improvement.ImprovementSource.ArmorMod,
-                                                        objMod.InternalId, GenericToken)
-                                                    .ConfigureAwait(false);
-                            if (objMod.Bonus != null)
-                                await ImprovementManager.CreateImprovementsAsync(
-                                                            CharacterObject, Improvement.ImprovementSource.ArmorMod,
-                                                            objMod.InternalId,
-                                                            objMod.Bonus, await objMod.GetRatingAsync(GenericToken).ConfigureAwait(false),
-                                                            await objMod.GetCurrentDisplayNameShortAsync(GenericToken)
-                                                                        .ConfigureAwait(false), token: GenericToken)
-                                                        .ConfigureAwait(false);
-                            if (objMod.WirelessOn && objMod.WirelessBonus != null)
-                                await ImprovementManager.CreateImprovementsAsync(
-                                                            CharacterObject, Improvement.ImprovementSource.ArmorMod,
-                                                            objMod.InternalId,
-                                                            objMod.WirelessBonus, await objMod.GetRatingAsync(GenericToken).ConfigureAwait(false),
-                                                            await objMod.GetCurrentDisplayNameShortAsync(GenericToken)
-                                                                        .ConfigureAwait(false), token: GenericToken)
-                                                        .ConfigureAwait(false);
-                        }
-
                         break;
                     }
                     case Gear objGear:
@@ -17036,7 +16931,7 @@ namespace Chummer
                                 Interlocked.Decrement(ref _intFileUpdateQueued);
                             }
 
-                            IsDirty = false;
+                            await SetDirty(false, token).ConfigureAwait(false);
                         }
 
                         IsReopenQueued = true;
@@ -17510,7 +17405,8 @@ namespace Chummer
                                                                  decimal decMarkup = 0, bool blnFree = false,
                                                                  bool blnBlackMarketDiscount = false, int intESSDiscount = 0,
                                                                  bool blnPrototypeTranshuman = false,
-                                                                 bool blnPromptForBaseWeapon = true, CancellationToken token = default)
+                                                                 bool blnPromptForBaseWeapon = true, CancellationToken token = default,
+                                                                 string strForceValue = "")
         {
             Cyberware objCyberware = new Cyberware(CharacterObject);
             try
@@ -17532,7 +17428,7 @@ namespace Chummer
                         decMarkup,
                         blnFree,
                         blnBlackMarketDiscount,
-                        objParent: objParent, token: token).ConfigureAwait(false))
+                        objParent: objParent, token: token, strForceValue: strForceValue).ConfigureAwait(false))
                 {
                     await objCyberware.DeleteCyberwareAsync(token: token).ConfigureAwait(false);
                     return null;
@@ -17755,6 +17651,82 @@ namespace Chummer
         }
 
         /// <summary>
+        /// Add a piece of Gear to a piece of Armor, one of its mods or gear inside it, as the Armor tab's Add Gear and Add as Plugin menu items do
+        /// once the Select Gear dialog closes. Ammunition merges with identical ammunition already there.
+        /// </summary>
+        /// <returns>The gear that now holds the purchase (an existing item if merged), or null if it could not be created.</returns>
+        internal async Task<Gear> AddArmorGearFromNodeAsync(Armor objSelectedArmor, ArmorMod objSelectedMod, Gear objSelectedGear, XmlNode objXmlGear,
+                                                            int intRating, decimal decQuantity, bool blnFree, bool blnBlackMarketDiscount,
+                                                            bool blnDoItYourself, string strForceValue = "", CancellationToken token = default)
+        {
+            // Create the new piece of Gear.
+            List<Weapon> lstWeapons = new List<Weapon>(1);
+
+            Gear objGear = new Gear(CharacterObject);
+            await objGear.CreateAsync(objXmlGear, intRating, lstWeapons,
+                strForceValue ?? string.Empty,
+                objSelectedGear?.Equipped ?? objSelectedMod?.Equipped ?? objSelectedArmor.Equipped,
+                objParent: objSelectedGear ?? (IHasName)objSelectedMod ?? objSelectedArmor, token: token).ConfigureAwait(false);
+
+            if (objGear.InternalId.IsEmptyGuid())
+                return null;
+
+            await objGear.SetQuantityAsync(decQuantity, token).ConfigureAwait(false);
+            objGear.DiscountCost = blnBlackMarketDiscount;
+
+            // Reduce the cost for Do It Yourself components.
+            if (blnDoItYourself)
+                objGear.Cost = "(" + objGear.Cost + ") * 0.5";
+            // If the item was marked as free, change its cost.
+            if (blnFree)
+            {
+                objGear.Cost = "0";
+            }
+
+            // Create any Weapons that came with this Gear.
+            foreach (Weapon objWeapon in lstWeapons)
+            {
+                await CharacterObject.Weapons.AddAsync(objWeapon, token).ConfigureAwait(false);
+            }
+
+            Gear objMatchingGear = null;
+            // If this is Ammunition, see if the character already has it on them.
+            if (objGear.Category == "Ammunition" || !string.IsNullOrEmpty(objGear.AmmoForWeaponType))
+            {
+                TaggedObservableCollection<Gear> lstToSearch = !string.IsNullOrEmpty(objSelectedGear?.Name)
+                    ? objSelectedGear.Children
+                    : !string.IsNullOrEmpty(objSelectedMod?.Name)
+                        ? objSelectedMod.GearChildren
+                        : objSelectedArmor.GearChildren;
+                objMatchingGear = lstToSearch.FirstOrDefault(x => objGear.IsIdenticalToOtherGear(x));
+            }
+
+            if (objMatchingGear != null)
+            {
+                await objMatchingGear.SetQuantityAsync(objMatchingGear.Quantity + objGear.Quantity, token).ConfigureAwait(false);
+                return objMatchingGear;
+            }
+            else
+            {
+                // Add the Gear.
+                if (!string.IsNullOrEmpty(objSelectedGear?.Name))
+                {
+                    await objSelectedGear.Children.AddAsync(objGear, token).ConfigureAwait(false);
+                }
+                else if (!string.IsNullOrEmpty(objSelectedMod?.Name))
+                {
+                    await objSelectedMod.GearChildren.AddAsync(objGear, token).ConfigureAwait(false);
+                }
+                else
+                {
+                    await objSelectedArmor.GearChildren.AddAsync(objGear, token).ConfigureAwait(false);
+                }
+            }
+
+            return objGear;
+        }
+
+        /// <summary>
         /// Select a piece of Gear and add it to a piece of Armor.
         /// </summary>
         /// <param name="strSelectedId">Id attached to the object to which the gear should be added.</param>
@@ -17841,69 +17813,10 @@ namespace Chummer
                             = objXmlDocument.TryGetNodeByNameOrId("/chummer/gears/gear",
                                 frmPickGear.MyForm.SelectedGear);
 
-                        // Create the new piece of Gear.
-                        List<Weapon> lstWeapons = new List<Weapon>(1);
-
-                        Gear objGear = new Gear(CharacterObject);
-                        await objGear.CreateAsync(objXmlGear, frmPickGear.MyForm.SelectedRating, lstWeapons,
-                            string.Empty,
-                            objSelectedGear?.Equipped ?? objSelectedMod?.Equipped ?? objSelectedArmor.Equipped,
-                            objParent: objSelectedGear ?? (IHasName)objSelectedMod ?? objSelectedArmor, token: token).ConfigureAwait(false);
-
-                        if (objGear.InternalId.IsEmptyGuid())
-                            return frmPickGear.MyForm.AddAgain;
-
-                        await objGear.SetQuantityAsync(frmPickGear.MyForm.SelectedQty, GenericToken).ConfigureAwait(false);
-                        objGear.DiscountCost = frmPickGear.MyForm.BlackMarketDiscount;
-
-                        // Reduce the cost for Do It Yourself components.
-                        if (frmPickGear.MyForm.DoItYourself)
-                            objGear.Cost = "(" + objGear.Cost + ") * 0.5";
-                        // If the item was marked as free, change its cost.
-                        if (frmPickGear.MyForm.FreeCost)
-                        {
-                            objGear.Cost = "0";
-                        }
-
-                        // Create any Weapons that came with this Gear.
-                        foreach (Weapon objWeapon in lstWeapons)
-                        {
-                            await CharacterObject.Weapons.AddAsync(objWeapon, token).ConfigureAwait(false);
-                        }
-
-                        Gear objMatchingGear = null;
-                        // If this is Ammunition, see if the character already has it on them.
-                        if (objGear.Category == "Ammunition" || !string.IsNullOrEmpty(objGear.AmmoForWeaponType))
-                        {
-                            TaggedObservableCollection<Gear> lstToSearch = !string.IsNullOrEmpty(objSelectedGear?.Name)
-                                ? objSelectedGear.Children
-                                : !string.IsNullOrEmpty(objSelectedMod?.Name)
-                                    ? objSelectedMod.GearChildren
-                                    : objSelectedArmor.GearChildren;
-                            objMatchingGear = lstToSearch.FirstOrDefault(x => objGear.IsIdenticalToOtherGear(x));
-                        }
-
-                        if (objMatchingGear != null)
-                        {
-                            await objMatchingGear.SetQuantityAsync(objMatchingGear.Quantity + objGear.Quantity, token).ConfigureAwait(false);
-                        }
-                        else
-                        {
-                            // Add the Gear.
-                            if (!string.IsNullOrEmpty(objSelectedGear?.Name))
-                            {
-                                await objSelectedGear.Children.AddAsync(objGear, token).ConfigureAwait(false);
-                            }
-                            else if (!string.IsNullOrEmpty(objSelectedMod?.Name))
-                            {
-                                await objSelectedMod.GearChildren.AddAsync(objGear, token).ConfigureAwait(false);
-                            }
-                            else
-                            {
-                                await objSelectedArmor.GearChildren.AddAsync(objGear, token).ConfigureAwait(false);
-                            }
-                        }
-
+                        await AddArmorGearFromNodeAsync(objSelectedArmor, objSelectedMod, objSelectedGear, objXmlGear,
+                                                        frmPickGear.MyForm.SelectedRating, frmPickGear.MyForm.SelectedQty,
+                                                        frmPickGear.MyForm.FreeCost, frmPickGear.MyForm.BlackMarketDiscount,
+                                                        frmPickGear.MyForm.DoItYourself, token: token).ConfigureAwait(false);
                         return frmPickGear.MyForm.AddAgain;
                     }
                 }

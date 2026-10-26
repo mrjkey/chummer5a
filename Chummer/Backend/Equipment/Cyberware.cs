@@ -14699,7 +14699,8 @@ namespace Chummer.Backend.Equipment
             int intRating, Vehicle objVehicle, IAsyncCollection<Cyberware> lstCyberwareCollection,
             IAsyncCollection<Vehicle> lstVehicleCollection, IAsyncCollection<Weapon> lstWeaponCollection,
             decimal decMarkup = 0, bool blnFree = false, bool blnBlackMarket = false, bool blnForVehicle = false,
-            string strExpenseString = "String_ExpensePurchaseCyberware", Cyberware objParent = null, CancellationToken token = default)
+            string strExpenseString = "String_ExpensePurchaseCyberware", Cyberware objParent = null, CancellationToken token = default,
+            string strForceValue = "", bool blnShowNotEnoughNuyenMessage = true)
         {
             token.ThrowIfCancellationRequested();
             IAsyncDisposable objLocker = await LockObject.EnterUpgradeableReadLockAsync(token).ConfigureAwait(false);
@@ -14716,7 +14717,7 @@ namespace Chummer.Backend.Equipment
                     {
                         token.ThrowIfCancellationRequested();
                         await CreateAsync(objNode, objGrade, objImprovementSource, intRating, lstWeapons, lstVehicles, true, true,
-                            string.Empty, objParent, objVehicle, token: token).ConfigureAwait(false);
+                            strForceValue ?? string.Empty, objParent, objVehicle, token: token).ConfigureAwait(false);
                         if (InternalId.IsEmptyGuid())
                         {
                             return false;
@@ -14763,11 +14764,12 @@ namespace Chummer.Backend.Equipment
 
                             if (decCost > await _objCharacter.GetNuyenAsync(token).ConfigureAwait(false))
                             {
-                                await Program.ShowScrollableMessageBoxAsync(
-                                    await LanguageManager.GetStringAsync("Message_NotEnoughNuyen", token: token).ConfigureAwait(false),
-                                    await LanguageManager.GetStringAsync("MessageTitle_NotEnoughNuyen", token: token).ConfigureAwait(false),
-                                    MessageBoxButtons.OK,
-                                    MessageBoxIcon.Information, token: token).ConfigureAwait(false);
+                                if (blnShowNotEnoughNuyenMessage)
+                                    await Program.ShowScrollableMessageBoxAsync(
+                                        await LanguageManager.GetStringAsync("Message_NotEnoughNuyen", token: token).ConfigureAwait(false),
+                                        await LanguageManager.GetStringAsync("MessageTitle_NotEnoughNuyen", token: token).ConfigureAwait(false),
+                                        MessageBoxButtons.OK,
+                                        MessageBoxIcon.Information, token: token).ConfigureAwait(false);
                                 return false;
                             }
                         }

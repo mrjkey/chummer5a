@@ -10,7 +10,7 @@ First release.
   - set attributes, skills, specializations, knowledge skills and languages
   - add qualities, contacts, spells, adept powers, complex forms, tradition and mentor spirit, spirits and sprites, initiation and metamagic, and martial arts
   - buy weapons and accessories, armor and mods, gear and ammo, cyberware and bioware, vehicles and mods, and lifestyles
-  - fill in the character's looks, concept and background
+  - fill in the character's looks, concept and background, and who their contacts are
   - check the character for mistakes and unspent points, save it, and export a PDF character sheet
 - **The `sr5-build-advisor` skill** walks you through a build step by step and explains the trade-offs. Start it with `/sr5-build-advisor`.
 - **Core rulebook by default.** New characters use the Shadowrun 5 core rules unless you ask for other books.

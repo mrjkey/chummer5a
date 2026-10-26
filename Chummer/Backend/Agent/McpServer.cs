@@ -281,7 +281,7 @@ namespace Chummer.Agent
             }
             catch (Exception e)
             {
-                Log.Warn(e, "Agent tool " + strName + " failed");
+                Log.Warn(e, "Agent tool " + strName + " failed: " + e);
                 return MakeToolResult("Tool " + strName + " failed: " + e.GetType().Name + ": " + e.Message, true);
             }
         }

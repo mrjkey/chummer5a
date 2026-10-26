@@ -49,10 +49,12 @@ namespace Chummer.Agent
             + "get_priority_table, then create_character; set_priorities changes them later. Spend points with set_attribute/set_skill/add_quality "
             + "and friends; magic and resonance with set_tradition, add_spell, add_power, add_complex_form, add_mentor_spirit, add_spirit, add_initiation, "
             + "add_art and add_metamagic; buy gear with add_weapon/add_armor/add_gear/add_cyberware/add_vehicle/add_lifestyle and fit it out with "
-            + "add_weapon_accessory/add_armor_mod/add_vehicle_mod; remove_item undoes any of these. set_character_details fills in looks, concept and background. "
+            + "add_weapon_accessory/add_armor_mod/add_vehicle_mod; remove_item undoes any of these. set_character_details fills in looks, concept and background, and "
+            + "set_contact_details a contact's role, ratings and personality. Never edit a .chum5 file by hand while it is open: Chummer's next save "
+            + "overwrites it. If no tool covers an edit, ask the user to make it in the editor. "
             + "Call save_character when the user wants it saved and "
             + "export_character_sheet for a sheet to play from; open_character reopens saved files. Unless asked otherwise, stick to the core rulebook (the Standard settings). "
-            + "Edits only work while the character is in creation mode, except set_character_details.";
+            + "Edits only work while the character is in creation mode, except set_character_details and set_contact_details.";
 
         private const string CharacterArgDescription =
             "Which open character to use (matches name, alias or file name). Defaults to the character in the active editor tab.";
@@ -84,6 +86,10 @@ namespace Chummer.Agent
             foreach (AgentTool objTool in CreateGearTools())
                 yield return objTool;
             foreach (AgentTool objTool in CreateMagicTools())
+                yield return objTool;
+            foreach (AgentTool objTool in CreateItemTools())
+                yield return objTool;
+            foreach (AgentTool objTool in CreateCareerTools())
                 yield return objTool;
         }
 
@@ -141,7 +147,8 @@ namespace Chummer.Agent
         {
             CharacterShared frmCharacter = await GetCharacterFormAsync(objArgs, token).ConfigureAwait(false);
             return frmCharacter as CharacterCreate
-                   ?? throw new AgentToolException("This character has finished creation and is in career mode; these tools only work during character creation.");
+                   ?? throw new AgentToolException("This character has finished creation and is in career mode, where this tool doesn't apply. "
+                                                   + "Career mode uses log_karma, log_nuyen, improve_attribute, improve_skill and the other career tools.");
         }
 
         #endregion

@@ -25,6 +25,7 @@ using System.Threading.Tasks;
 using System.Xml;
 using System.Xml.XPath;
 using Chummer.Backend.Enums;
+using Chummer.Backend.Equipment;
 using Chummer.Backend.Uniques;
 using Newtonsoft.Json.Linq;
 
@@ -62,6 +63,29 @@ namespace Chummer.Agent
                                  ("services", "integer", "Services (or tasks) owed. Default 1."),
                                  ("character", "string", CharacterArgDescription)),
                 AddSpiritAsync);
+            yield return new AgentTool("set_spirit_details",
+                "Change a bound spirit or registered sprite the character has, as its panel on the Spirits/Sprites tab does: its type, force or level, "
+                + "services or tasks owed, bound/registered and fettered boxes, its own name, and notes. Only the fields passed change. Works in creation "
+                + "and career mode.",
+                AgentTool.Schema(("id!", "string", "Spirit or sprite id from get_character_summary."),
+                                 ("type", "string", "Spirit or sprite type the character can have, e.g. 'Spirit of Air'."),
+                                 ("force", "integer", "Force (spirits) or level (sprites), up to the character's maximum."),
+                                 ("services", "integer", "Services (spirits) or tasks (sprites) owed."),
+                                 ("bound", "boolean", "Bound (spirits) or registered (sprites)."),
+                                 ("fettered", "boolean", "Fettered (spirits only, where allowed)."),
+                                 ("name", "string", "The spirit's own name."),
+                                 ("notes", "string", "Notes. Empty clears them."),
+                                 ("character", "string", CharacterArgDescription)),
+                SetSpiritDetailsAsync);
+            yield return new AgentTool("bond_focus",
+                "Bond or unbond a focus the character has, as ticking it in the Magic tab's foci list does. Bonding is refused past the character's "
+                + "limits (number of foci up to Magic, total force up to Magic x 5). Bonded foci give their bonuses. Bonding karma counts toward the build.",
+                AgentTool.Schema(("id!", "string", "Focus gear (or stacked focus) id from list_items."),
+                                 ("bonded", "boolean", "True to bond (default), false to unbond."),
+                                 ("forced_value", "string", "Answer for the choice bonding asks: most foci are attuned to a tradition (default: the character's "
+                                                            + "own); summoning, banishing and binding foci to a spirit type."),
+                                 ("character", "string", CharacterArgDescription)),
+                BondFocusAsync);
             yield return new AgentTool("add_initiation",
                 "Raise the initiate grade (or the submersion grade for technomancers) by one, as the editor's Add Initiation/Submersion does. "
                 + "Each grade costs karma and allows one metamagic or echo.",
@@ -272,6 +296,178 @@ namespace Chummer.Agent
                                          + objSpirit.InternalId + ")" + (blnBound
                                              ? "."
                                              : ". It is unbound because the character is at their bound spirit limit."),
+                                         token).ConfigureAwait(false);
+        }
+
+        private static async Task<object> SetSpiritDetailsAsync(JObject objArgs, CancellationToken token)
+        {
+            CharacterShared frmCharacter = await GetCharacterFormAsync(objArgs, token).ConfigureAwait(false);
+            Character objCharacter = frmCharacter.CharacterObject;
+            string strId = RequiredString(objArgs, "id");
+            Spirit objSpirit = null;
+            foreach (Spirit objLoop in await objCharacter.Spirits.ToListAsync(token).ConfigureAwait(false))
+            {
+                if (string.Equals(objLoop.InternalId, strId, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(await objLoop.GetNameAsync(token).ConfigureAwait(false), strId, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(await objLoop.GetCritterNameAsync(token).ConfigureAwait(false), strId, StringComparison.OrdinalIgnoreCase))
+                {
+                    objSpirit = objLoop;
+                    break;
+                }
+            }
+
+            if (objSpirit == null)
+                throw new AgentToolException("The character has no spirit or sprite '" + strId + "'. Use get_character_summary for ids.");
+            bool blnSprite = await objSpirit.GetEntityTypeAsync(token).ConfigureAwait(false) == SpiritType.Sprite;
+            bool blnIgnoreRules = await objCharacter.GetIgnoreRulesAsync(token).ConfigureAwait(false);
+            List<string> lstChanged = new List<string>();
+
+            // The panel's boxes, in the order the editor binds them
+            string strType = objArgs.Value<string>("type")?.Trim();
+            if (!string.IsNullOrEmpty(strType))
+            {
+                using (new FetchSafelyFromSafeObjectPool<List<ListItem>>(Utils.ListItemListPool, out List<ListItem> lstTypes))
+                {
+                    await Spirit.FillSpiritTypeChoicesAsync(objCharacter, await objCharacter.GetMagicTraditionAsync(token).ConfigureAwait(false),
+                                                            blnSprite ? SpiritType.Sprite : SpiritType.Spirit, lstTypes, token).ConfigureAwait(false);
+                    string strMatch = lstTypes.Select(x => x.Value.ToString()).FirstOrDefault(x => string.Equals(x, strType, StringComparison.OrdinalIgnoreCase))
+                                      ?? throw new AgentToolException("'" + strType + "' is not a type this character can have. Options: "
+                                                                      + string.Join(", ", lstTypes.Select(x => x.Value)) + ".");
+                    await objSpirit.SetNameAsync(strMatch, token).ConfigureAwait(false);
+                }
+
+                lstChanged.Add("type");
+            }
+
+            int? intForce = OptionalInt(objArgs, "force");
+            if (intForce.HasValue)
+            {
+                int intMaximum = blnSprite
+                    ? await objCharacter.GetMaxSpriteLevelAsync(token).ConfigureAwait(false)
+                    : await objCharacter.GetMaxSpiritForceAsync(token).ConfigureAwait(false);
+                if (intForce.Value < 1 || intForce.Value > intMaximum && !blnIgnoreRules)
+                    throw new AgentToolException((blnSprite ? "Level" : "Force") + " must be between 1 and " + intMaximum.ToString(GlobalSettings.InvariantCultureInfo) + ".");
+                await objSpirit.SetForceAsync(intForce.Value, token).ConfigureAwait(false);
+                lstChanged.Add(blnSprite ? "level" : "force");
+            }
+
+            int? intServices = OptionalInt(objArgs, "services");
+            if (intServices.HasValue)
+            {
+                if (intServices.Value < 0)
+                    throw new AgentToolException("Services can't be negative.");
+                await objSpirit.SetServicesOwedAsync(intServices.Value, token).ConfigureAwait(false);
+                lstChanged.Add(blnSprite ? "tasks" : "services");
+            }
+
+            bool? blnBound = objArgs.Value<bool?>("bound");
+            if (blnBound.HasValue)
+            {
+                await objSpirit.SetBoundAsync(blnBound.Value, token).ConfigureAwait(false);
+                lstChanged.Add(blnBound.Value ? (blnSprite ? "registered" : "bound") : (blnSprite ? "unregistered" : "unbound"));
+            }
+
+            bool? blnFettered = objArgs.Value<bool?>("fettered");
+            if (blnFettered.HasValue)
+            {
+                if (blnSprite || blnFettered.Value && !await objSpirit.GetAllowFetteringAsync(token).ConfigureAwait(false))
+                    throw new AgentToolException("This " + (blnSprite ? "sprite" : "spirit") + " can't be fettered.");
+                await objSpirit.SetFetteredAsync(blnFettered.Value, token).ConfigureAwait(false);
+                lstChanged.Add(blnFettered.Value ? "fettered" : "not fettered");
+            }
+
+            string strName = objArgs.Value<string>("name");
+            if (strName != null)
+            {
+                await objSpirit.SetCritterNameAsync(strName.Trim(), token).ConfigureAwait(false);
+                lstChanged.Add("name");
+            }
+
+            string strNotes = objArgs.Value<string>("notes");
+            if (strNotes != null)
+            {
+                await objSpirit.SetNotesAsync(strNotes.Replace("\r\n", "\n").Replace("\n", Environment.NewLine), token).ConfigureAwait(false);
+                lstChanged.Add("notes");
+            }
+
+            if (lstChanged.Count == 0)
+                throw new AgentToolException("Pass at least one field to set.");
+            string strResult = "Set " + string.Join(", ", lstChanged) + " for " + await objSpirit.GetNameAsync(token).ConfigureAwait(false) + ".";
+            if (frmCharacter is CharacterCreate frmCreate)
+                return await FinishEditAsync(frmCreate, strResult, token).ConfigureAwait(false);
+            await frmCharacter.MakeDirtyWithCharacterUpdate(token).ConfigureAwait(false);
+            return new { result = strResult };
+        }
+
+        private static async Task<object> BondFocusAsync(JObject objArgs, CancellationToken token)
+        {
+            CharacterCreate frmCreate = await GetCreateFormAsync(objArgs, token).ConfigureAwait(false);
+            Character objCharacter = frmCreate.CharacterObject;
+            string strId = RequiredString(objArgs, "id");
+            // A focus gear anywhere in the character's gear, or a stacked focus
+            Gear objFocusGear = await objCharacter.Gear.DeepFindByIdAsync(strId, token).ConfigureAwait(false);
+            StackedFocus objStack = objFocusGear == null
+                ? await objCharacter.StackedFoci.FindAsync(x => x.InternalId == strId, token).ConfigureAwait(false)
+                : null;
+            if (objFocusGear == null && objStack == null)
+            {
+                OwnedItem objOwned = await FindItemAsync(objCharacter, strId, token).ConfigureAwait(false);
+                objFocusGear = objOwned.Item as Gear;
+            }
+
+            if (objFocusGear != null && objFocusGear.Category != "Foci" && objFocusGear.Category != "Metamagic Foci")
+                throw new AgentToolException(objFocusGear.Name + " isn't a focus.");
+            if (objFocusGear == null && objStack == null)
+                throw new AgentToolException("The character has no focus '" + strId + "'.");
+            string strFocusId = objFocusGear?.InternalId ?? objStack.InternalId;
+            bool blnBond = objArgs.Value<bool?>("bonded") != false;
+            bool blnIsBonded = objFocusGear?.Bonded ?? objStack.Bonded;
+            if (blnBond == blnIsBonded)
+                throw new AgentToolException("That focus is already " + (blnBond ? "bonded." : "unbonded."));
+            if (blnBond)
+            {
+                // The editor pre-answers the focus's choice from its Extra text, so answer it there
+                if (objFocusGear != null && string.IsNullOrEmpty(objFocusGear.Extra))
+                {
+                    string strForced = objArgs.Value<string>("forced_value")?.Trim();
+                    if (string.IsNullOrEmpty(strForced) && objFocusGear.Bonus?["selecttradition"] != null)
+                    {
+                        Tradition objTradition = await objCharacter.GetMagicTraditionAsync(token).ConfigureAwait(false);
+                        if (objTradition != null && !string.IsNullOrEmpty(objTradition.Name))
+                            strForced = await objTradition.GetCurrentDisplayNameAsync(token).ConfigureAwait(false);
+                    }
+
+                    if (!string.IsNullOrEmpty(strForced))
+                        objFocusGear.Extra = strForced;
+                }
+
+                List<string> lstBonded = new List<string>();
+                foreach (Focus objFocus in await objCharacter.Foci.ToListAsync(token).ConfigureAwait(false))
+                {
+                    if (objFocus.GearObject != null)
+                        lstBonded.Add(objFocus.GearObject.InternalId);
+                }
+
+                foreach (StackedFocus objLoop in await objCharacter.StackedFoci.ToListAsync(token).ConfigureAwait(false))
+                {
+                    if (objLoop.Bonded)
+                        lstBonded.Add(objLoop.InternalId);
+                }
+
+                string strRefusal = await frmCreate.BondFocusAsync(strFocusId, lstBonded, token).ConfigureAwait(false);
+                if (strRefusal != null)
+                    throw new AgentToolException(string.IsNullOrEmpty(strRefusal)
+                                                     ? "The focus was not bonded (a choice it needed was cancelled)."
+                                                     : await LanguageManager.GetStringAsync(strRefusal, GlobalSettings.DefaultLanguage, token: token).ConfigureAwait(false));
+            }
+            else
+                await frmCreate.UnbondFocusAsync(strFocusId, token).ConfigureAwait(false);
+
+            await frmCreate.RefreshFociListAsync(token).ConfigureAwait(false);
+            return await FinishEditAsync(frmCreate, (blnBond ? "Bonded " : "Unbonded ")
+                                                    + (objFocusGear != null
+                                                        ? await objFocusGear.GetCurrentDisplayNameAsync(token).ConfigureAwait(false)
+                                                        : await objStack.GetCurrentDisplayNameAsync(token).ConfigureAwait(false)) + ".",
                                          token).ConfigureAwait(false);
         }
 

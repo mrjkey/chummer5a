@@ -720,103 +720,143 @@ namespace Chummer
                 objThisLocker = await objHasLock.LockObject.EnterUpgradeableReadLockAsync(token).ConfigureAwait(false);
             try
             {
-                string strTemp;
-                Action<string> funcAttributePropertySetter;
-
-                if (cboChangedAttribute == cboAttack)
-                {
-                    strTemp = objThis.Attack;
-                    funcAttributePropertySetter = (x => objThis.Attack = x);
-                }
-                else if (cboChangedAttribute == cboSleaze)
-                {
-                    strTemp = objThis.Sleaze;
-                    funcAttributePropertySetter = (x => objThis.Sleaze = x);
-                }
-                else if (cboChangedAttribute == cboDataProcessing)
-                {
-                    strTemp = objThis.DataProcessing;
-                    funcAttributePropertySetter = (x => objThis.DataProcessing = x);
-                }
-                else if (cboChangedAttribute == cboFirewall)
-                {
-                    strTemp = objThis.Firewall;
-                    funcAttributePropertySetter = (x => objThis.Firewall = x);
-                }
-                else
+                if (cboChangedAttribute != cboAttack && cboChangedAttribute != cboSleaze
+                    && cboChangedAttribute != cboDataProcessing && cboChangedAttribute != cboFirewall)
                     return false;
 
                 int intCurrentIndex = await cboChangedAttribute.DoThreadSafeFuncAsync(x => x.SelectedIndex, token)
                     .ConfigureAwait(false);
-                bool blnRefreshCharacter = false;
-                bool blnDPChanged = cboChangedAttribute == cboDataProcessing;
-                // Find the combo with the same value as this one and change it to the missing value.
+                // Find the combo with the same value as this one; the two attributes swap values.
+                string strOther = null;
                 if (cboChangedAttribute != cboAttack &&
                     await cboAttack.DoThreadSafeFuncAsync(x => x.SelectedIndex, token).ConfigureAwait(false) ==
                     intCurrentIndex)
-                {
-                    funcAttributePropertySetter.Invoke(objThis.Attack);
-                    objThis.Attack = strTemp;
-                    blnRefreshCharacter = true;
-                }
+                    strOther = "Attack";
                 else if (cboChangedAttribute != cboSleaze &&
                          await cboSleaze.DoThreadSafeFuncAsync(x => x.SelectedIndex, token).ConfigureAwait(false) ==
                          intCurrentIndex)
-                {
-                    funcAttributePropertySetter.Invoke(objThis.Sleaze);
-                    objThis.Sleaze = strTemp;
-                    blnRefreshCharacter = true;
-                }
-                else if (!blnDPChanged &&
+                    strOther = "Sleaze";
+                else if (cboChangedAttribute != cboDataProcessing &&
                          await cboDataProcessing.DoThreadSafeFuncAsync(x => x.SelectedIndex, token)
                              .ConfigureAwait(false) ==
                          intCurrentIndex)
-                {
-                    funcAttributePropertySetter.Invoke(objThis.DataProcessing);
-                    objThis.DataProcessing = strTemp;
-                    blnRefreshCharacter = true;
-                    blnDPChanged = true;
-                }
+                    strOther = "Data Processing";
                 else if (cboChangedAttribute != cboFirewall &&
                          await cboFirewall.DoThreadSafeFuncAsync(x => x.SelectedIndex, token).ConfigureAwait(false) ==
                          intCurrentIndex)
-                {
-                    funcAttributePropertySetter.Invoke(objThis.Firewall);
-                    objThis.Firewall = strTemp;
-                    blnRefreshCharacter = true;
-                }
+                    strOther = "Firewall";
 
-                if (blnRefreshCharacter)
+                if (strOther != null)
                 {
+                    string strChanged = cboChangedAttribute == cboAttack
+                        ? "Attack"
+                        : cboChangedAttribute == cboSleaze
+                            ? "Sleaze"
+                            : cboChangedAttribute == cboDataProcessing
+                                ? "Data Processing"
+                                : "Firewall";
+                    bool blnReturn = await objThis.SwapMatrixAttributesAsync(objCharacter, strChanged, strOther, token).ConfigureAwait(false);
                     await objThis
                         .RefreshMatrixAttributeComboBoxesAsync(cboAttack, cboSleaze, cboDataProcessing, cboFirewall,
                             token)
                         .ConfigureAwait(false);
-                    if (await objThis.IsActiveCommlinkAsync(objCharacter, token).ConfigureAwait(false) ||
-                        await objThis.IsHomeNodeAsync(objCharacter, token).ConfigureAwait(false))
-                    {
-                        if (blnDPChanged)
-                        {
-                            if (await objThis.IsActiveCommlinkAsync(objCharacter, token).ConfigureAwait(false))
-                            {
-                                if (await objThis.IsHomeNodeAsync(objCharacter, token).ConfigureAwait(false))
-                                    await objCharacter.OnMultiplePropertyChangedAsync(token,
-                                        nameof(Character.MatrixInitiativeValue),
-                                        nameof(Character.MatrixInitiativeColdValue),
-                                        nameof(Character.MatrixInitiativeHotValue)).ConfigureAwait(false);
-                                else
-                                    await objCharacter.OnMultiplePropertyChangedAsync(token,
-                                        nameof(Character.MatrixInitiativeColdValue),
-                                        nameof(Character.MatrixInitiativeHotValue)).ConfigureAwait(false);
-                            }
-                            else
-                                await objCharacter
-                                    .OnPropertyChangedAsync(nameof(Character.MatrixInitiativeValue), token)
-                                    .ConfigureAwait(false);
-                        }
+                    return blnReturn;
+                }
 
-                        return true;
+                return false;
+            }
+            finally
+            {
+                if (objThisLocker != null)
+                    await objThisLocker.DisposeAsync().ConfigureAwait(false);
+            }
+        }
+
+        /// <summary>
+        /// Swap two matrix attributes of an item that allows it (e.g. a cyberdeck's Attack and Firewall), as picking a value in one of its
+        /// attribute combo boxes does. Returns true if the change affects the character's matrix initiative or other matrix values.
+        /// </summary>
+        /// <param name="objThis">Item whose attributes to swap.</param>
+        /// <param name="objCharacter">Character that owns the item.</param>
+        /// <param name="strFirst">"Attack", "Sleaze", "Data Processing" or "Firewall".</param>
+        /// <param name="strSecond">"Attack", "Sleaze", "Data Processing" or "Firewall".</param>
+        /// <param name="token">Cancellation token to listen to.</param>
+        public static async Task<bool> SwapMatrixAttributesAsync(this IHasMatrixAttributes objThis, Character objCharacter,
+            string strFirst, string strSecond, CancellationToken token = default)
+        {
+            token.ThrowIfCancellationRequested();
+            if (objThis == null || strFirst == strSecond)
+                return false;
+            if (objCharacter == null)
+                throw new ArgumentNullException(nameof(objCharacter));
+            string GetValue(string strAttribute)
+            {
+                switch (strAttribute)
+                {
+                    case "Attack":
+                        return objThis.Attack;
+                    case "Sleaze":
+                        return objThis.Sleaze;
+                    case "Data Processing":
+                        return objThis.DataProcessing;
+                    case "Firewall":
+                        return objThis.Firewall;
+                    default:
+                        throw new ArgumentOutOfRangeException(nameof(strAttribute), strAttribute);
+                }
+            }
+
+            void SetValue(string strAttribute, string strValue)
+            {
+                switch (strAttribute)
+                {
+                    case "Attack":
+                        objThis.Attack = strValue;
+                        break;
+                    case "Sleaze":
+                        objThis.Sleaze = strValue;
+                        break;
+                    case "Data Processing":
+                        objThis.DataProcessing = strValue;
+                        break;
+                    case "Firewall":
+                        objThis.Firewall = strValue;
+                        break;
+                }
+            }
+
+            IAsyncDisposable objThisLocker = null;
+            if (objThis is IHasLockObject objHasLock)
+                objThisLocker = await objHasLock.LockObject.EnterUpgradeableReadLockAsync(token).ConfigureAwait(false);
+            try
+            {
+                string strFirstValue = GetValue(strFirst);
+                SetValue(strFirst, GetValue(strSecond));
+                SetValue(strSecond, strFirstValue);
+                if (await objThis.IsActiveCommlinkAsync(objCharacter, token).ConfigureAwait(false) ||
+                    await objThis.IsHomeNodeAsync(objCharacter, token).ConfigureAwait(false))
+                {
+                    if (strFirst == "Data Processing" || strSecond == "Data Processing")
+                    {
+                        if (await objThis.IsActiveCommlinkAsync(objCharacter, token).ConfigureAwait(false))
+                        {
+                            if (await objThis.IsHomeNodeAsync(objCharacter, token).ConfigureAwait(false))
+                                await objCharacter.OnMultiplePropertyChangedAsync(token,
+                                    nameof(Character.MatrixInitiativeValue),
+                                    nameof(Character.MatrixInitiativeColdValue),
+                                    nameof(Character.MatrixInitiativeHotValue)).ConfigureAwait(false);
+                            else
+                                await objCharacter.OnMultiplePropertyChangedAsync(token,
+                                    nameof(Character.MatrixInitiativeColdValue),
+                                    nameof(Character.MatrixInitiativeHotValue)).ConfigureAwait(false);
+                        }
+                        else
+                            await objCharacter
+                                .OnPropertyChangedAsync(nameof(Character.MatrixInitiativeValue), token)
+                                .ConfigureAwait(false);
                     }
+
+                    return true;
                 }
 
                 return false;

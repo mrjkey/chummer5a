@@ -55,65 +55,88 @@ namespace Chummer
             this.UpdateParentForToolTipControls();
         }
 
+        /// <summary>
+        /// Put a character on other settings, as OK does. Switching an existing character in creation to settings with another build method
+        /// converts the build after <paramref name="funcConfirmBuildMethodSwitch"/> agrees.
+        /// </summary>
+        /// <param name="objCharacter">Character to change.</param>
+        /// <param name="objSelectedGameplayOption">Settings to use.</param>
+        /// <param name="blnIgnoreRules">Whether the character ignores the rules.</param>
+        /// <param name="blnForExistingCharacter">Whether the character already exists (rather than being created).</param>
+        /// <param name="eStartingBuildMethod">The build method the character had before.</param>
+        /// <param name="funcConfirmBuildMethodSwitch">Asked before converting the build to another build method; false keeps the old settings.</param>
+        /// <param name="token">Cancellation token to listen to.</param>
+        /// <returns>Whether the settings were applied.</returns>
+        internal static async Task<bool> ApplySettingsAsync(Character objCharacter, CharacterSettings objSelectedGameplayOption, bool blnIgnoreRules,
+                                                            bool blnForExistingCharacter, CharacterBuildMethod eStartingBuildMethod,
+                                                            Func<CharacterBuildMethod, CancellationToken, Task<bool>> funcConfirmBuildMethodSwitch,
+                                                            CancellationToken token = default)
+        {
+            CharacterBuildMethod eSelectedBuildMethod = objSelectedGameplayOption.BuildMethod;
+            if (blnForExistingCharacter
+                && !await objCharacter.GetCreatedAsync(token).ConfigureAwait(false)
+                && await (await objCharacter.GetSettingsAsync(token).ConfigureAwait(false)).GetBuildMethodAsync(
+                    token).ConfigureAwait(false) == await objCharacter.GetEffectiveBuildMethodAsync(token).ConfigureAwait(false)
+                && eSelectedBuildMethod != eStartingBuildMethod)
+            {
+                if (!await funcConfirmBuildMethodSwitch(eSelectedBuildMethod, token).ConfigureAwait(false))
+                    return false;
+                string strOldCharacterSettingsKey =
+                    await objCharacter.GetSettingsKeyAsync(token).ConfigureAwait(false);
+                await objCharacter.SetSettingsKeyAsync(
+                        (await SettingsManager.GetLoadedCharacterSettingsAsync(token)
+                            .ConfigureAwait(false))
+                        .FirstOrDefault(x => ReferenceEquals(x.Value, objSelectedGameplayOption)).Key,
+                        token)
+                    .ConfigureAwait(false);
+                // If the character is loading, make sure we only switch build methods after we've loaded, otherwise we might cause all sorts of nastiness
+                if (objCharacter.IsLoading)
+                    await objCharacter
+                        .EnqueuePostLoadAsyncMethodAsync(
+                            x => objCharacter.SwitchBuildMethods(eStartingBuildMethod, eSelectedBuildMethod,
+                                strOldCharacterSettingsKey, x), token).ConfigureAwait(false);
+                else if (!await objCharacter.SwitchBuildMethods(eStartingBuildMethod, eSelectedBuildMethod,
+                             strOldCharacterSettingsKey, token).ConfigureAwait(false))
+                    return false;
+            }
+            else
+            {
+                await objCharacter.SetSettingsKeyAsync((await SettingsManager.GetLoadedCharacterSettingsAsync(token).ConfigureAwait(false))
+                    .FirstOrDefault(
+                        x => ReferenceEquals(
+                            x.Value, objSelectedGameplayOption)).Key, token).ConfigureAwait(false);
+            }
+
+            await objCharacter.SetIgnoreRulesAsync(blnIgnoreRules, token).ConfigureAwait(false);
+            return true;
+        }
+
         private async void cmdOK_Click(object sender, EventArgs e)
         {
             try
             {
                 if (!(await cboCharacterSetting.DoThreadSafeFuncAsync(x => x.SelectedValue, _objGenericToken).ConfigureAwait(false) is CharacterSettings objSelectedGameplayOption))
                     return;
-                CharacterBuildMethod eSelectedBuildMethod = objSelectedGameplayOption.BuildMethod;
-                if (_blnForExistingCharacter
-                    && !await _objCharacter.GetCreatedAsync(_objGenericToken).ConfigureAwait(false)
-                    && await (await _objCharacter.GetSettingsAsync(_objGenericToken).ConfigureAwait(false)).GetBuildMethodAsync(
-                        _objGenericToken).ConfigureAwait(false) == await _objCharacter.GetEffectiveBuildMethodAsync(_objGenericToken).ConfigureAwait(false)
-                    && eSelectedBuildMethod != _eStartingBuildMethod)
-                {
-                    if (await Program.ShowScrollableMessageBoxAsync(this,
-                            StringExtensions.FastFormat(
-                                await LanguageManager
-                                    .GetStringAsync("Message_SelectBP_SwitchBuildMethods", token: _objGenericToken)
-                                    .ConfigureAwait(false),
-                                await LanguageManager
-                                    .GetStringAsync("String_" + eSelectedBuildMethod, token: _objGenericToken)
-                                    .ConfigureAwait(false),
-                                await LanguageManager
-                                    .GetStringAsync("String_" + _eStartingBuildMethod, token: _objGenericToken)
-                                    .ConfigureAwait(false)),
-                            await LanguageManager
-                                .GetStringAsync("MessageTitle_SelectBP_SwitchBuildMethods", token: _objGenericToken)
-                                .ConfigureAwait(false), MessageBoxButtons.YesNo,
-                            MessageBoxIcon.Warning, token: _objGenericToken).ConfigureAwait(false) != DialogResult.Yes)
-                        return;
-                    string strOldCharacterSettingsKey =
-                        await _objCharacter.GetSettingsKeyAsync(_objGenericToken).ConfigureAwait(false);
-                    await _objCharacter.SetSettingsKeyAsync(
-                            (await SettingsManager.GetLoadedCharacterSettingsAsync(_objGenericToken)
-                                .ConfigureAwait(false))
-                            .FirstOrDefault(x => ReferenceEquals(x.Value, objSelectedGameplayOption)).Key,
-                            _objGenericToken)
-                        .ConfigureAwait(false);
-                    // If the character is loading, make sure we only switch build methods after we've loaded, otherwise we might cause all sorts of nastiness
-                    if (_objCharacter.IsLoading)
-                        await _objCharacter
-                            .EnqueuePostLoadAsyncMethodAsync(
-                                x => _objCharacter.SwitchBuildMethods(_eStartingBuildMethod, eSelectedBuildMethod,
-                                    strOldCharacterSettingsKey, x), _objGenericToken).ConfigureAwait(false);
-                    else if (!await _objCharacter.SwitchBuildMethods(_eStartingBuildMethod, eSelectedBuildMethod,
-                                 strOldCharacterSettingsKey, _objGenericToken).ConfigureAwait(false))
-                        return;
-                }
-                else
-                {
-                    await _objCharacter.SetSettingsKeyAsync((await SettingsManager.GetLoadedCharacterSettingsAsync(_objGenericToken).ConfigureAwait(false))
-                        .FirstOrDefault(
-                            x => ReferenceEquals(
-                                x.Value, objSelectedGameplayOption)).Key, _objGenericToken).ConfigureAwait(false);
-                }
-
-                await _objCharacter
-                    .SetIgnoreRulesAsync(
-                        await chkIgnoreRules.DoThreadSafeFuncAsync(x => x.Checked, _objGenericToken)
-                            .ConfigureAwait(false), _objGenericToken).ConfigureAwait(false);
+                if (!await ApplySettingsAsync(_objCharacter, objSelectedGameplayOption,
+                                              await chkIgnoreRules.DoThreadSafeFuncAsync(x => x.Checked, _objGenericToken).ConfigureAwait(false),
+                                              _blnForExistingCharacter, _eStartingBuildMethod,
+                                              async (eSelectedBuildMethod, t) => await Program.ShowScrollableMessageBoxAsync(this,
+                                                      StringExtensions.FastFormat(
+                                                          await LanguageManager
+                                                              .GetStringAsync("Message_SelectBP_SwitchBuildMethods", token: t)
+                                                              .ConfigureAwait(false),
+                                                          await LanguageManager
+                                                              .GetStringAsync("String_" + eSelectedBuildMethod, token: t)
+                                                              .ConfigureAwait(false),
+                                                          await LanguageManager
+                                                              .GetStringAsync("String_" + _eStartingBuildMethod, token: t)
+                                                              .ConfigureAwait(false)),
+                                                      await LanguageManager
+                                                          .GetStringAsync("MessageTitle_SelectBP_SwitchBuildMethods", token: t)
+                                                          .ConfigureAwait(false), MessageBoxButtons.YesNo,
+                                                      MessageBoxIcon.Warning, token: t).ConfigureAwait(false) == DialogResult.Yes,
+                                              _objGenericToken).ConfigureAwait(false))
+                    return;
                 await this.DoThreadSafeAsync(x =>
                 {
                     x.DialogResult = DialogResult.OK;

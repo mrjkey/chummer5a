@@ -18,6 +18,7 @@
  */
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -231,6 +232,18 @@ namespace Chummer.Tests
             Assert.IsTrue(blnIsError, strText);
             StringAssert.Contains(strText, "Spirit of Air");
             await CallOnAsync(strMage, "add_spirit", new JObject { ["type"] = "Spirit of Air", ["force"] = 2, ["services"] = 2 }, token).ConfigureAwait(false);
+            // Spirit details change in place
+            JToken objNewSpirit = ((JArray)((JObject)await CallOnAsync(strMage, "get_character_summary", new JObject(), token).ConfigureAwait(false))["spirits"]).Single();
+            await CallOnAsync(strMage, "set_spirit_details", new JObject
+            {
+                ["id"] = objNewSpirit.Value<string>("id"), ["services"] = 3, ["name"] = "Zephyr", ["notes"] = "Owes me one."
+            }, token).ConfigureAwait(false);
+            (bool blnSpiritError, string strSpiritText) = await TryCallOnAsync(strMage, "set_spirit_details", new JObject
+            {
+                ["id"] = objNewSpirit.Value<string>("id"), ["force"] = 99
+            }, token).ConfigureAwait(false);
+            Assert.IsTrue(blnSpiritError, strSpiritText);
+            await CallOnAsync(strMage, "set_spirit_details", new JObject { ["id"] = "Zephyr", ["services"] = 2 }, token).ConfigureAwait(false);
             await CallOnAsync(strMage, "add_mentor_spirit", new JObject { ["mentor"] = "Dog" }, token).ConfigureAwait(false);
             await CallOnAsync(strMage, "set_specialization", new JObject { ["skill"] = "Spellcasting", ["specialization"] = "Combat Spells" }, token).ConfigureAwait(false);
             objResult = (JObject)await CallOnAsync(strMage, "add_initiation", new JObject(), token).ConfigureAwait(false);
@@ -245,6 +258,20 @@ namespace Chummer.Tests
                 await CallOnAsync(strMage, "add_metamagic", new JObject { ["id"] = "Centering" }, token).ConfigureAwait(false);
             else
                 StringAssert.Contains(strText, "isn't enabled");
+            // A bonded focus counts toward the build; too many or too strong foci are refused
+            objResult = (JObject)await CallOnAsync(strMage, "add_gear", new JObject { ["id"] = "Power Focus", ["rating"] = 1 }, token).ConfigureAwait(false);
+            string strFocus = objResult.Value<string>("result").Split(new[] { "(id " }, StringSplitOptions.None)[1].Split(',')[0];
+            int intKarmaBeforeBonding = objResult.Value<int>("karmaRemaining");
+            objResult = (JObject)await CallOnAsync(strMage, "bond_focus", new JObject { ["id"] = strFocus }, token).ConfigureAwait(false);
+            Assert.IsTrue(objResult.Value<int>("karmaRemaining") < intKarmaBeforeBonding, objResult.ToString());
+            (blnIsError, strText) = await TryCallOnAsync(strMage, "bond_focus", new JObject { ["id"] = strFocus }, token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, "Bonding twice must be refused: " + strText);
+            JArray objMageItems = (JArray)await CallOnAsync(strMage, "list_items", new JObject { ["kind"] = "gear" }, token).ConfigureAwait(false);
+            Assert.IsTrue(objMageItems.Any(x => x.Value<string>("id") == strFocus && x.Value<bool?>("bonded") == true), objMageItems.ToString());
+            objResult = (JObject)await CallOnAsync(strMage, "bond_focus", new JObject { ["id"] = strFocus, ["bonded"] = false }, token).ConfigureAwait(false);
+            Assert.AreEqual(intKarmaBeforeBonding, objResult.Value<int>("karmaRemaining"), objResult.ToString());
+            await CallOnAsync(strMage, "remove_item", new JObject { ["id"] = strFocus }, token).ConfigureAwait(false);
+
             JObject objSummary = (JObject)await CallOnAsync(strMage, "get_character_summary", new JObject(), token).ConfigureAwait(false);
             JToken objSpirit = ((JArray)objSummary["spirits"]).Single();
             Assert.AreEqual("Spirit of Air", objSpirit.Value<string>("type"));
@@ -353,6 +380,359 @@ namespace Chummer.Tests
             Assert.AreEqual(1, ((JArray)objSummary["magic"]["arts"]).Count, objSummary["magic"].ToString());
             Assert.AreEqual(1, ((JArray)objSummary["magic"]["metamagics"]).Count, objSummary["magic"].ToString());
             Assert.AreEqual(1, ((JArray)((JArray)objSummary["martialArts"]).Single()["techniques"]).Count, objSummary["martialArts"].ToString());
+        }
+
+        [TestMethod]
+        public void ItemDetailsStateAndValues()
+        {
+            RunWithMainForm((frmMain, t) => RunItemDetailsStateAndValuesScenarioAsync(t));
+        }
+
+        /// <summary>
+        /// Every item a character has, from list_items, flattened.
+        /// </summary>
+        private static async Task<List<JToken>> ListAllItemsAsync(string strCharacter, CancellationToken token)
+        {
+            JArray objItems = (JArray)await CallOnAsync(strCharacter, "list_items", new JObject(), token).ConfigureAwait(false);
+            List<JToken> lstReturn = new List<JToken>();
+            Stack<JToken> stkItems = new Stack<JToken>(objItems);
+            while (stkItems.Count > 0)
+            {
+                JToken objItem = stkItems.Pop();
+                lstReturn.Add(objItem);
+                if (objItem["contains"] is JArray objChildren)
+                    foreach (JToken objChild in objChildren)
+                        stkItems.Push(objChild);
+            }
+
+            return lstReturn;
+        }
+
+        private static async Task RunItemDetailsStateAndValuesScenarioAsync(CancellationToken token)
+        {
+            const string strRunner = "Agent Test Runner";
+            await CallToolOkAsync("create_character", new JObject
+            {
+                ["metatype"] = "Human",
+                ["priorities"] = new JObject { ["heritage"] = "D", ["attributes"] = "B", ["talent"] = "E", ["skills"] = "C", ["resources"] = "A" },
+                ["talent"] = "Mundane",
+                ["name"] = strRunner
+            }, token).ConfigureAwait(false);
+            await CallOnAsync(strRunner, "add_gear", new JObject { ["id"] = "Hermes Ikon" }, token).ConfigureAwait(false);
+            await CallOnAsync(strRunner, "add_gear", new JObject { ["id"] = "Erika MCD-1" }, token).ConfigureAwait(false);
+            await CallOnAsync(strRunner, "add_gear", new JObject { ["id"] = "Medkit", ["rating"] = 2 }, token).ConfigureAwait(false);
+            await CallOnAsync(strRunner, "add_weapon", new JObject { ["id"] = "Ares Predator V" }, token).ConfigureAwait(false);
+            await CallOnAsync(strRunner, "add_armor", new JObject { ["id"] = "Armor Jacket" }, token).ConfigureAwait(false);
+            await CallOnAsync(strRunner, "add_cyberware", new JObject { ["id"] = "Datajack" }, token).ConfigureAwait(false);
+            await CallOnAsync(strRunner, "add_lifestyle", new JObject { ["id"] = "Low" }, token).ConfigureAwait(false);
+            List<JToken> lstItems = await ListAllItemsAsync(strRunner, token).ConfigureAwait(false);
+            string IdOf(string strName) => lstItems.First(x => x.Value<string>("name").StartsWith(strName, StringComparison.Ordinal)).Value<string>("id");
+            string strPredator = IdOf("Ares Predator V");
+            string strMedkit = IdOf("Medkit");
+            string strJacket = IdOf("Armor Jacket");
+            string strDatajack = IdOf("Datajack");
+            string strLifestyle = lstItems.First(x => x.Value<string>("kind") == "lifestyle").Value<string>("id");
+            string strDeck = IdOf("Erika MCD-1");
+            string strIkon = IdOf("Hermes Ikon");
+            // The pistol's built-in smartgun shows up as something fitted to it
+            Assert.IsTrue(lstItems.First(x => x.Value<string>("id") == strPredator)["contains"] is JArray, "list_items must show what is fitted to a weapon");
+
+            // Details: notes, custom names, locations
+            await CallOnAsync(strRunner, "set_item_details", new JObject { ["id"] = strPredator, ["custom_name"] = "Old Faithful", ["notes"] = "A gift.\nKeep it clean." }, token)
+                .ConfigureAwait(false);
+            await CallOnAsync(strRunner, "manage_location", new JObject { ["action"] = "add", ["name"] = "Go Bag" }, token).ConfigureAwait(false);
+            await CallOnAsync(strRunner, "set_item_details", new JObject { ["id"] = strMedkit, ["location"] = "Go Bag" }, token).ConfigureAwait(false);
+            (bool blnIsError, string strText) = await TryCallOnAsync(strRunner, "set_item_details", new JObject { ["id"] = strMedkit, ["location"] = "Nowhere" }, token)
+                .ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+            (blnIsError, strText) = await TryCallOnAsync(strRunner, "set_item_details", new JObject { ["id"] = strDatajack, ["custom_name"] = "Jack" }, token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, "Cyberware has no custom name: " + strText);
+            lstItems = await ListAllItemsAsync(strRunner, token).ConfigureAwait(false);
+            JToken objPredator = lstItems.First(x => x.Value<string>("id") == strPredator);
+            Assert.AreEqual("Old Faithful", objPredator.Value<string>("customName"), objPredator.ToString());
+            StringAssert.Contains(objPredator.Value<string>("notes"), "Keep it clean.");
+            Assert.AreEqual("Go Bag", lstItems.First(x => x.Value<string>("id") == strMedkit).Value<string>("location"));
+            await CallOnAsync(strRunner, "manage_location", new JObject { ["action"] = "rename", ["name"] = "Go Bag", ["new_name"] = "Bug-Out Bag" }, token).ConfigureAwait(false);
+            lstItems = await ListAllItemsAsync(strRunner, token).ConfigureAwait(false);
+            Assert.AreEqual("Bug-Out Bag", lstItems.First(x => x.Value<string>("id") == strMedkit).Value<string>("location"));
+            await CallOnAsync(strRunner, "manage_location", new JObject { ["action"] = "remove", ["name"] = "Bug-Out Bag" }, token).ConfigureAwait(false);
+            lstItems = await ListAllItemsAsync(strRunner, token).ConfigureAwait(false);
+            Assert.IsNull(lstItems.First(x => x.Value<string>("id") == strMedkit).Value<string>("location"));
+
+            // State: equipping armor changes the armor value; the active commlink can move
+            int intArmor = int.Parse(((JObject)await CallOnAsync(strRunner, "export_character", new JObject { ["section"] = "armor" }, token).ConfigureAwait(false)).Value<string>("armor"));
+            await CallOnAsync(strRunner, "set_item_state", new JObject { ["id"] = strJacket, ["equipped"] = false }, token).ConfigureAwait(false);
+            int intUnarmored = int.Parse(((JObject)await CallOnAsync(strRunner, "export_character", new JObject { ["section"] = "armor" }, token).ConfigureAwait(false)).Value<string>("armor"));
+            Assert.IsTrue(intUnarmored < intArmor, intArmor + " -> " + intUnarmored);
+            await CallOnAsync(strRunner, "set_item_state", new JObject { ["id"] = strJacket, ["equipped"] = true }, token).ConfigureAwait(false);
+            await CallOnAsync(strRunner, "set_item_state", new JObject { ["id"] = strIkon, ["active_commlink"] = true }, token).ConfigureAwait(false);
+            lstItems = await ListAllItemsAsync(strRunner, token).ConfigureAwait(false);
+            Assert.IsTrue(lstItems.First(x => x.Value<string>("id") == strIkon).Value<bool?>("activeCommlink") == true);
+            (blnIsError, strText) = await TryCallOnAsync(strRunner, "set_item_state", new JObject { ["id"] = strMedkit, ["active_commlink"] = true }, token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+            (blnIsError, strText) = await TryCallOnAsync(strRunner, "set_item_state", new JObject { ["id"] = strMedkit, ["black_market_discount"] = true }, token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+
+            // Values: ratings within limits, quantities, grades and months all change the budget
+            JObject objResult = (JObject)await CallOnAsync(strRunner, "set_item_values", new JObject { ["id"] = strMedkit, ["rating"] = 4 }, token).ConfigureAwait(false);
+            decimal decNuyen = objResult.Value<decimal>("nuyenRemaining");
+            (blnIsError, strText) = await TryCallOnAsync(strRunner, "set_item_values", new JObject { ["id"] = strMedkit, ["rating"] = 40 }, token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+            objResult = (JObject)await CallOnAsync(strRunner, "set_item_values", new JObject { ["id"] = strMedkit, ["quantity"] = 2 }, token).ConfigureAwait(false);
+            Assert.IsTrue(objResult.Value<decimal>("nuyenRemaining") < decNuyen, objResult.ToString());
+            decimal decEssence = objResult.Value<decimal>("essence");
+            objResult = (JObject)await CallOnAsync(strRunner, "set_item_values", new JObject { ["id"] = strDatajack, ["grade"] = "Alphaware" }, token).ConfigureAwait(false);
+            Assert.IsTrue(objResult.Value<decimal>("essence") > decEssence, objResult.ToString());
+            (blnIsError, strText) = await TryCallOnAsync(strRunner, "set_item_values", new JObject { ["id"] = strDatajack, ["grade"] = "Godware" }, token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+            StringAssert.Contains(strText, "Options:");
+            decNuyen = objResult.Value<decimal>("nuyenRemaining");
+            objResult = (JObject)await CallOnAsync(strRunner, "set_item_values", new JObject { ["id"] = strLifestyle, ["months"] = 3 }, token).ConfigureAwait(false);
+            Assert.IsTrue(objResult.Value<decimal>("nuyenRemaining") < decNuyen, objResult.ToString());
+            (blnIsError, strText) = await TryCallOnAsync(strRunner, "set_item_values", new JObject { ["id"] = strJacket, ["rating"] = 2 }, token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+
+            // A cyberdeck's attributes can be rearranged
+            objResult = (JObject)await CallOnAsync(strRunner, "swap_matrix_attributes", new JObject { ["id"] = strDeck, ["first"] = "Attack", ["second"] = "Firewall" }, token)
+                .ConfigureAwait(false);
+            StringAssert.Contains(objResult.Value<string>("result"), "Swapped Attack and Firewall");
+            (blnIsError, strText) = await TryCallOnAsync(strRunner, "swap_matrix_attributes", new JObject { ["id"] = strIkon, ["first"] = "Attack", ["second"] = "Firewall" }, token)
+                .ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+
+            // Gear inside other things: a program in a commlink, gear in armor, a commlink in headware, gear in a vehicle
+            await CallOnAsync(strRunner, "add_gear", new JObject { ["id"] = "Browse", ["parent"] = strIkon }, token).ConfigureAwait(false);
+            await CallOnAsync(strRunner, "add_gear", new JObject { ["id"] = "Micro-Transceiver", ["parent"] = strJacket }, token).ConfigureAwait(false);
+            await CallOnAsync(strRunner, "add_cyberware", new JObject { ["id"] = "Commlink" }, token).ConfigureAwait(false);
+            lstItems = await ListAllItemsAsync(strRunner, token).ConfigureAwait(false);
+            string strHeadware = lstItems.First(x => x.Value<string>("kind") == "cyberware" && x.Value<string>("name").StartsWith("Commlink", StringComparison.Ordinal))
+                                         .Value<string>("id");
+            (blnIsError, strText) = await TryCallOnAsync(strRunner, "add_gear", new JObject { ["id"] = "Medkit", ["parent"] = strHeadware }, token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+            StringAssert.Contains(strText, "Commlinks");
+            await CallOnAsync(strRunner, "add_gear", new JObject { ["id"] = "Meta Link", ["parent"] = strHeadware }, token).ConfigureAwait(false);
+            JObject objVehicles = (JObject)await CallToolOkAsync("search_catalog", new JObject { ["kind"] = "vehicle", ["limit"] = 1, ["character"] = strRunner }, token)
+                .ConfigureAwait(false);
+            await CallOnAsync(strRunner, "add_vehicle", new JObject { ["id"] = objVehicles["items"][0].Value<string>("id") }, token).ConfigureAwait(false);
+            lstItems = await ListAllItemsAsync(strRunner, token).ConfigureAwait(false);
+            string strCar = lstItems.First(x => x.Value<string>("kind") == "vehicle").Value<string>("id");
+            await CallOnAsync(strRunner, "add_gear", new JObject { ["id"] = "Medkit", ["parent"] = strCar }, token).ConfigureAwait(false);
+            lstItems = await ListAllItemsAsync(strRunner, token).ConfigureAwait(false);
+            bool HasChild(string strParentId, string strChild) => lstItems.First(x => x.Value<string>("id") == strParentId)["contains"] is JArray objChildren
+                                                                  && objChildren.Any(x => x.Value<string>("name").StartsWith(strChild, StringComparison.Ordinal));
+            Assert.IsTrue(HasChild(strIkon, "Browse"), "Browse is not in the commlink");
+            Assert.IsTrue(HasChild(strJacket, "Micro-Transceiver"), "The transceiver is not in the armor");
+            Assert.IsTrue(HasChild(strHeadware, "Meta Link"), "The commlink is not in the headware");
+            Assert.IsTrue(HasChild(strCar, "Medkit"), "The medkit is not in the vehicle");
+
+            // Weapons inside other things: an underbarrel weapon, a drone's weapon mount, and an accessory on the mounted weapon
+            await CallOnAsync(strRunner, "add_weapon", new JObject { ["id"] = "AK-97" }, token).ConfigureAwait(false);
+            (blnIsError, strText) = await TryCallOnAsync(strRunner, "add_weapon", new JObject { ["id"] = "Underbarrel Grapple Gun" }, token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, "An underbarrel weapon can't be bought on its own: " + strText);
+            lstItems = await ListAllItemsAsync(strRunner, token).ConfigureAwait(false);
+            string strRifle = lstItems.First(x => x.Value<string>("kind") == "weapon" && x.Value<string>("name").StartsWith("AK-97", StringComparison.Ordinal)).Value<string>("id");
+            await CallOnAsync(strRunner, "add_weapon", new JObject { ["id"] = "Underbarrel Grapple Gun", ["parent"] = strRifle }, token).ConfigureAwait(false);
+            (blnIsError, strText) = await TryCallOnAsync(strRunner, "add_weapon", new JObject { ["id"] = "Ares Predator V", ["parent"] = strRifle }, token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, "Only underbarrel weapons go under a weapon: " + strText);
+            await CallOnAsync(strRunner, "add_vehicle", new JObject { ["id"] = "GM-Nissan Doberman (Medium)" }, token).ConfigureAwait(false);
+            lstItems = await ListAllItemsAsync(strRunner, token).ConfigureAwait(false);
+            string strMount = lstItems.First(x => x.Value<string>("kind") == "weapon mount").Value<string>("id");
+            (blnIsError, strText) = await TryCallOnAsync(strRunner, "add_weapon", new JObject { ["id"] = "Combat Knife", ["parent"] = strMount }, token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+            StringAssert.Contains(strText, "Assault Rifles");
+            objResult = (JObject)await CallOnAsync(strRunner, "add_weapon", new JObject { ["id"] = "AK-97", ["parent"] = strMount }, token).ConfigureAwait(false);
+            string strMountedRifle = objResult.Value<string>("result").Split(new[] { "(id " }, StringSplitOptions.None)[1].TrimEnd(')', '.');
+            await CallOnAsync(strRunner, "add_weapon_accessory", new JObject { ["weapon"] = strMountedRifle, ["id"] = "Laser Sight" }, token).ConfigureAwait(false);
+            lstItems = await ListAllItemsAsync(strRunner, token).ConfigureAwait(false);
+            Assert.IsTrue(HasChild(strRifle, "Underbarrel Grapple Gun"), "The grapple gun is not under the rifle");
+            Assert.IsTrue(HasChild(strMount, "AK-97"), "The rifle is not in the mount");
+            Assert.IsTrue(HasChild(strMountedRifle, "Laser Sight"), "The laser sight is not on the mounted rifle");
+
+            // Primary arm and portraits
+            await CallOnAsync(strRunner, "set_character_details", new JObject { ["primary_arm"] = "Left" }, token).ConfigureAwait(false);
+            Assert.AreEqual("Left", ((JObject)await CallOnAsync(strRunner, "export_character", new JObject { ["section"] = "primaryarm" }, token).ConfigureAwait(false))
+                                    .Value<string>("primaryarm"));
+            string strImage = Path.Combine(Path.GetTempPath(), "AgentToolsTest_" + Guid.NewGuid().ToString("N") + ".png");
+            try
+            {
+                using (System.Drawing.Bitmap bmpTest = new System.Drawing.Bitmap(4, 4))
+                    bmpTest.Save(strImage, System.Drawing.Imaging.ImageFormat.Png);
+                await CallOnAsync(strRunner, "manage_portrait", new JObject { ["action"] = "add", ["path"] = strImage }, token).ConfigureAwait(false);
+                objResult = (JObject)await CallOnAsync(strRunner, "manage_portrait", new JObject { ["action"] = "add", ["path"] = strImage }, token).ConfigureAwait(false);
+                Assert.AreEqual(2, objResult.Value<int>("portraits"), objResult.ToString());
+                await CallOnAsync(strRunner, "manage_portrait", new JObject { ["action"] = "set_main", ["index"] = 2 }, token).ConfigureAwait(false);
+                objResult = (JObject)await CallOnAsync(strRunner, "manage_portrait", new JObject { ["action"] = "remove", ["index"] = 1 }, token).ConfigureAwait(false);
+                Assert.AreEqual(1, objResult.Value<int>("portraits"), objResult.ToString());
+                (blnIsError, strText) = await TryCallOnAsync(strRunner, "manage_portrait", new JObject { ["action"] = "remove", ["index"] = 5 }, token).ConfigureAwait(false);
+                Assert.IsTrue(blnIsError, strText);
+            }
+            finally
+            {
+                // Chummer keeps the image file open while the portrait is loaded, as it does in the editor
+                try
+                {
+                    if (File.Exists(strImage))
+                        File.Delete(strImage);
+                }
+                catch (IOException)
+                {
+                    // Left for the temp folder cleanup
+                }
+            }
+
+            // Moving to other settings with the same build method opens up more books
+            (blnIsError, strText) = await TryCallOnAsync(strRunner, "add_martial_art", new JObject { ["id"] = "Krav Maga" }, token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+            await CallOnAsync(strRunner, "set_build_settings", new JObject { ["settings"] = "Full House" }, token).ConfigureAwait(false);
+            await CallOnAsync(strRunner, "add_martial_art", new JObject { ["id"] = "Krav Maga" }, token).ConfigureAwait(false);
+            JArray objAllSettings = (JArray)await CallToolOkAsync("list_build_settings", null, token).ConfigureAwait(false);
+            JToken objKarmaSettings = objAllSettings.FirstOrDefault(x => x.Value<string>("buildMethod") == "Karma");
+            if (objKarmaSettings != null)
+            {
+                (blnIsError, strText) = await TryCallOnAsync(strRunner, "set_build_settings", new JObject { ["settings"] = objKarmaSettings.Value<string>("key") }, token)
+                    .ConfigureAwait(false);
+                Assert.IsTrue(blnIsError, "Switching build methods needs convert_build: " + strText);
+                StringAssert.Contains(strText, "convert_build");
+            }
+
+            // Vehicle weapons have a firing mode; modular cyberware moves between mounts (Chrome Flesh, enabled by Full House)
+            await CallOnAsync(strRunner, "set_item_state", new JObject { ["id"] = strMountedRifle, ["fire_mode"] = "RemoteOperated" }, token).ConfigureAwait(false);
+            (blnIsError, strText) = await TryCallOnAsync(strRunner, "set_item_state", new JObject { ["id"] = strRifle, ["fire_mode"] = "RemoteOperated" }, token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, "Only vehicle weapons have a firing mode: " + strText);
+            objResult = (JObject)await CallOnAsync(strRunner, "add_cyberware", new JObject { ["id"] = "Modular Connector, Wrist", ["forced_value"] = "Right" }, token)
+                .ConfigureAwait(false);
+            string strConnector = objResult.Value<string>("result").Split(new[] { "(id " }, StringSplitOptions.None)[1].Split(')')[0];
+            objResult = (JObject)await CallOnAsync(strRunner, "add_cyberware", new JObject { ["id"] = "Obvious Hand, Modular", ["forced_value"] = "Right" }, token)
+                .ConfigureAwait(false);
+            string strHand = objResult.Value<string>("result").Split(new[] { "(id " }, StringSplitOptions.None)[1].Split(')')[0];
+            objResult = (JObject)await CallOnAsync(strRunner, "move_modular_cyberware", new JObject { ["id"] = strHand }, token).ConfigureAwait(false);
+            StringAssert.Contains(objResult.Value<string>("result"), strConnector);
+            await CallOnAsync(strRunner, "move_modular_cyberware", new JObject { ["id"] = strHand, ["mount"] = strConnector }, token).ConfigureAwait(false);
+            lstItems = await ListAllItemsAsync(strRunner, token).ConfigureAwait(false);
+            Assert.IsTrue(HasChild(strConnector, "Obvious Hand"), "The hand is not on the wrist connector");
+
+            // Lifestyles from the Select Lifestyle dialog: a name, qualities, roommates
+            objResult = (JObject)await CallOnAsync(strRunner, "add_lifestyle", new JObject
+            {
+                ["id"] = "Medium", ["name"] = "Safehouse", ["qualities"] = new JArray("DocWagon Contract, Basic")
+            }, token).ConfigureAwait(false);
+            string strSafehouse = objResult.Value<string>("result").Split(new[] { "(id " }, StringSplitOptions.None)[1].TrimEnd(')', '.');
+            decimal decWithContract = objResult.Value<decimal>("nuyenRemaining");
+            lstItems = await ListAllItemsAsync(strRunner, token).ConfigureAwait(false);
+            JToken objSafehouse = lstItems.First(x => x.Value<string>("id") == strSafehouse);
+            StringAssert.Contains(objSafehouse.Value<string>("name"), "Safehouse");
+            Assert.IsTrue(HasChild(strSafehouse, "DocWagon"), objSafehouse.ToString());
+            objResult = (JObject)await CallOnAsync(strRunner, "edit_lifestyle", new JObject
+            {
+                ["id"] = strSafehouse, ["remove_qualities"] = new JArray("DocWagon Contract, Basic"), ["roommates"] = 2, ["split_cost"] = true
+            }, token).ConfigureAwait(false);
+            Assert.IsTrue(objResult.Value<decimal>("nuyenRemaining") > decWithContract, objResult.ToString());
+            (blnIsError, strText) = await TryCallOnAsync(strRunner, "edit_lifestyle", new JObject { ["id"] = strSafehouse, ["area"] = 2 }, token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, "Points only apply to advanced lifestyles: " + strText);
+
+            // Pets come from the Add Pet button and need no ratings
+            await CallOnAsync(strRunner, "add_contact", new JObject { ["kind"] = "pet", ["name"] = "Rex" }, token).ConfigureAwait(false);
+            JObject objWithPet = (JObject)await CallOnAsync(strRunner, "get_character_summary", new JObject(), token).ConfigureAwait(false);
+            Assert.IsTrue(((JArray)objWithPet["contacts"]).Any(x => x.Value<string>("name") == "Rex" && x.Value<string>("type") == "Pet"), objWithPet["contacts"].ToString());
+
+            // Nested items can be removed directly
+            string strLaser = ((JArray)lstItems.First(x => x.Value<string>("id") == strMountedRifle)["contains"])
+                              .First(x => x.Value<string>("name").StartsWith("Laser Sight", StringComparison.Ordinal)).Value<string>("id");
+            await CallOnAsync(strRunner, "remove_item", new JObject { ["id"] = strLaser }, token).ConfigureAwait(false);
+            lstItems = await ListAllItemsAsync(strRunner, token).ConfigureAwait(false);
+            Assert.IsFalse(HasChild(strMountedRifle, "Laser Sight"), "The laser sight was not removed");
+
+            // Skills: notes, a knowledge skill's name and type, native languages, and removing knowledge skills
+            await CallOnAsync(strRunner, "add_knowledge_skill", new JObject { ["name"] = "Seattle Gangs", ["type"] = "Street", ["base"] = 1 }, token).ConfigureAwait(false);
+            await CallOnAsync(strRunner, "set_skill_details", new JObject { ["skill"] = "Seattle Gangs", ["name"] = "Redmond Gangs", ["type"] = "Academic" }, token)
+                .ConfigureAwait(false);
+            await CallOnAsync(strRunner, "set_skill_details", new JObject { ["skill"] = "Pistols", ["notes"] = "Learned from dad." }, token).ConfigureAwait(false);
+            await CallOnAsync(strRunner, "add_knowledge_skill", new JObject { ["name"] = "Japanese", ["type"] = "Language", ["base"] = 1 }, token).ConfigureAwait(false);
+            (blnIsError, strText) = await TryCallOnAsync(strRunner, "set_skill_details", new JObject { ["skill"] = "Redmond Gangs", ["native_language"] = true }, token)
+                .ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, "Only languages can be native: " + strText);
+            JObject objSkills = (JObject)await CallOnAsync(strRunner, "get_character_summary", new JObject(), token).ConfigureAwait(false);
+            JToken objGangs = ((JArray)objSkills["knowledgeSkills"]).FirstOrDefault(x => x.Value<string>("name") == "Redmond Gangs");
+            Assert.IsNotNull(objGangs, objSkills["knowledgeSkills"].ToString());
+            Assert.AreEqual("LOG", objGangs.Value<string>("attribute"), "Academic knowledge uses Logic");
+            (blnIsError, strText) = await TryCallOnAsync(strRunner, "remove_item", new JObject { ["id"] = "Pistols" }, token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, "Active skills can't be removed: " + strText);
+            await CallOnAsync(strRunner, "remove_item", new JObject { ["id"] = "Redmond Gangs" }, token).ConfigureAwait(false);
+            objSkills = (JObject)await CallOnAsync(strRunner, "get_character_summary", new JObject(), token).ConfigureAwait(false);
+            Assert.IsFalse(((JArray)objSkills["knowledgeSkills"]).Any(x => x.Value<string>("name") == "Redmond Gangs"), "The knowledge skill was not removed");
+        }
+
+        [TestMethod]
+        public void CareerMode()
+        {
+            string strSaveFile = Path.Combine(Path.GetTempPath(), "AgentToolsTest_" + Guid.NewGuid().ToString("N") + ".chum5");
+            try
+            {
+                RunWithMainForm((frmMain, t) => RunCareerModeScenarioAsync(frmMain, strSaveFile, t));
+            }
+            finally
+            {
+                if (File.Exists(strSaveFile))
+                    File.Delete(strSaveFile);
+            }
+        }
+
+        private static async Task RunCareerModeScenarioAsync(ChummerMainForm frmMain, string strSaveFile, CancellationToken token)
+        {
+            const string strVet = "Agent Test Veteran";
+            await CallToolOkAsync("create_character", new JObject
+            {
+                ["metatype"] = "Human",
+                ["priorities"] = new JObject { ["heritage"] = "D", ["attributes"] = "B", ["talent"] = "E", ["skills"] = "A", ["resources"] = "C" },
+                ["talent"] = "Mundane",
+                ["name"] = strVet
+            }, token).ConfigureAwait(false);
+            (bool blnIsError, string strText) = await TryCallOnAsync(strVet, "log_karma", new JObject { ["amount"] = 5, ["reason"] = "Too early" }, token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, "Career tools need a created character: " + strText);
+            await CallOnAsync(strVet, "set_skill", new JObject { ["name"] = "Pistols", ["base"] = 3 }, token).ConfigureAwait(false);
+
+            // Finishing creation reopens the character in career mode
+            JObject objResult = (JObject)await CallOnAsync(strVet, "finish_creation", new JObject { ["path"] = strSaveFile }, token).ConfigureAwait(false);
+            StringAssert.Contains(objResult.Value<string>("result"), "career");
+            JArray objOpen = (JArray)await CallToolOkAsync("list_open_characters", null, token).ConfigureAwait(false);
+            Assert.IsTrue(objOpen.Any(x => x.Value<string>("name") == strVet && x.Value<string>("mode") == "career"), objOpen.ToString());
+
+            // Karma and nuyen go through the expense log
+            objResult = (JObject)await CallOnAsync(strVet, "log_karma", new JObject { ["amount"] = 40, ["reason"] = "Run: the docks job" }, token).ConfigureAwait(false);
+            int intKarma = objResult.Value<int>("karma");
+            Assert.IsTrue(intKarma >= 40, objResult.ToString());
+            objResult = (JObject)await CallOnAsync(strVet, "log_nuyen", new JObject { ["amount"] = 5000, ["reason"] = "Run pay" }, token).ConfigureAwait(false);
+            decimal decNuyen = objResult.Value<decimal>("nuyen");
+            objResult = (JObject)await CallOnAsync(strVet, "log_nuyen", new JObject { ["amount"] = -1000, ["reason"] = "Bribe" }, token).ConfigureAwait(false);
+            Assert.AreEqual(decNuyen - 1000, objResult.Value<decimal>("nuyen"), objResult.ToString());
+            (blnIsError, strText) = await TryCallOnAsync(strVet, "log_nuyen", new JObject { ["amount"] = -100000000, ["reason"] = "A yacht" }, token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+
+            // Attributes, skills, knowledge skills and specializations cost karma
+            objResult = (JObject)await CallOnAsync(strVet, "improve_attribute", new JObject { ["name"] = "BOD" }, token).ConfigureAwait(false);
+            Assert.IsTrue(objResult.Value<int>("karma") < intKarma, objResult.ToString());
+            intKarma = objResult.Value<int>("karma");
+            objResult = (JObject)await CallOnAsync(strVet, "improve_skill", new JObject { ["name"] = "Pistols" }, token).ConfigureAwait(false);
+            StringAssert.Contains(objResult.Value<string>("result"), "is now 4");
+            Assert.IsTrue(objResult.Value<int>("karma") < intKarma, objResult.ToString());
+            await CallOnAsync(strVet, "add_knowledge_skill", new JObject { ["name"] = "Seattle Gangs", ["type"] = "Street" }, token).ConfigureAwait(false);
+            objResult = (JObject)await CallOnAsync(strVet, "improve_skill", new JObject { ["name"] = "Seattle Gangs" }, token).ConfigureAwait(false);
+            StringAssert.Contains(objResult.Value<string>("result"), "is now 1");
+            intKarma = objResult.Value<int>("karma");
+            objResult = (JObject)await CallOnAsync(strVet, "set_specialization", new JObject { ["skill"] = "Pistols", ["specialization"] = "Semi-Automatics" }, token)
+                .ConfigureAwait(false);
+            Assert.IsTrue(objResult.Value<int>("karma") < intKarma, objResult.ToString());
+            (blnIsError, strText) = await TryCallOnAsync(strVet, "improve_skill", new JObject { ["name"] = "Pistols", ["times"] = 50 }, token).ConfigureAwait(false);
+            Assert.IsFalse(blnIsError, "Raising as far as karma allows is fine: " + strText);
+            (blnIsError, strText) = await TryCallOnAsync(strVet, "set_attribute", new JObject { ["name"] = "BOD", ["karma"] = 1 }, token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+            StringAssert.Contains(strText, "improve_attribute");
+
+            // Burning Edge lowers it for good
+            JObject objSummary = (JObject)await CallOnAsync(strVet, "get_character_summary", new JObject(), token).ConfigureAwait(false);
+            int intEdge = ((JArray)objSummary["specialAttributes"]).First(x => x.Value<string>("name") == "EDG").Value<int>("value");
+            objResult = (JObject)await CallOnAsync(strVet, "burn_edge", new JObject(), token).ConfigureAwait(false);
+            StringAssert.Contains(objResult.Value<string>("result"), "Edge is now " + (intEdge - 1).ToString(System.Globalization.CultureInfo.InvariantCulture));
         }
 
         [TestMethod]
@@ -630,6 +1010,24 @@ namespace Chummer.Tests
             JObject objAfter = (JObject)await CallToolOkAsync("get_character_summary", null, token).ConfigureAwait(false);
             Assert.AreEqual(intContacts + 1, ((JArray)objAfter["contacts"]).Count);
             Assert.IsTrue(((JArray)objAfter["knowledgeSkills"]).Any(x => x.Value<string>("name") == "Agent Test Lore"), objAfter["knowledgeSkills"].ToString());
+            // Contact details and ratings edit the existing contact; out-of-range ratings are refused
+            JObject objContactEdit = (JObject)await CallToolOkAsync("set_contact_details", new JObject
+            {
+                ["id"] = "Agent Test Fixer",
+                ["role"] = "Fixer",
+                ["hobbies_vice"] = "Gambling",
+                ["loyalty"] = 3
+            }, token).ConfigureAwait(false);
+            Assert.IsNotNull(objContactEdit["karmaRemaining"], objContactEdit.ToString());
+            // The export has a lone contact as an object and several as an array
+            JToken objExportedContacts = ((JObject)await CallToolOkAsync("export_character", new JObject { ["section"] = "contacts" }, token).ConfigureAwait(false))["contacts"]["contact"];
+            JToken objExportedContact = (objExportedContacts is JArray objContactArray ? (IEnumerable<JToken>)objContactArray : new[] { objExportedContacts })
+                                        .First(x => x.Value<string>("name") == "Agent Test Fixer");
+            Assert.AreEqual("Fixer", objExportedContact.Value<string>("role"), objExportedContact.ToString());
+            Assert.AreEqual("Gambling", objExportedContact.Value<string>("hobbiesvice"), objExportedContact.ToString());
+            Assert.AreEqual("3", objExportedContact.Value<string>("loyalty"), objExportedContact.ToString());
+            (bool blnContactError, string strContactText) = await CallToolAsync("set_contact_details", new JObject { ["id"] = "Agent Test Fixer", ["loyalty"] = 9 }, token).ConfigureAwait(false);
+            Assert.IsTrue(blnContactError, strContactText);
             await CallToolOkAsync("remove_item", new JObject { ["id"] = "Agent Test Fixer" }, token).ConfigureAwait(false);
 
             // Personal details change only the fields passed, and multi-line text keeps its paragraphs

@@ -80,6 +80,17 @@ namespace Chummer.Agent
                                  ("with_karma", "boolean", "Pay with karma instead of skill points (the skill's Karma checkbox). Default: karma once the skill points are used up."),
                                  ("character", "string", CharacterArgDescription)),
                 SetSpecializationAsync);
+            yield return new AgentTool("set_skill_details",
+                "Change a skill the character has, as its row on the Skills tab does: notes, a knowledge skill's name and type (which sets its linked "
+                + "attribute), and whether a language is native. Only the fields passed change. Works in creation and career mode. "
+                + "Use remove_item with the skill's name to delete a knowledge or exotic skill.",
+                AgentTool.Schema(("skill!", "string", "Skill name, e.g. 'Pistols', 'Seattle Gangs', 'English'."),
+                                 ("notes", "string", "Notes. Empty clears them."),
+                                 ("name", "string", "New name, for knowledge skills that can be renamed."),
+                                 ("type", "string", "Knowledge skill type: Academic, Interest, Language, Professional or Street."),
+                                 ("native_language", "boolean", "Whether this language is a native language (uses a native language slot)."),
+                                 ("character", "string", CharacterArgDescription)),
+                SetSkillDetailsAsync);
             yield return new AgentTool("add_exotic_skill",
                 "Add an exotic skill (search_catalog kind='skill' with exotic=True, e.g. 'Exotic Ranged Weapon') for a specific weapon or vehicle, "
                 + "as the skills tab's Add Exotic Skill does, then optionally set its ranks.",
@@ -142,12 +153,38 @@ namespace Chummer.Agent
                                  ("character", "string", CharacterArgDescription)),
                 SetKarmaForNuyenAsync);
             yield return new AgentTool("add_contact",
-                "Add a contact paid for with contact points (CHA x 3 by default) and then karma.",
+                "Add a contact paid for with contact points (CHA x 3 by default) and then karma, as the Contacts tab's Add Contact does. With `kind` "
+                + "it adds an enemy (connection and incidence, where the settings use enemies) or a pet instead, as Add Enemy and Add Pet do.",
                 AgentTool.Schema(("name", "string", "Contact's name or description, e.g. 'Fixer - Mama Rosa'."),
-                                 ("connection!", "integer", "Connection rating 1-12."),
-                                 ("loyalty!", "integer", "Loyalty rating 1-6."),
+                                 ("kind", "string", "'contact' (default), 'enemy' or 'pet'."),
+                                 ("connection", "integer", "Connection rating 1-12 (contacts and enemies; required for them)."),
+                                 ("loyalty", "integer", "Loyalty rating 1-6, or an enemy's incidence (contacts and enemies; required for them)."),
                                  ("character", "string", CharacterArgDescription)),
                 AddContactAsync);
+            yield return new AgentTool("set_contact_details",
+                "Edit a contact the character has, as its panel on the Contacts tab does: who they are (role, location, metatype, gender, age, type, "
+                + "preferred payment, hobbies/vice, personal life, notes) and their connection, loyalty and group/family/blackmail/free boxes. Only the "
+                + "fields passed change; an empty string clears a text field. Works in creation and career mode (`free` only during creation).",
+                AgentTool.Schema(("id!", "string", "Contact id from get_character_summary, or its name."),
+                                 ("name", "string", "New name or description."),
+                                 ("role", "string", "What they do, e.g. 'Fixer', 'Bartender'."),
+                                 ("location", "string", "Where they are, e.g. 'Redmond Barrens'."),
+                                 ("metatype", "string", "Metatype, e.g. 'Ork'."),
+                                 ("gender", "string", "Gender."),
+                                 ("age", "string", "Age, e.g. 'Young', 'Middle-Aged', or a number."),
+                                 ("type", "string", "Contact type, e.g. 'Legwork', 'Networking', 'Swag', 'Shadow Service'."),
+                                 ("preferred_payment", "string", "How they like to be paid, e.g. 'Cash (Nuyen)', 'Favors'."),
+                                 ("hobbies_vice", "string", "Hobby or vice, e.g. 'Gambling'."),
+                                 ("personal_life", "string", "Personal life, e.g. 'Divorced', 'Family'."),
+                                 ("notes", "string", "Free-form notes about the contact."),
+                                 ("connection", "integer", "Connection rating (up to the settings' maximum, 12 by default)."),
+                                 ("loyalty", "integer", "Loyalty rating 1-6."),
+                                 ("group", "boolean", "The contact is a group (loyalty then comes from the group rules)."),
+                                 ("family", "boolean", "The contact is family."),
+                                 ("blackmail", "boolean", "The character has blackmail material on the contact."),
+                                 ("free", "boolean", "The contact is free (no contact points or karma), where the settings allow it."),
+                                 ("character", "string", CharacterArgDescription)),
+                SetContactDetailsAsync);
             yield return new AgentTool("set_character_details",
                 "Set the character's personal details, as typing into the editor's Description tab does: name, alias, looks, concept, description, "
                 + "background and notes. Only the fields passed change; an empty string clears one. Works in creation and career mode.",
@@ -166,10 +203,12 @@ namespace Chummer.Agent
                                  ("background", "string", "Background story. Plain text; blank lines separate paragraphs."),
                                  ("notes", "string", "Character notes."),
                                  ("game_notes", "string", "Notes for the GM or game."),
+                                 ("primary_arm", "string", "'Right' or 'Left' (not for ambidextrous characters)."),
                                  ("character", "string", CharacterArgDescription)),
                 SetCharacterDetailsAsync);
             yield return new AgentTool("remove_item",
-                "Remove something the character has, by the id (or name) shown in get_character_summary: a spell, adept power, contact, spirit or sprite, "
+                "Remove something the character has, by the id (or name) shown in list_items or get_character_summary, however deeply it is nested: "
+                + "a spell, adept power, contact, spirit or sprite, knowledge or exotic skill, location, "
                 + "complex form, martial art or technique, metamagic or echo, initiation grade, weapon (or accessory), armor (or mod), gear, "
                 + "cyberware/bioware, vehicle (or mod) or lifestyle. Bought equipment is refunded. Use remove_quality for qualities, including a mentor spirit.",
                 AgentTool.Schema(("id!", "string", "Id from get_character_summary."),
@@ -457,8 +496,11 @@ namespace Chummer.Agent
 
         private static async Task<object> AddKnowledgeSkillAsync(JObject objArgs, CancellationToken token)
         {
-            CharacterCreate frmCreate = await GetCreateFormAsync(objArgs, token).ConfigureAwait(false);
-            Character objCharacter = frmCreate.CharacterObject;
+            CharacterShared frmCharacter = await GetCharacterFormAsync(objArgs, token).ConfigureAwait(false);
+            bool blnCareer = frmCharacter is CharacterCareer;
+            if (blnCareer && (objArgs["base"] != null || objArgs["karma"] != null))
+                throw new AgentToolException("In career mode a new knowledge skill starts at 0; add it, then raise it with improve_skill.");
+            Character objCharacter = frmCharacter.CharacterObject;
             string strName = RequiredString(objArgs, "name");
             SkillsSection objSkillsSection = await objCharacter.GetSkillsSectionAsync(token).ConfigureAwait(false);
             List<Skill> lstExisting = (await objSkillsSection.KnowledgeSkills.ToListAsync(token).ConfigureAwait(false)).Cast<Skill>().ToList();
@@ -499,6 +541,17 @@ namespace Chummer.Agent
                 }
             }
 
+            if (blnCareer)
+            {
+                if (!blnNew)
+                    throw new AgentToolException("The character already knows " + objSkill.Name + "; raise it with improve_skill.");
+                return await FinishCareerEditAsync(frmCharacter, "Added " + await objSkill.GetCurrentDisplayNameAsync(token).ConfigureAwait(false)
+                                                                 + (await objSkill.GetIsNativeLanguageAsync(token).ConfigureAwait(false)
+                                                                     ? " (native language)."
+                                                                     : " at rating 0; raise it with improve_skill."), token).ConfigureAwait(false);
+            }
+
+            CharacterCreate frmCreate = (CharacterCreate)frmCharacter;
             int? intBase = OptionalInt(objArgs, "base");
             int? intKarma = OptionalInt(objArgs, "karma");
             if (intBase != null || intKarma != null)
@@ -512,7 +565,10 @@ namespace Chummer.Agent
 
         private static async Task<object> SetSpecializationAsync(JObject objArgs, CancellationToken token)
         {
-            CharacterCreate frmCreate = await GetCreateFormAsync(objArgs, token).ConfigureAwait(false);
+            CharacterShared frmCharacter = await GetCharacterFormAsync(objArgs, token).ConfigureAwait(false);
+            if (frmCharacter is CharacterCareer)
+                return await AddCareerSpecializationAsync(frmCharacter, objArgs, token).ConfigureAwait(false);
+            CharacterCreate frmCreate = (CharacterCreate)frmCharacter;
             Character objCharacter = frmCreate.CharacterObject;
             string strName = RequiredString(objArgs, "skill");
             SkillsSection objSkillsSection = await objCharacter.GetSkillsSectionAsync(token).ConfigureAwait(false);
@@ -543,6 +599,98 @@ namespace Chummer.Agent
                                          string.IsNullOrEmpty(strSpec)
                                              ? "Removed the specialization from " + strDisplayName + "."
                                              : strDisplayName + " is now specialized in " + strSpec + ".", token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Career mode: learn a new specialization with karma, as the skill's Add Specialization button does.
+        /// </summary>
+        private static async Task<object> AddCareerSpecializationAsync(CharacterShared frmCareer, JObject objArgs, CancellationToken token)
+        {
+            Character objCharacter = frmCareer.CharacterObject;
+            string strName = RequiredString(objArgs, "skill");
+            SkillsSection objSkillsSection = await objCharacter.GetSkillsSectionAsync(token).ConfigureAwait(false);
+            Skill objSkill = await FindSkillAsync(await objSkillsSection.Skills.ToListAsync(token).ConfigureAwait(false), strName, token).ConfigureAwait(false)
+                             ?? await FindSkillAsync((await objSkillsSection.KnowledgeSkills.ToListAsync(token).ConfigureAwait(false)).Cast<Skill>(), strName, token)
+                                 .ConfigureAwait(false)
+                             ?? throw new AgentToolException("The character has no skill named '" + strName + "'.");
+            string strSpec = objArgs.Value<string>("specialization")?.Trim();
+            if (string.IsNullOrEmpty(strSpec))
+                throw new AgentToolException("In career mode specializations can only be added; pass `specialization`.");
+            if (!await objSkill.GetCanHaveSpecsAsync(token).ConfigureAwait(false) && !await objCharacter.GetIgnoreRulesAsync(token).ConfigureAwait(false))
+                throw new AgentToolException(objSkill.Name + " can't take a specialization right now (it needs a rating, and it can't be part of an unbroken skill group).");
+            int intSpecs = await (await objSkill.GetSpecializationsAsync(token).ConfigureAwait(false)).GetCountAsync(token).ConfigureAwait(false);
+            int intKarma = await objCharacter.GetKarmaAsync(token).ConfigureAwait(false);
+            // AddSpecialization works out and pays the karma price, and does nothing if the character can't pay it
+            await objSkill.AddSpecialization(strSpec, token).ConfigureAwait(false);
+            if (await (await objSkill.GetSpecializationsAsync(token).ConfigureAwait(false)).GetCountAsync(token).ConfigureAwait(false) == intSpecs)
+                throw new AgentToolException("The character doesn't have enough karma for a specialization (" + intKarma.ToString(GlobalSettings.InvariantCultureInfo) + " left).");
+            return await FinishCareerEditAsync(frmCareer, objSkill.Name + " is now specialized in " + strSpec + " ("
+                                                          + (intKarma - await objCharacter.GetKarmaAsync(token).ConfigureAwait(false)).ToString(GlobalSettings.InvariantCultureInfo)
+                                                          + " karma).", token).ConfigureAwait(false);
+        }
+
+        private static async Task<object> SetSkillDetailsAsync(JObject objArgs, CancellationToken token)
+        {
+            CharacterShared frmCharacter = await GetCharacterFormAsync(objArgs, token).ConfigureAwait(false);
+            Character objCharacter = frmCharacter.CharacterObject;
+            SkillsSection objSkillsSection = await objCharacter.GetSkillsSectionAsync(token).ConfigureAwait(false);
+            string strSkill = RequiredString(objArgs, "skill");
+            Skill objSkill = await FindSkillAsync(await objSkillsSection.Skills.ToListAsync(token).ConfigureAwait(false), strSkill, token).ConfigureAwait(false)
+                             ?? await FindSkillAsync((await objSkillsSection.KnowledgeSkills.ToListAsync(token).ConfigureAwait(false)).Cast<Skill>().ToList(), strSkill, token)
+                                 .ConfigureAwait(false)
+                             ?? throw new AgentToolException("The character has no skill '" + strSkill + "'.");
+            KnowledgeSkill objKnowledge = objSkill as KnowledgeSkill;
+            List<string> lstChanged = new List<string>();
+
+            JToken objNotes = objArgs["notes"];
+            if (objNotes != null && objNotes.Type != JTokenType.Null)
+            {
+                // The skill's Notes menu item
+                await objSkill.SetNotesAsync(objNotes.ToString().Replace("\r\n", "\n").Replace("\n", Environment.NewLine), token).ConfigureAwait(false);
+                lstChanged.Add("notes");
+            }
+
+            string strName = objArgs.Value<string>("name")?.Trim();
+            if (!string.IsNullOrEmpty(strName))
+            {
+                if (objKnowledge == null || !await objKnowledge.GetAllowNameChangeAsync(token).ConfigureAwait(false))
+                    throw new AgentToolException(strSkill + " can't be renamed.");
+                await objKnowledge.SetWritableNameAsync(strName, token).ConfigureAwait(false);
+                lstChanged.Add("name");
+            }
+
+            string strType = objArgs.Value<string>("type")?.Trim();
+            if (!string.IsNullOrEmpty(strType))
+            {
+                if (objKnowledge == null || !await objKnowledge.GetAllowTypeChangeAsync(token).ConfigureAwait(false))
+                    throw new AgentToolException(strSkill + "'s type can't be changed.");
+                IReadOnlyDictionary<string, string> dicTypes = await objSkillsSection.GetKnowledgeSkillCategoriesMapAsync(token).ConfigureAwait(false);
+                string strMatch = dicTypes.Keys.FirstOrDefault(x => string.Equals(x, strType, StringComparison.OrdinalIgnoreCase))
+                                  ?? throw new AgentToolException("Unknown knowledge skill type '" + strType + "'. Use one of: " + string.Join(", ", dicTypes.Keys) + ".");
+                await objKnowledge.SetTypeAsync(strMatch, token).ConfigureAwait(false);
+                lstChanged.Add("type");
+            }
+
+            bool? blnNative = objArgs.Value<bool?>("native_language");
+            if (blnNative.HasValue)
+            {
+                if (objKnowledge == null || !await objKnowledge.GetIsLanguageAsync(token).ConfigureAwait(false))
+                    throw new AgentToolException(strSkill + " isn't a language.");
+                if (blnNative.Value && !await objKnowledge.GetIsNativeLanguageAsync(token).ConfigureAwait(false)
+                                    && !await objSkillsSection.GetHasAvailableNativeLanguageSlotsAsync(token).ConfigureAwait(false))
+                    throw new AgentToolException("The character has no native language slots left.");
+                // The Native checkbox
+                await objKnowledge.SetIsNativeLanguageAsync(blnNative.Value, token).ConfigureAwait(false);
+                lstChanged.Add(blnNative.Value ? "native" : "not native");
+            }
+
+            if (lstChanged.Count == 0)
+                throw new AgentToolException("Pass at least one field to set: notes, name, type or native_language.");
+            string strResult = "Set " + string.Join(", ", lstChanged) + " for " + await objSkill.GetCurrentDisplayNameAsync(token).ConfigureAwait(false) + ".";
+            if (frmCharacter is CharacterCreate frmCreate)
+                return await FinishEditAsync(frmCreate, strResult, token).ConfigureAwait(false);
+            await frmCharacter.MakeDirtyWithCharacterUpdate(token).ConfigureAwait(false);
+            return new { result = strResult };
         }
 
         private static async Task<object> AddExoticSkillAsync(JObject objArgs, CancellationToken token)
@@ -824,19 +972,48 @@ namespace Chummer.Agent
         {
             CharacterCreate frmCreate = await GetCreateFormAsync(objArgs, token).ConfigureAwait(false);
             Character objCharacter = frmCreate.CharacterObject;
-            int intConnection = OptionalInt(objArgs, "connection") ?? throw new AgentToolException("`connection` is required.");
-            int intLoyalty = OptionalInt(objArgs, "loyalty") ?? throw new AgentToolException("`loyalty` is required.");
-            if (intConnection < 1 || intConnection > 12 || intLoyalty < 1 || intLoyalty > 6)
-                throw new AgentToolException("Connection must be 1-12 and loyalty 1-6.");
+            ContactType eType;
+            switch (objArgs.Value<string>("kind")?.Trim().ToLowerInvariant())
+            {
+                case null:
+                case "":
+                case "contact":
+                    eType = ContactType.Contact;
+                    break;
+                case "enemy":
+                    eType = ContactType.Enemy;
+                    break;
+                case "pet":
+                    eType = ContactType.Pet;
+                    break;
+                default:
+                    throw new AgentToolException("`kind` must be 'contact', 'enemy' or 'pet'.");
+            }
+
+            int intConnection = 0;
+            int intLoyalty = 0;
+            if (eType != ContactType.Pet)
+            {
+                intConnection = OptionalInt(objArgs, "connection") ?? throw new AgentToolException("`connection` is required.");
+                intLoyalty = OptionalInt(objArgs, "loyalty") ?? throw new AgentToolException("`loyalty` is required.");
+                int intMaxConnection = await objCharacter.GetMaxContactConnectionAsync(token).ConfigureAwait(false);
+                if (intConnection < 1 || intConnection > intMaxConnection || intLoyalty < 1 || intLoyalty > 6)
+                    throw new AgentToolException("Connection must be 1-" + intMaxConnection.ToString(GlobalSettings.InvariantCultureInfo) + " and loyalty 1-6.");
+            }
+
             Contact objContact = new Contact(objCharacter);
             try
             {
-                await objContact.SetEntityTypeAsync(ContactType.Contact, token).ConfigureAwait(false);
+                // The Add Contact, Add Enemy and Add Pet buttons
+                await objContact.SetEntityTypeAsync(eType, token).ConfigureAwait(false);
                 string strName = objArgs.Value<string>("name");
                 if (!string.IsNullOrWhiteSpace(strName))
                     await objContact.SetNameAsync(strName.Trim(), token).ConfigureAwait(false);
-                await objContact.SetConnectionAsync(intConnection, token).ConfigureAwait(false);
-                await objContact.SetLoyaltyAsync(intLoyalty, token).ConfigureAwait(false);
+                if (eType != ContactType.Pet)
+                {
+                    await objContact.SetConnectionAsync(intConnection, token).ConfigureAwait(false);
+                    await objContact.SetLoyaltyAsync(intLoyalty, token).ConfigureAwait(false);
+                }
                 await objCharacter.Contacts.AddAsync(objContact, token: token).ConfigureAwait(false);
             }
             catch
@@ -846,11 +1023,120 @@ namespace Chummer.Agent
                 throw;
             }
 
+            if (eType == ContactType.Pet)
+                return await FinishEditAsync(frmCreate, "Added pet " + await objContact.GetNameAsync(token).ConfigureAwait(false) + " (id " + objContact.InternalId + ").",
+                                             token).ConfigureAwait(false);
             return await FinishEditAsync(frmCreate,
-                                         "Added contact " + (await objContact.GetNameAsync(token).ConfigureAwait(false)) + " (connection "
+                                         "Added " + (eType == ContactType.Enemy ? "enemy " : "contact ") + (await objContact.GetNameAsync(token).ConfigureAwait(false)) + " (connection "
                                          + (await objContact.GetConnectionAsync(token).ConfigureAwait(false)).ToString(GlobalSettings.InvariantCultureInfo) + ", loyalty "
                                          + (await objContact.GetLoyaltyAsync(token).ConfigureAwait(false)).ToString(GlobalSettings.InvariantCultureInfo) + ").",
                                          token).ConfigureAwait(false);
+        }
+
+        private static async Task<object> SetContactDetailsAsync(JObject objArgs, CancellationToken token)
+        {
+            CharacterShared frmCharacter = await GetCharacterFormAsync(objArgs, token).ConfigureAwait(false);
+            Character objCharacter = frmCharacter.CharacterObject;
+            string strId = RequiredString(objArgs, "id");
+            Contact objContact = await FindOwnedAsync(await (await objCharacter.GetContactsAsync(token).ConfigureAwait(false)).ToListAsync(token).ConfigureAwait(false), strId, token).ConfigureAwait(false)
+                                 ?? throw new AgentToolException("The character has no contact '" + strId + "'. Use get_character_summary for contact ids.");
+            bool blnReadOnly = await objContact.GetReadOnlyAsync(token).ConfigureAwait(false);
+            bool blnEnemy = await objContact.GetIsEnemyAsync(token).ConfigureAwait(false);
+            List<string> lstChanged = new List<string>();
+
+            // Checkboxes first: being a group changes whether loyalty can be set
+            bool? blnGroup = objArgs.Value<bool?>("group");
+            if (blnGroup.HasValue)
+            {
+                if (!await objContact.GetGroupEnabledAsync(token).ConfigureAwait(false))
+                    throw new AgentToolException("This contact's group box can't be changed.");
+                await objContact.SetIsGroupAsync(blnGroup.Value, token).ConfigureAwait(false);
+                lstChanged.Add("group");
+            }
+
+            bool? blnFree = objArgs.Value<bool?>("free");
+            if (blnFree.HasValue)
+            {
+                if (await objCharacter.GetCreatedAsync(token).ConfigureAwait(false) || !await objContact.GetFreeEnabledAsync(token).ConfigureAwait(false))
+                    throw new AgentToolException("This contact can't be made free (only during creation, and only where the settings allow it).");
+                await objContact.SetFreeAsync(blnFree.Value, token).ConfigureAwait(false);
+                lstChanged.Add("free");
+            }
+
+            bool? blnFamily = objArgs.Value<bool?>("family");
+            bool? blnBlackmail = objArgs.Value<bool?>("blackmail");
+            if ((blnFamily.HasValue || blnBlackmail.HasValue) && blnEnemy)
+                throw new AgentToolException("Enemies have no family or blackmail boxes.");
+            if (blnFamily.HasValue)
+            {
+                await objContact.SetFamilyAsync(blnFamily.Value, token).ConfigureAwait(false);
+                lstChanged.Add("family");
+            }
+
+            if (blnBlackmail.HasValue)
+            {
+                await objContact.SetBlackmailAsync(blnBlackmail.Value, token).ConfigureAwait(false);
+                lstChanged.Add("blackmail");
+            }
+
+            int? intConnection = OptionalInt(objArgs, "connection");
+            if (intConnection.HasValue)
+            {
+                if (blnReadOnly)
+                    throw new AgentToolException("This contact comes from something else the character has; its connection can't be changed.");
+                int intMaximum = await objCharacter.GetMaxContactConnectionAsync(token).ConfigureAwait(false);
+                if (intConnection.Value < 1 || intConnection.Value > intMaximum)
+                    throw new AgentToolException("Connection must be 1-" + intMaximum.ToString(GlobalSettings.InvariantCultureInfo) + ".");
+                await objContact.SetConnectionAsync(intConnection.Value, token).ConfigureAwait(false);
+                lstChanged.Add("connection");
+            }
+
+            int? intLoyalty = OptionalInt(objArgs, "loyalty");
+            if (intLoyalty.HasValue)
+            {
+                if (!await objContact.GetLoyaltyEnabledAsync(token).ConfigureAwait(false))
+                    throw new AgentToolException("This contact's loyalty is fixed (it is a group, comes from something else, or has forced loyalty).");
+                if (intLoyalty.Value < 1 || intLoyalty.Value > 6)
+                    throw new AgentToolException("Loyalty must be 1-6.");
+                await objContact.SetLoyaltyAsync(intLoyalty.Value, token).ConfigureAwait(false);
+                lstChanged.Add("loyalty");
+            }
+
+            if (objArgs["name"] != null && objArgs["name"].Type != JTokenType.Null
+                && !await objContact.GetNoLinkedCharacterAsync(token).ConfigureAwait(false))
+                throw new AgentToolException("This contact is linked to a character file, which supplies its name.");
+            // The setters the contact panel's boxes use (the Display* ones take the same text the user types)
+            (string Name, Func<string, CancellationToken, Task> Setter)[] aobjFields =
+            {
+                ("name", objContact.SetNameAsync),
+                ("role", objContact.SetDisplayRoleAsync),
+                ("location", objContact.SetLocationAsync),
+                ("metatype", objContact.SetDisplayMetatypeAsync),
+                ("gender", objContact.SetDisplayGenderAsync),
+                ("age", objContact.SetDisplayAgeAsync),
+                ("type", objContact.SetDisplayTypeAsync),
+                ("preferred_payment", objContact.SetDisplayPreferredPaymentAsync),
+                ("hobbies_vice", objContact.SetDisplayHobbiesViceAsync),
+                ("personal_life", objContact.SetDisplayPersonalLifeAsync),
+                ("notes", objContact.SetNotesAsync)
+            };
+            foreach ((string strField, Func<string, CancellationToken, Task> funcSetter) in aobjFields)
+            {
+                JToken objValue = objArgs[strField];
+                if (objValue == null || objValue.Type == JTokenType.Null)
+                    continue;
+                await funcSetter(objValue.ToString().Replace("\r\n", "\n").Replace("\n", Environment.NewLine), token).ConfigureAwait(false);
+                lstChanged.Add(strField);
+            }
+
+            if (lstChanged.Count == 0)
+                throw new AgentToolException("Pass at least one field to set, e.g. `role` or `loyalty`.");
+            string strResult = "Set " + string.Join(", ", lstChanged) + " for contact " + await objContact.GetNameAsync(token).ConfigureAwait(false) + ".";
+            // Connection, loyalty and the boxes change what the contact costs, so report the budget like the other edits do
+            if (frmCharacter is CharacterCreate frmCreate)
+                return await FinishEditAsync(frmCreate, strResult, token).ConfigureAwait(false);
+            await frmCharacter.MakeDirtyWithCharacterUpdate(token).ConfigureAwait(false);
+            return new { result = strResult };
         }
 
         private static async Task<object> SetCharacterDetailsAsync(JObject objArgs, CancellationToken token)
@@ -886,6 +1172,18 @@ namespace Chummer.Agent
                 string strValue = objValue.ToString().Replace("\r\n", "\n").Replace("\n", Environment.NewLine);
                 await funcSetter(strValue, token).ConfigureAwait(false);
                 lstChanged.Add(strField);
+            }
+
+            string strArm = objArgs.Value<string>("primary_arm")?.Trim();
+            if (!string.IsNullOrEmpty(strArm))
+            {
+                // The Primary Arm box, which ambidextrous characters don't have
+                if (await objCharacter.GetAmbidextrousAsync(token).ConfigureAwait(false))
+                    throw new AgentToolException("The character is ambidextrous, so has no primary arm.");
+                if (!string.Equals(strArm, "Left", StringComparison.OrdinalIgnoreCase) && !string.Equals(strArm, "Right", StringComparison.OrdinalIgnoreCase))
+                    throw new AgentToolException("`primary_arm` must be 'Left' or 'Right'.");
+                await objCharacter.SetPrimaryArmAsync(char.ToUpperInvariant(strArm[0]) + strArm.Substring(1).ToLowerInvariant(), token).ConfigureAwait(false);
+                lstChanged.Add("primary arm");
             }
 
             if (lstChanged.Count == 0)
@@ -950,7 +1248,51 @@ namespace Chummer.Agent
                 return await FinishEditAsync(frmCreate, "Removed " + strName + ".", token).ConfigureAwait(false);
             }
 
-            throw new AgentToolException("Nothing the character has matches '" + strId + "'. Use get_character_summary for ids, and remove_quality for qualities.");
+            // Anything else the trees show, however deeply it is nested (gear in armor, vehicle weapons...), as the tabs' delete buttons do
+            OwnedItem objNested = null;
+            try
+            {
+                objNested = await FindItemAsync(objCharacter, strId, token).ConfigureAwait(false);
+            }
+            catch (AgentToolException)
+            {
+                // Not an item; maybe a skill
+            }
+
+            if (objNested != null)
+            {
+                string strName = await GetItemNameAsync(objNested.Item, token).ConfigureAwait(false);
+                switch (objNested.Item)
+                {
+                    case Quality _:
+                        throw new AgentToolException("Use remove_quality for qualities.");
+                    case Backend.Equipment.VehicleMod objObsolete when objObsolete.Name == "Obsolete":
+                        throw new AgentToolException("Removing the Obsolete mod needs a retrofit cost; do it in the editor.");
+                    case ICanRemove objRemovable:
+                        if (!await objRemovable.RemoveAsync(false, token).ConfigureAwait(false))
+                            throw new AgentToolException("Chummer did not remove " + strName + " (it may come with something else the character has; remove that instead).");
+                        return await FinishEditAsync(frmCreate, "Removed " + strName + ".", token).ConfigureAwait(false);
+                }
+            }
+
+            // A knowledge or exotic skill, as its row's delete button does
+            SkillsSection objSkillsSection = await objCharacter.GetSkillsSectionAsync(token).ConfigureAwait(false);
+            Skill objSkill = await FindSkillAsync((await objSkillsSection.KnowledgeSkills.ToListAsync(token).ConfigureAwait(false)).Cast<Skill>().ToList(), strId, token)
+                                 .ConfigureAwait(false)
+                             ?? await FindSkillAsync(await objSkillsSection.Skills.ToListAsync(token).ConfigureAwait(false), strId, token).ConfigureAwait(false);
+            if (objSkill != null)
+            {
+                if (!await objSkill.GetAllowDeleteAsync(token).ConfigureAwait(false))
+                    throw new AgentToolException(objSkill.Name + " can't be removed (only knowledge and exotic skills can, and not ones granted by something else).");
+                string strName = await objSkill.GetCurrentDisplayNameAsync(token).ConfigureAwait(false);
+                if (objSkill is KnowledgeSkill objKnowledgeSkill)
+                    await objSkillsSection.KnowledgeSkills.RemoveAsync(objKnowledgeSkill, token).ConfigureAwait(false);
+                else
+                    await objSkillsSection.Skills.RemoveAsync(objSkill, token).ConfigureAwait(false);
+                return await FinishEditAsync(frmCreate, "Removed skill " + strName + ".", token).ConfigureAwait(false);
+            }
+
+            throw new AgentToolException("Nothing the character has matches '" + strId + "'. Use list_items for ids, and remove_quality for qualities.");
         }
 
         #endregion

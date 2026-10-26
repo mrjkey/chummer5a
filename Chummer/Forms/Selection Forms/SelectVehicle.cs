@@ -979,6 +979,25 @@ namespace Chummer
         /// <summary>
         /// Accept the selected item and close the form.
         /// </summary>
+        /// <summary>
+        /// The availability and cost of a vehicle bought used, as this dialog works them out: availability 4 lower, and the cost cut by the discount.
+        /// </summary>
+        internal static async Task<(string Avail, decimal Cost)> GetUsedVehicleAvailAndCostAsync(XPathNavigator xmlVehicle, Character objCharacter,
+                                                                                                 decimal decDiscount, CancellationToken token = default)
+        {
+            decimal.TryParse(xmlVehicle?.SelectSingleNodeAndCacheExpression("cost", token)?.Value,
+                NumberStyles.Any, GlobalSettings.InvariantCultureInfo, out decimal decCost);
+            decCost *= 1 - decDiscount / 100.0m;
+            int intAvailModifier = (await ImprovementManager.ValueOfAsync(objCharacter, Improvement.ImprovementType.Availability,
+                                                                          strImprovedName: xmlVehicle?.SelectSingleNodeAndCacheExpression("id", token)?.Value,
+                                                                          blnIncludeNonImproved: true, token: token).ConfigureAwait(false)).StandardRound() - 4;
+            string strAvail = (await new AvailabilityValue(0, xmlVehicle?.SelectSingleNodeAndCacheExpression("avail", token)?.Value, intAvailModifier)
+                                     .ToStringAsync(token).ConfigureAwait(false))
+                              .Replace(await LanguageManager.GetStringAsync("String_AvailRestricted", token: token).ConfigureAwait(false), "R")
+                              .Replace(await LanguageManager.GetStringAsync("String_AvailForbidden", token: token).ConfigureAwait(false), "F");
+            return (strAvail, decCost);
+        }
+
         private async Task AcceptForm(CancellationToken token = default)
         {
             XPathNavigator xmlVehicle = null;
@@ -1057,21 +1076,10 @@ namespace Chummer
 
             if (await chkUsedVehicle.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false))
             {
-                decimal.TryParse(xmlVehicle?.SelectSingleNodeAndCacheExpression("cost", token)?.Value,
-                    NumberStyles.Any, GlobalSettings.InvariantCultureInfo, out decimal decCost);
-                decCost *= 1 - await nudUsedVehicleDiscount.DoThreadSafeFuncAsync(x => x.Value, token: token)
-                    .ConfigureAwait(false) / 100.0m;
-
                 _blnUsedVehicle = true;
-                _strUsedAvail = (await lblVehicleAvail.DoThreadSafeFuncAsync(x => x.Text, token: token)
-                                                      .ConfigureAwait(false))
-                                .Replace(
-                                    await LanguageManager.GetStringAsync("String_AvailRestricted", token: token)
-                                                         .ConfigureAwait(false), "R")
-                                .Replace(
-                                    await LanguageManager.GetStringAsync("String_AvailForbidden", token: token)
-                                                         .ConfigureAwait(false), "F");
-                _decUsedCost = decCost;
+                (_strUsedAvail, _decUsedCost) = await GetUsedVehicleAvailAndCostAsync(
+                    xmlVehicle, _objCharacter,
+                    await nudUsedVehicleDiscount.DoThreadSafeFuncAsync(x => x.Value, token: token).ConfigureAwait(false), token).ConfigureAwait(false);
             }
 
             _blnBlackMarketDiscount = await chkBlackMarketDiscount.DoThreadSafeFuncAsync(x => x.Checked, token: token)
