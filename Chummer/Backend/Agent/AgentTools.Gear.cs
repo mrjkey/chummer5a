@@ -55,7 +55,8 @@ namespace Chummer.Agent
                 AddArmorAsync);
             yield return new AgentTool("add_gear",
                 "Buy gear from search_catalog(kind='gear') (commlinks, fake SINs and licenses, ammo, tools, drugs...), as the editor's Add Gear does. "
-                + "A commlink becomes the active one if the character has none. Identical items stack. Checks requirements, books, rating and availability.",
+                + "A commlink becomes the active one if the character has none. Identical items stack. Checks requirements, books, rating and availability. "
+                + "Ammunition, spare clips and speed loaders ask which weapon category they are for: pass it as forced_value (e.g. 'Heavy Pistols').",
                 AgentTool.Schema(("id!", "string", "Gear id from search_catalog, or its exact English name."),
                                  ("rating", "integer", "Rating, for gear that has one (e.g. a Fake SIN 4). Default the item's minimum."),
                                  ("quantity", "number", "How many to buy. Default 1 (or the pack size, for things sold in packs)."),

@@ -92,8 +92,9 @@ namespace Chummer.Agent
             CharacterCreate frmCreate = await GetCreateFormAsync(objArgs, token).ConfigureAwait(false);
             Character objCharacter = frmCreate.CharacterObject;
             bool blnStream = await objCharacter.GetRESEnabledAsync(token).ConfigureAwait(false);
-            if (!blnStream && !await objCharacter.GetMagicianEnabledAsync(token).ConfigureAwait(false))
-                throw new AgentToolException("Only magicians, mystic adepts and technomancers have a tradition or stream.");
+            // Chummer wants every awakened or emerged character to have one, adepts included
+            if (!await objCharacter.GetShouldHaveTraditionAsync(token).ConfigureAwait(false))
+                throw new AgentToolException("Only awakened and emerged characters have a tradition or stream.");
             string strFile = blnStream ? "streams.xml" : "traditions.xml";
             XPathNavigator xmlTradition = (await objCharacter.LoadDataXPathAsync(strFile, token: token).ConfigureAwait(false))
                                           .TryGetNodeByNameOrId("/chummer/traditions/tradition", RequiredString(objArgs, "id"),

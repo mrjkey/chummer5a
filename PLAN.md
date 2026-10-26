@@ -29,7 +29,7 @@
 
 ## Status
 
-Steps 0–7 are done: built, and 81/81 tests pass (76 existing plus 5 agent tests). The server was verified live from WSL and from Claude Code with Chummer running. Step 6 was also checked live: an elf face was created, edited, given gear and saved over MCP, and showed up correctly in the Chummer window.
+Steps 0–8 are done: built, and 82/82 tests pass (76 existing plus 6 agent tests). The server was verified live from WSL and from Claude Code with Chummer running. Step 6 was also checked live: an elf face was created, edited, given gear and saved over MCP, and showed up correctly in the Chummer window.
 
 ### Step 0: Build/run loop (done)
 
@@ -169,6 +169,19 @@ Other changes:
 - `add_quality`, `add_spell`, `add_power` and all the new tools now refuse items from books the settings don't enable, as the dialogs do.
 - Every SR5 magician metamagic needs an art, and all the arts are in Street Grimoire. With the Standard (core-only) settings, mages therefore can't take metamagics.
 
+### Step 8: Finishing touches found while building real characters (done)
+
+These came up while building two complete core-rules characters, Darrow (a face) and Sif (an adept gunslinger). Both are in `characters/`, with `.chum5`, PDF/HTML sheets and a write-up each.
+
+- `export_character_sheet(path?, format=pdf|html, sheet?)`: the Print Character viewer's path. `CharacterSheetViewer.TransformToHtmlAsync` and `ConvertHtmlToPdfAsync` were extracted from the viewer, which now uses them too; PDFs come from the bundled wkhtmltopdf.
+- `open_character(path)`: File > Open's path (`Program.LoadCharacterAsync` + `ChummerMainForm.OpenCharacter`). Load problems come back as the tool's error instead of a message box.
+- `set_karma_for_nuyen(karma)`: the editor's nuyen box (`Character.NuyenBP`).
+- `add_power` takes `forced_value`, passed as the power's `Extra`. For example, Improved Ability (Pistols).
+- `add_knowledge_skill` takes `type` (Academic, Interest, Language, Professional or Street), which sets the linked attribute.
+- `set_specialization` takes `with_karma` (the skill's Karma checkbox). By default it pays with karma once skill points run out. Chummer only keeps that flag on a skill that already has a specialization, so the tool sets it after the specialization.
+- `set_tradition` follows `Character.GetShouldHaveTraditionAsync`: adepts must have a tradition too, or validation fails.
+- Ammunition, spare clips and speed loaders ask for a weapon category. `forced_value` (e.g. "Heavy Pistols") answers it. The dialog still flashes open and closes, which is fine live but impossible in the hidden test window.
+
 ### Tests (`Chummer.Tests/AgentToolsTests.cs`)
 
 - `Protocol_InitializeListAndErrors`: initialize, tools/list, notifications, unknown method and unknown tool.
@@ -191,6 +204,13 @@ Other changes:
   - a technomancer: stream, complex form, sprite
   - a mundane: exotic skill, laser sight (and a refused mount), armor mod, vehicle mod, and martial arts refused under Standard
   - a Full House mage: art, metamagic, Krav Maga with a technique
+- `AdeptExtrasOpenAndExport` covers:
+  - an adept's power with `forced_value`, and its tradition
+  - knowledge skill type
+  - a specialization paid with karma
+  - karma for nuyen
+  - HTML and PDF sheets
+  - opening a saved file
 - `RunWithMainForm` is the shared hidden-main-window helper. The hidden window can't show dialogs, so items that ask a question need `forced_value` in tests.
 - Only test files listed in `Chummer.Tests.csproj` are copied to the output (`Gangerbean.chum5` is not).
 
@@ -199,6 +219,7 @@ Other changes:
 ## Next steps (goal 1)
 
 1. Career mode: the tools only edit characters in creation.
+   - Rules focus is the core rulebook. Tools work with other books when the settings enable them, but defaults, docs and tests lean on Standard (core-only) settings.
 2. Smaller gaps, each reusing the GUI code path when needed:
    - enchanting, enhancements and rituals
    - AI programs and critter powers

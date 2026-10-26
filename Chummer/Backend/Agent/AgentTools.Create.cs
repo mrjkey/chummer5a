@@ -23,6 +23,9 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Xml.Xsl;
+using System.Xml;
+using System.Text;
 using System.Xml.XPath;
 using Chummer.Backend.Enums;
 using Newtonsoft.Json.Linq;
@@ -72,6 +75,18 @@ namespace Chummer.Agent
                                  ("talent_skills", "array", "New free skill choices for the talent."),
                                  ("character", "string", CharacterArgDescription)),
                 SetPrioritiesAsync);
+            yield return new AgentTool("open_character",
+                "Open a saved character file in Chummer's editor, as File > Open does. Relative paths are looked up in Chummer's saves folder.",
+                AgentTool.Schema(("path!", "string", "The .chum5 file, e.g. 'Darrow.chum5' or a full path.")),
+                OpenCharacterAsync);
+            yield return new AgentTool("export_character_sheet",
+                "Print an open character to a character sheet file to bring to the table, as Chummer's Print Character viewer does. "
+                + "Saves to Chummer's saves folder under the character's name unless `path` is given.",
+                AgentTool.Schema(("path", "string", "File to write (optional). Relative paths go in Chummer's saves folder."),
+                                 ("format", "string", "'pdf' (default) or 'html'."),
+                                 ("sheet", "string", "Sheet design from the sheets folder, e.g. 'Shadowrun 5' (the default), 'Fancy Blocks', 'Formatted Text-Only'."),
+                                 ("character", "string", CharacterArgDescription)),
+                ExportCharacterSheetAsync);
             yield return new AgentTool("save_character",
                 "Save an open character to its file. A new character without a file is saved to Chummer's saves folder under its name unless `path` is given.",
                 AgentTool.Schema(("path", "string", "File to save to (optional). Relative paths go in Chummer's saves folder; .chum5 is added if missing."),
@@ -348,14 +363,7 @@ namespace Chummer.Agent
                 strPath = (await objCharacter.GetCharacterNameAsync(token).ConfigureAwait(false)).CleanForFileName();
             }
 
-            // Agents running in WSL see Windows drives as /mnt/<drive>/
-            if (strPath.Length > 6 && strPath.StartsWith("/mnt/", StringComparison.Ordinal) && char.IsLetter(strPath[5]) && strPath[6] == '/')
-                strPath = char.ToUpperInvariant(strPath[5]) + ":" + strPath.Substring(6).Replace('/', Path.DirectorySeparatorChar);
-            if (!Path.IsPathRooted(strPath))
-                strPath = Path.Combine(Utils.GetStartupPath, "saves", strPath);
-            if (!strPath.EndsWith(".chum5", StringComparison.OrdinalIgnoreCase) && !strPath.EndsWith(".chum5lz", StringComparison.OrdinalIgnoreCase))
-                strPath += ".chum5";
-            strPath = Path.GetFullPath(strPath);
+            strPath = ResolveOutputPath(strPath, ".chum5", ".chum5lz");
             if (File.Exists(strPath) && objArgs.Value<bool?>("overwrite") != true
                                      && !string.Equals(strPath, strCurrentFile, StringComparison.OrdinalIgnoreCase))
                 throw new AgentToolException(strPath + " already exists. Pass overwrite: true to replace it, or pick another path.");
@@ -365,6 +373,95 @@ namespace Chummer.Agent
             if (!await frmCharacter.SaveCharacterToFileAsync(strPath, false, token).ConfigureAwait(false))
                 throw new AgentToolException("Chummer could not save to " + strPath + ".");
             return new { result = "Saved to " + strPath + ".", file = strPath };
+        }
+
+        /// <summary>
+        /// A full Windows path for a file the agent asked for: WSL paths (/mnt/c/...) are translated, relative paths go in Chummer's saves
+        /// folder, and the first extension is added unless the path already ends with one of them.
+        /// </summary>
+        private static string ResolveOutputPath(string strPath, params string[] astrExtensions)
+        {
+            // Agents running in WSL see Windows drives as /mnt/<drive>/
+            if (strPath.Length > 6 && strPath.StartsWith("/mnt/", StringComparison.Ordinal) && char.IsLetter(strPath[5]) && strPath[6] == '/')
+                strPath = char.ToUpperInvariant(strPath[5]) + ":" + strPath.Substring(6).Replace('/', Path.DirectorySeparatorChar);
+            if (!Path.IsPathRooted(strPath))
+                strPath = Path.Combine(Utils.GetStartupPath, "saves", strPath);
+            if (!astrExtensions.Any(x => strPath.EndsWith(x, StringComparison.OrdinalIgnoreCase)))
+                strPath += astrExtensions[0];
+            return Path.GetFullPath(strPath);
+        }
+
+        private static async Task<object> OpenCharacterAsync(JObject objArgs, CancellationToken token)
+        {
+            ChummerMainForm frmMain = Program.MainForm ?? throw new AgentToolException("Chummer's main window is not open.");
+            string strPath = ResolveOutputPath(RequiredString(objArgs, "path"), ".chum5", ".chum5lz");
+            if (!File.Exists(strPath))
+                throw new AgentToolException("There is no file " + strPath + ".");
+            foreach (CharacterShared frmLoop in await frmMain.OpenCharacterEditorForms.ToListAsync(token).ConfigureAwait(false))
+            {
+                if (string.Equals(await frmLoop.CharacterObject.GetFileNameAsync(token).ConfigureAwait(false), strPath, StringComparison.OrdinalIgnoreCase))
+                    return new { result = "That character is already open.", name = await frmLoop.CharacterObject.GetCharacterNameAsync(token).ConfigureAwait(false) };
+            }
+
+            // What File > Open does once the user has picked a file
+            Character objCharacter = await Program.LoadCharacterAsync(strPath, blnShowErrors: false, token: token).ConfigureAwait(false)
+                                     ?? throw new AgentToolException("Chummer could not load " + strPath + ".");
+            await frmMain.OpenCharacter(objCharacter, token: token).ConfigureAwait(false);
+            for (int i = 0; i < 600; ++i)
+            {
+                CharacterShared frmEditor = await frmMain.OpenCharacterEditorForms
+                                                         .FirstOrDefaultAsync(x => ReferenceEquals(x.CharacterObject, objCharacter), token).ConfigureAwait(false);
+                if (frmEditor?.IsFinishedInitializing == true)
+                    break;
+                await Task.Delay(50, token).ConfigureAwait(false);
+            }
+
+            return new
+            {
+                result = "Opened " + await objCharacter.GetCharacterNameAsync(token).ConfigureAwait(false) + " ("
+                         + (await objCharacter.GetCreatedAsync(token).ConfigureAwait(false) ? "career" : "creation") + " mode).",
+                name = await objCharacter.GetCharacterNameAsync(token).ConfigureAwait(false)
+            };
+        }
+
+        private static async Task<object> ExportCharacterSheetAsync(JObject objArgs, CancellationToken token)
+        {
+            CharacterShared frmCharacter = await GetCharacterFormAsync(objArgs, token).ConfigureAwait(false);
+            Character objCharacter = frmCharacter.CharacterObject;
+            string strFormat = objArgs.Value<string>("format")?.Trim().ToLowerInvariant();
+            if (string.IsNullOrEmpty(strFormat))
+                strFormat = "pdf";
+            if (strFormat != "pdf" && strFormat != "html")
+                throw new AgentToolException("`format` must be 'pdf' or 'html'.");
+            string strSheetsFolder = Path.Combine(Utils.GetStartupPath, "sheets");
+            string strSheet = objArgs.Value<string>("sheet")?.Trim();
+            if (string.IsNullOrEmpty(strSheet))
+                strSheet = GlobalSettings.DefaultCharacterSheet;
+            string strXslPath = Path.Combine(strSheetsFolder, strSheet + ".xsl");
+            if (!File.Exists(strXslPath))
+                throw new AgentToolException("There is no sheet '" + strSheet + "'. Options: "
+                                             + string.Join(", ", Directory.GetFiles(strSheetsFolder, "*.xsl").Select(Path.GetFileNameWithoutExtension).OrderBy(x => x))
+                                             + ".");
+            string strPath = objArgs.Value<string>("path")?.Trim();
+            if (string.IsNullOrEmpty(strPath))
+                strPath = (await objCharacter.GetCharacterNameAsync(token).ConfigureAwait(false)).CleanForFileName();
+            strPath = ResolveOutputPath(strPath, "." + strFormat);
+            string strDirectory = Path.GetDirectoryName(strPath);
+            if (!string.IsNullOrEmpty(strDirectory))
+                Directory.CreateDirectory(strDirectory);
+
+            // The same steps as the Print Character viewer: export XML, the sheet's transform, then wkhtmltopdf for PDFs
+            XmlDocument objCharacterXml = await CommonFunctions.GenerateCharactersExportXml(GlobalSettings.CultureInfo, GlobalSettings.Language, token, objCharacter)
+                                                               .ConfigureAwait(false);
+            XslCompiledTransform objXslTransform = await XslManager.GetTransformForFileAsync(strXslPath, token).ConfigureAwait(false);
+            string strHtml = await CharacterSheetViewer.TransformToHtmlAsync(objXslTransform, objCharacterXml, token).ConfigureAwait(false);
+            if (strFormat == "html")
+                File.WriteAllText(strPath, strHtml, Encoding.UTF8);
+            else
+                await CharacterSheetViewer.ConvertHtmlToPdfAsync(strHtml, strPath, token).ConfigureAwait(false);
+            if (!File.Exists(strPath))
+                throw new AgentToolException("Chummer could not write " + strPath + ".");
+            return new { result = "Exported the " + strSheet + " sheet to " + strPath + ".", file = strPath };
         }
 
         #endregion

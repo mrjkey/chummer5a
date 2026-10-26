@@ -472,27 +472,9 @@ namespace Chummer
 
                     try
                     {
-                        PdfDocument objPdfDocument = new PdfDocument
-                        {
-                            Html = await webViewer.DoThreadSafeFuncAsync(x => x.DocumentText, token: _objGenericToken)
-                                .ConfigureAwait(false),
-                            ExtraParams = new Dictionary<string, string>(8)
-                            {
-                                { "encoding", "UTF-8" },
-                                { "dpi", "300" },
-                                { "margin-top", "13" },
-                                { "margin-bottom", "19" },
-                                { "margin-left", "13" },
-                                { "margin-right", "13" },
-                                { "image-quality", "100" },
-                                { "print-media-type", string.Empty }
-                            }
-                        };
-                        PdfConvertEnvironment objPdfConvertEnvironment = new PdfConvertEnvironment(Path.Combine(Utils.GetStartupPath, "wkhtmltopdf.exe"));
-                        PdfOutput objPdfOutput = new PdfOutput(strSaveFile);
-                        await PdfConvert
-                              .ConvertHtmlToPdfAsync(objPdfDocument, objPdfConvertEnvironment, objPdfOutput,
-                                                     _objGenericToken).ConfigureAwait(false);
+                        await ConvertHtmlToPdfAsync(
+                            await webViewer.DoThreadSafeFuncAsync(x => x.DocumentText, token: _objGenericToken).ConfigureAwait(false),
+                            strSaveFile, _objGenericToken).ConfigureAwait(false);
 
                         if (!string.IsNullOrWhiteSpace(GlobalSettings.PdfAppPath))
                         {
@@ -908,6 +890,84 @@ namespace Chummer
         /// <summary>
         /// Run the generated XML file through the XSL transformation engine to create the file output.
         /// </summary>
+        /// <summary>
+        /// Turn a character export (from <see cref="CommonFunctions.GenerateCharactersExportXml(CultureInfo, string, CancellationToken, Character[])"/>)
+        /// into a character sheet's HTML with one of the transforms in the sheets folder, as the viewer shows it.
+        /// </summary>
+        internal static async Task<string> TransformToHtmlAsync(XslCompiledTransform objXslTransform, XmlDocument objCharacterXml,
+                                                                CancellationToken token = default)
+        {
+            XmlWriterSettings objSettings = objXslTransform.OutputSettings?.Clone();
+            if (objSettings != null)
+            {
+                objSettings.CheckCharacters = false;
+                objSettings.ConformanceLevel = ConformanceLevel.Fragment;
+            }
+
+            string strOutput;
+            using (RecyclableMemoryStream objStream = new RecyclableMemoryStream(Utils.MemoryStreamManager))
+            {
+                using (XmlWriter objWriter = objSettings != null
+                            ? XmlWriter.Create(objStream, objSettings)
+                            : Utils.GetXslTransformXmlWriter(objStream))
+                {
+                    token.ThrowIfCancellationRequested();
+                    objXslTransform.Transform(objCharacterXml, objWriter);
+                }
+
+                token.ThrowIfCancellationRequested();
+
+                objStream.Position = 0;
+
+                // Read in the resulting code and pass it to the browser.
+                using (new FetchSafelyFromObjectPool<StringBuilder>(Utils.StringBuilderPool, out StringBuilder sbdReturn))
+                {
+                    token.ThrowIfCancellationRequested();
+                    using (StreamReader objReader = new StreamReader(objStream, Encoding.UTF8, true))
+                    {
+                        token.ThrowIfCancellationRequested();
+                        for (string strLine = await objReader.ReadLineAsync().ConfigureAwait(false);
+                                strLine != null;
+                                strLine = await objReader.ReadLineAsync().ConfigureAwait(false))
+                        {
+                            token.ThrowIfCancellationRequested();
+                            if (!string.IsNullOrEmpty(strLine))
+                                sbdReturn.AppendLine(strLine);
+                        }
+                    }
+
+                    strOutput = sbdReturn.ToString();
+                }
+            }
+
+            return strOutput;
+        }
+
+        /// <summary>
+        /// Save a character sheet's HTML as a PDF with the bundled wkhtmltopdf, as Save as PDF does when there is no PDF printer.
+        /// </summary>
+        internal static Task ConvertHtmlToPdfAsync(string strHtml, string strPdfPath, CancellationToken token = default)
+        {
+            PdfDocument objPdfDocument = new PdfDocument
+            {
+                Html = strHtml,
+                ExtraParams = new Dictionary<string, string>(8)
+                {
+                    { "encoding", "UTF-8" },
+                    { "dpi", "300" },
+                    { "margin-top", "13" },
+                    { "margin-bottom", "19" },
+                    { "margin-left", "13" },
+                    { "margin-right", "13" },
+                    { "image-quality", "100" },
+                    { "print-media-type", string.Empty }
+                }
+            };
+            PdfConvertEnvironment objPdfConvertEnvironment = new PdfConvertEnvironment(Path.Combine(Utils.GetStartupPath, "wkhtmltopdf.exe"));
+            PdfOutput objPdfOutput = new PdfOutput(strPdfPath);
+            return PdfConvert.ConvertHtmlToPdfAsync(objPdfDocument, objPdfConvertEnvironment, objPdfOutput, token);
+        }
+
         private async Task AsyncGenerateOutput(CancellationToken token = default)
         {
             token.ThrowIfCancellationRequested();
@@ -1010,13 +1070,6 @@ namespace Chummer
 
                 token.ThrowIfCancellationRequested();
 
-                XmlWriterSettings objSettings = objXslTransform.OutputSettings?.Clone();
-                if (objSettings != null)
-                {
-                    objSettings.CheckCharacters = false;
-                    objSettings.ConformanceLevel = ConformanceLevel.Fragment;
-                }
-
                 string strTempSheetFilePath = string.Empty;
 
                 if (GlobalSettings.PrintToFileFirst)
@@ -1034,42 +1087,7 @@ namespace Chummer
                     }
                 }
 
-                string strOutput;
-                using (RecyclableMemoryStream objStream = new RecyclableMemoryStream(Utils.MemoryStreamManager))
-                {
-                    using (XmlWriter objWriter = objSettings != null
-                                ? XmlWriter.Create(objStream, objSettings)
-                                : Utils.GetXslTransformXmlWriter(objStream))
-                    {
-                        token.ThrowIfCancellationRequested();
-                        objXslTransform.Transform(_objCharacterXml, objWriter);
-                    }
-
-                    token.ThrowIfCancellationRequested();
-
-                    objStream.Position = 0;
-
-                    // Read in the resulting code and pass it to the browser.
-                    using (new FetchSafelyFromObjectPool<StringBuilder>(Utils.StringBuilderPool, out StringBuilder sbdReturn))
-                    {
-                        token.ThrowIfCancellationRequested();
-                        using (StreamReader objReader = new StreamReader(objStream, Encoding.UTF8, true))
-                        {
-                            token.ThrowIfCancellationRequested();
-                            for (string strLine = await objReader.ReadLineAsync().ConfigureAwait(false);
-                                    strLine != null;
-                                    strLine = await objReader.ReadLineAsync().ConfigureAwait(false))
-                            {
-                                token.ThrowIfCancellationRequested();
-                                if (!string.IsNullOrEmpty(strLine))
-                                    sbdReturn.AppendLine(strLine);
-                            }
-                        }
-
-                        strOutput = sbdReturn.ToString();
-                    }
-                }
-
+                string strOutput = await TransformToHtmlAsync(objXslTransform, _objCharacterXml, token).ConfigureAwait(false);
                 token.ThrowIfCancellationRequested();
 
                 _blnCanPrint = true;

@@ -14,7 +14,7 @@ Chummer is a .NET Framework 4.8 WinForms app (Windows only). The repo lives on t
 
 - `Chummer/Backend/Agent/` holds the MCP server:
   - `McpServer.cs`: Streamable HTTP, JSON responses, localhost only. Port 51723; override with `/mcpport:N`.
-  - `AgentTools*.cs`: the tools. `AgentTools.cs` reads, `.Catalog.cs` searches the rules data, `.Create.cs` creates/saves characters and sets priorities, `.Edit.cs` edits attributes/skills/qualities/spells/powers/contacts/martial arts, `.Magic.cs` handles tradition, mentor, spirits, complex forms and initiation, and `.Gear.cs` buys equipment and its accessories/mods.
+  - `AgentTools*.cs`: the tools. `AgentTools.cs` reads, `.Catalog.cs` searches the rules data, `.Create.cs` creates/opens/saves/exports characters and sets priorities, `.Edit.cs` edits attributes/skills/qualities/spells/powers/contacts/martial arts, `.Magic.cs` handles tradition, mentor, spirits, complex forms and initiation, and `.Gear.cs` buys equipment and its accessories/mods.
 - `Program.cs` starts the server around `Application.Run(MainForm)`.
 - Tools work on the characters open in the editor (`Program.MainForm.OpenCharacterEditorForms`).
 - Every edit goes through code the GUI also uses. These methods were refactored out of the forms' button/dialog code, so the results always match the UI:
@@ -25,6 +25,7 @@ Chummer is a .NET Framework 4.8 WinForms app (Windows only). The repo lives on t
   | `SelectMetatypePriority` | `ValidatePrioritySelectionAsync` (agent input only) and `ApplyPrioritySelectionAsync` |
   | `SelectMetatypeKarma` | `ApplyMetatypeSelectionAsync` |
   | `ChummerMainForm` | `OpenNewCharacterEditorAsync` |
+  | `CharacterSheetViewer` | `TransformToHtmlAsync`, `ConvertHtmlToPdfAsync` |
   | `CharacterShared` | `SaveCharacterToFileAsync`, `AddSpirit`/`AddSprite`, `Add{WeaponAccessory,VehicleMod}FromNodeAsync` |
   | Backend | `MartialArt.PurchaseFromNodeAsync`, `Spirit.FillSpiritTypeChoicesAsync`, `SelectMartialArtTechnique.FillAllowedTechniques` |
 

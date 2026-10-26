@@ -355,6 +355,88 @@ namespace Chummer.Tests
             Assert.AreEqual(1, ((JArray)((JArray)objSummary["martialArts"]).Single()["techniques"]).Count, objSummary["martialArts"].ToString());
         }
 
+        [TestMethod]
+        public void AdeptExtrasOpenAndExport()
+        {
+            string strFolder = Path.Combine(Path.GetTempPath(), "AgentToolsTest_" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                RunWithMainForm((frmMain, t) => RunAdeptExtrasOpenAndExportScenarioAsync(strFolder, t));
+            }
+            finally
+            {
+                if (Directory.Exists(strFolder))
+                    Directory.Delete(strFolder, true);
+            }
+        }
+
+        private static async Task RunAdeptExtrasOpenAndExportScenarioAsync(string strFolder, CancellationToken token)
+        {
+            const string strAdept = "Agent Test Adept";
+            await CallToolOkAsync("create_character", new JObject
+            {
+                ["metatype"] = "Human",
+                ["priorities"] = new JObject { ["heritage"] = "E", ["attributes"] = "A", ["talent"] = "B", ["skills"] = "C", ["resources"] = "D" },
+                ["talent"] = "Adept",
+                ["talent_skills"] = new JArray("Pistols"),
+                ["name"] = strAdept
+            }, token).ConfigureAwait(false);
+
+            // Choices inside items: a power's skill, a license's subject. (Ammunition's weapon category works live, but its dialog
+            // still opens for a moment, which the hidden test window can't do.)
+            await CallOnAsync(strAdept, "add_power", new JObject { ["id"] = "Improved Ability (skill)", ["rating"] = 1, ["forced_value"] = "Pistols" }, token)
+                .ConfigureAwait(false);
+            JObject objResult = (JObject)await CallOnAsync(strAdept, "add_gear", new JObject { ["id"] = "Fake License", ["rating"] = 2, ["forced_value"] = "Concealed Carry" }, token)
+                .ConfigureAwait(false);
+            StringAssert.Contains(objResult.Value<string>("result"), "Concealed Carry");
+
+            // Chummer wants adepts to have a tradition too
+            await CallOnAsync(strAdept, "set_tradition", new JObject { ["id"] = "Shamanic" }, token).ConfigureAwait(false);
+            JObject objValidation = (JObject)await CallOnAsync(strAdept, "validate_character", new JObject(), token).ConfigureAwait(false);
+            Assert.IsFalse(((JArray)objValidation["errors"]).Any(x => x.ToString().Contains("Tradition")), objValidation.ToString());
+
+            // Knowledge skill types set the linked attribute
+            await CallOnAsync(strAdept, "add_knowledge_skill", new JObject { ["name"] = "Street Gangs", ["type"] = "Street", ["base"] = 2 }, token).ConfigureAwait(false);
+            JObject objSummary = (JObject)await CallOnAsync(strAdept, "get_character_summary", new JObject(), token).ConfigureAwait(false);
+            Assert.AreEqual("INT", ((JArray)objSummary["knowledgeSkills"]).First(x => x.Value<string>("name") == "Street Gangs").Value<string>("attribute"));
+            Assert.IsTrue(((JArray)objSummary["powers"]).Any(x => x.Value<string>("name").Contains("Pistols")), objSummary["powers"].ToString());
+
+            // A specialization paid with karma leaves the skill points alone
+            int intKarma = objSummary["karma"].Value<int>("remaining");
+            int intSkillPoints = objSummary["points"]["skillPoints"].Value<int>("remaining");
+            objResult = (JObject)await CallOnAsync(strAdept, "set_specialization", new JObject
+            {
+                ["skill"] = "Pistols", ["specialization"] = "Semi-Automatics", ["with_karma"] = true
+            }, token).ConfigureAwait(false);
+            Assert.AreEqual(intSkillPoints, objResult.Value<int>("skillPointsRemaining"), objResult.ToString());
+            Assert.IsTrue(objResult.Value<int>("karmaRemaining") < intKarma, objResult.ToString());
+
+            // Karma for nuyen
+            decimal decNuyen = objResult.Value<decimal>("nuyenRemaining");
+            objResult = (JObject)await CallOnAsync(strAdept, "set_karma_for_nuyen", new JObject { ["karma"] = 2 }, token).ConfigureAwait(false);
+            Assert.IsTrue(objResult.Value<decimal>("nuyenRemaining") > decNuyen, objResult.ToString());
+
+            // Character sheets, as HTML and PDF
+            string strHtml = Path.Combine(strFolder, "Adept.html");
+            await CallOnAsync(strAdept, "export_character_sheet", new JObject { ["format"] = "html", ["path"] = strHtml }, token).ConfigureAwait(false);
+            StringAssert.Contains(File.ReadAllText(strHtml), strAdept);
+            string strPdf = Path.Combine(strFolder, "Adept.pdf");
+            await CallOnAsync(strAdept, "export_character_sheet", new JObject { ["path"] = strPdf }, token).ConfigureAwait(false);
+            Assert.IsTrue(new FileInfo(strPdf).Length > 1000, "The PDF sheet is missing or empty");
+            (bool blnIsError, string strText) = await TryCallOnAsync(strAdept, "export_character_sheet", new JObject { ["sheet"] = "No Such Sheet" }, token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+            StringAssert.Contains(strText, "Shadowrun 5");
+
+            // Opening a saved character
+            string strSkink = Path.Combine(AppDomain.CurrentDomain.SetupInformation.ApplicationBase ?? string.Empty, "TestFiles", "Skink.chum5");
+            objResult = (JObject)await CallToolOkAsync("open_character", new JObject { ["path"] = strSkink }, token).ConfigureAwait(false);
+            StringAssert.Contains(objResult.Value<string>("result"), "Opened");
+            JArray objOpen = (JArray)await CallToolOkAsync("list_open_characters", null, token).ConfigureAwait(false);
+            Assert.IsTrue(objOpen.Any(x => x.Value<string>("file") == strSkink), objOpen.ToString());
+            objResult = (JObject)await CallToolOkAsync("open_character", new JObject { ["path"] = strSkink }, token).ConfigureAwait(false);
+            StringAssert.Contains(objResult.Value<string>("result"), "already open");
+        }
+
         private static async Task RunCreationScenarioAsync(ChummerMainForm frmMain, string strSaveFile, CancellationToken token)
         {
             // The Heritage rows used to embed every metatype in full (~130 KB); they must now be compact

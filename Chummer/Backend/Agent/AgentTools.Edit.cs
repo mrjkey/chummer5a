@@ -67,6 +67,8 @@ namespace Chummer.Agent
                 AgentTool.Schema(("name!", "string", "Skill name, e.g. 'English', 'Corporate Security', 'Seattle Gangs'."),
                                  ("base", "integer", "Ranks paid with knowledge skill points."),
                                  ("karma", "integer", "Ranks paid with karma."),
+                                 ("type", "string", "Academic, Interest, Language, Professional or Street; sets the linked attribute (Street/Interest use INT, the others LOG). "
+                                                    + "Default Academic for new skills."),
                                  ("native_language", "boolean", "Make this a native language (uses one of the character's native language slots)."),
                                  ("character", "string", CharacterArgDescription)),
                 AddKnowledgeSkillAsync);
@@ -75,6 +77,7 @@ namespace Chummer.Agent
                 + "Pass an empty specialization to remove it. The skill needs a rating, and skills in an unbroken group can't specialize.",
                 AgentTool.Schema(("skill!", "string", "Skill name, e.g. 'Pistols', 'Negotiation'."),
                                  ("specialization", "string", "Specialization, e.g. 'Semi-Automatics', 'Bargaining'. Empty removes it."),
+                                 ("with_karma", "boolean", "Pay with karma instead of skill points (the skill's Karma checkbox). Default: karma once the skill points are used up."),
                                  ("character", "string", CharacterArgDescription)),
                 SetSpecializationAsync);
             yield return new AgentTool("add_exotic_skill",
@@ -123,6 +126,7 @@ namespace Chummer.Agent
                 "Add an adept power from search_catalog(kind='power'), optionally at a rating.",
                 AgentTool.Schema(("id!", "string", "Power id from search_catalog, or its exact English name."),
                                  ("rating", "integer", "Rating for powers with levels. Default 1."),
+                                 ("forced_value", "string", ForcedValueDescription + " E.g. the skill for Improved Ability (skill)."),
                                  ("character", "string", CharacterArgDescription)),
                 AddPowerAsync);
             yield return new AgentTool("set_power_rating",
@@ -131,6 +135,12 @@ namespace Chummer.Agent
                                  ("rating!", "integer", "New rating."),
                                  ("character", "string", CharacterArgDescription)),
                 SetPowerRatingAsync);
+            yield return new AgentTool("set_karma_for_nuyen",
+                "Trade build karma for starting nuyen during creation, as the editor's nuyen box does (2,000 nuyen per karma by default, capped by "
+                + "the settings). Pass the total karma to spend this way, not an increase.",
+                AgentTool.Schema(("karma!", "integer", "Total karma converted to nuyen. 0 undoes it."),
+                                 ("character", "string", CharacterArgDescription)),
+                SetKarmaForNuyenAsync);
             yield return new AgentTool("add_contact",
                 "Add a contact paid for with contact points (CHA x 3 by default) and then karma.",
                 AgentTool.Schema(("name", "string", "Contact's name or description, e.g. 'Fixer - Mama Rosa'."),
@@ -441,6 +451,16 @@ namespace Chummer.Agent
                 {
                     await objSkill.SetDefaultAttributeAsync("LOG", token).ConfigureAwait(false);
                     await objSkill.SetWritableNameAsync(strName, token).ConfigureAwait(false);
+                    string strType = objArgs.Value<string>("type")?.Trim();
+                    if (!string.IsNullOrEmpty(strType))
+                    {
+                        IReadOnlyDictionary<string, string> dicTypes = await objSkillsSection.GetKnowledgeSkillCategoriesMapAsync(token).ConfigureAwait(false);
+                        string strMatch = dicTypes.Keys.FirstOrDefault(x => string.Equals(x, strType, StringComparison.OrdinalIgnoreCase))
+                                          ?? throw new AgentToolException("Unknown knowledge skill type '" + strType + "'. Use one of: "
+                                                                          + string.Join(", ", dicTypes.Keys) + ".");
+                        await objSkill.SetTypeAsync(strMatch, token).ConfigureAwait(false);
+                    }
+
                     if (objArgs.Value<bool?>("native_language") == true)
                     {
                         if (!await objSkillsSection.GetHasAvailableNativeLanguageSlotsAsync(token).ConfigureAwait(false))
@@ -486,7 +506,19 @@ namespace Chummer.Agent
             if (!string.IsNullOrEmpty(strSpec) && !await objSkill.GetCanHaveSpecsAsync(token).ConfigureAwait(false)
                                                && !await objCharacter.GetIgnoreRulesAsync(token).ConfigureAwait(false))
                 throw new AgentToolException(strDisplayName + " can't have a specialization right now (it needs a rating, and it can't be part of an unbroken skill group).");
+            bool? blnWithKarma = objArgs.Value<bool?>("with_karma");
+            if (blnWithKarma == null && !string.IsNullOrEmpty(strSpec))
+            {
+                int intPointsLeft = objSkill.IsKnowledgeSkill
+                    ? await objSkillsSection.GetKnowledgeSkillPointsRemainAsync(token).ConfigureAwait(false)
+                    : await objSkillsSection.GetSkillPointsAsync(token).ConfigureAwait(false);
+                blnWithKarma = intPointsLeft <= 0;
+            }
+
             await objSkill.SetTopMostDisplaySpecializationAsync(strSpec, token).ConfigureAwait(false);
+            // Chummer only keeps the Karma checkbox on a skill that has a specialization to pay for, so this comes second
+            if (blnWithKarma != null)
+                await objSkill.SetBuyWithKarmaAsync(blnWithKarma.Value, token).ConfigureAwait(false);
             return await FinishEditAsync(frmCreate,
                                          string.IsNullOrEmpty(strSpec)
                                              ? "Removed the specialization from " + strDisplayName + "."
@@ -570,6 +602,19 @@ namespace Chummer.Agent
                                                ?? throw new AgentToolException("The technique was not added (a choice it needed was cancelled).");
             return await FinishEditAsync(frmCreate, "Learned " + await objTechnique.GetCurrentDisplayNameAsync(token).ConfigureAwait(false)
                                                     + " for " + objArt.Name + ".", token).ConfigureAwait(false);
+        }
+
+        private static async Task<object> SetKarmaForNuyenAsync(JObject objArgs, CancellationToken token)
+        {
+            CharacterCreate frmCreate = await GetCreateFormAsync(objArgs, token).ConfigureAwait(false);
+            Character objCharacter = frmCreate.CharacterObject;
+            int intKarma = OptionalInt(objArgs, "karma") ?? throw new AgentToolException("`karma` is required.");
+            decimal decMaximum = await objCharacter.GetTotalNuyenMaximumBPAsync(token).ConfigureAwait(false);
+            if (intKarma < 0 || intKarma > decMaximum)
+                throw new AgentToolException("Karma for nuyen must be between 0 and " + decMaximum.ToString(GlobalSettings.InvariantCultureInfo) + ".");
+            await objCharacter.SetNuyenBPAsync(intKarma, token).ConfigureAwait(false);
+            return await FinishEditAsync(frmCreate, intKarma.ToString(GlobalSettings.InvariantCultureInfo) + " karma now goes to starting nuyen.", token)
+                .ConfigureAwait(false);
         }
 
         #endregion
@@ -692,6 +737,10 @@ namespace Chummer.Agent
             Power objPower = new Power(objCharacter);
             try
             {
+                // A power's Extra is what its choice dialog gets pre-answered with, as when the editor re-creates a power
+                string strForced = objArgs.Value<string>("forced_value");
+                if (!string.IsNullOrEmpty(strForced))
+                    await objPower.SetExtraAsync(strForced, token).ConfigureAwait(false);
                 if (!await objPower.CreateAsync(objXmlPower, token: token).ConfigureAwait(false))
                 {
                     await objPower.DeletePowerAsync(token).ConfigureAwait(false);
