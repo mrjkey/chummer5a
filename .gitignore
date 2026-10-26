@@ -212,3 +212,7 @@ FakesAssemblies/
 
 # Mac Specific Generated Files
 .DS_Store
+
+# WSL build helper (scripts/win-env.sh) and release packages (scripts/win-release.sh)
+.wsl-run.cmd
+/dist/

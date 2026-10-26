@@ -1,13 +1,14 @@
 # Chummer5a (fork with an AI-agent MCP server)
 
-Chummer is a .NET Framework 4.8 WinForms app (Windows only). This repo lives in WSL; it's built and run on the Windows host through the scripts in `scripts/`.
+Chummer is a .NET Framework 4.8 WinForms app (Windows only). The repo lives on the Windows drive (`/mnt/c/dev/chummer5a`) and is built and run on the Windows host from WSL through the scripts in `scripts/`.
 
 ## Build / run / test from WSL
 
-- `scripts/win-build.sh`: rsyncs the repo to `C:\dev\chummer5a` (cmd-based build events break on `\\wsl$` paths) and builds `Chummer.csproj` with Visual Studio's MSBuild. `dotnet build` does **not** work (binary .resx resources, MSB3823).
+- `scripts/win-build.sh`: builds `Chummer.csproj` with Visual Studio's MSBuild (found via vswhere). `dotnet build` does **not** work (binary .resx resources, MSB3823). `CONFIG=Release scripts/win-build.sh` for a release build.
 - `scripts/win-test.sh [dotnet test args]`: builds and runs `Chummer.Tests` (MSTest), e.g. `scripts/win-test.sh --filter "FullyQualifiedName~AgentToolsTests"`.
 - `scripts/win-run.sh [chummer args]`: launches the built `Chummer5.exe`. Close any running Chummer before rebuilding.
-- `scripts/win-env.sh` holds the paths. Override them with `CHUMMER_WIN_DIR`, `CONFIG`, `MSBUILD` or `MSBUILD_SDKS_PATH`. The VS install has no .NET SDK resolver, so the scripts point MSBuild at the installed .NET SDK and disable the workload resolver.
+- `scripts/win-release.sh [version]`: clean Release build packaged with the Claude Code setup files as `dist/Chummer5a-MCP-<version>.zip`. See `docs/releasing.md`; the end-user guide is `docs/ai-agent-setup.md`.
+- `scripts/win-env.sh` holds the paths. If the repo is on the WSL filesystem instead, the scripts rsync it to `C:\dev\chummer5a` first (cmd-based build events break on `\\wsl$` paths). Override with `CHUMMER_WIN_DIR`, `CONFIG`, `MSBUILD` or `MSBUILD_SDKS_PATH`. The VS install has no .NET SDK resolver, so the scripts point MSBuild at the newest installed .NET 8 SDK and disable the workload resolver.
 
 ## AI agent integration
 
