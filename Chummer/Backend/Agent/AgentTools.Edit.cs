@@ -148,6 +148,26 @@ namespace Chummer.Agent
                                  ("loyalty!", "integer", "Loyalty rating 1-6."),
                                  ("character", "string", CharacterArgDescription)),
                 AddContactAsync);
+            yield return new AgentTool("set_character_details",
+                "Set the character's personal details, as typing into the editor's Description tab does: name, alias, looks, concept, description, "
+                + "background and notes. Only the fields passed change; an empty string clears one. Works in creation and career mode.",
+                AgentTool.Schema(("name", "string", "Character's full name."),
+                                 ("alias", "string", "Street name."),
+                                 ("player_name", "string", "The player's name."),
+                                 ("gender", "string", "Gender."),
+                                 ("age", "string", "Age."),
+                                 ("eyes", "string", "Eye color."),
+                                 ("hair", "string", "Hair."),
+                                 ("skin", "string", "Skin."),
+                                 ("height", "string", "Height, e.g. '1.85 m'."),
+                                 ("weight", "string", "Weight, e.g. '78 kg'."),
+                                 ("concept", "string", "One-line concept."),
+                                 ("description", "string", "Physical description. Plain text; blank lines separate paragraphs."),
+                                 ("background", "string", "Background story. Plain text; blank lines separate paragraphs."),
+                                 ("notes", "string", "Character notes."),
+                                 ("game_notes", "string", "Notes for the GM or game."),
+                                 ("character", "string", CharacterArgDescription)),
+                SetCharacterDetailsAsync);
             yield return new AgentTool("remove_item",
                 "Remove something the character has, by the id (or name) shown in get_character_summary: a spell, adept power, contact, spirit or sprite, "
                 + "complex form, martial art or technique, metamagic or echo, initiation grade, weapon (or accessory), armor (or mod), gear, "
@@ -831,6 +851,47 @@ namespace Chummer.Agent
                                          + (await objContact.GetConnectionAsync(token).ConfigureAwait(false)).ToString(GlobalSettings.InvariantCultureInfo) + ", loyalty "
                                          + (await objContact.GetLoyaltyAsync(token).ConfigureAwait(false)).ToString(GlobalSettings.InvariantCultureInfo) + ").",
                                          token).ConfigureAwait(false);
+        }
+
+        private static async Task<object> SetCharacterDetailsAsync(JObject objArgs, CancellationToken token)
+        {
+            CharacterShared frmCharacter = await GetCharacterFormAsync(objArgs, token).ConfigureAwait(false);
+            Character objCharacter = frmCharacter.CharacterObject;
+            // The setters the Description tab's boxes are bound to, so the open editor shows the new text
+            (string Name, Func<string, CancellationToken, Task> Setter)[] aobjFields =
+            {
+                ("name", objCharacter.SetNameAsync),
+                ("alias", objCharacter.SetAliasAsync),
+                ("player_name", objCharacter.SetPlayerNameAsync),
+                ("gender", objCharacter.SetGenderAsync),
+                ("age", objCharacter.SetAgeAsync),
+                ("eyes", objCharacter.SetEyesAsync),
+                ("hair", objCharacter.SetHairAsync),
+                ("skin", objCharacter.SetSkinAsync),
+                ("height", objCharacter.SetHeightAsync),
+                ("weight", objCharacter.SetWeightAsync),
+                ("concept", objCharacter.SetConceptAsync),
+                ("description", objCharacter.SetDescriptionAsync),
+                ("background", objCharacter.SetBackgroundAsync),
+                ("notes", objCharacter.SetNotesAsync),
+                ("game_notes", objCharacter.SetGameNotesAsync)
+            };
+            List<string> lstChanged = new List<string>();
+            foreach ((string strField, Func<string, CancellationToken, Task> funcSetter) in aobjFields)
+            {
+                JToken objValue = objArgs[strField];
+                if (objValue == null || objValue.Type == JTokenType.Null)
+                    continue;
+                // The editor's multi-line boxes store Windows line breaks
+                string strValue = objValue.ToString().Replace("\r\n", "\n").Replace("\n", Environment.NewLine);
+                await funcSetter(strValue, token).ConfigureAwait(false);
+                lstChanged.Add(strField);
+            }
+
+            if (lstChanged.Count == 0)
+                throw new AgentToolException("Pass at least one field to set, e.g. `background` or `age`.");
+            await frmCharacter.MakeDirtyWithCharacterUpdate(token).ConfigureAwait(false);
+            return new { result = "Set " + string.Join(", ", lstChanged) + " for " + await objCharacter.GetCharacterNameAsync(token).ConfigureAwait(false) + "." };
         }
 
         private static async Task<object> RemoveItemAsync(JObject objArgs, CancellationToken token)

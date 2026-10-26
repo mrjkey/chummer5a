@@ -49,9 +49,10 @@ namespace Chummer.Agent
             + "get_priority_table, then create_character; set_priorities changes them later. Spend points with set_attribute/set_skill/add_quality "
             + "and friends; magic and resonance with set_tradition, add_spell, add_power, add_complex_form, add_mentor_spirit, add_spirit, add_initiation, "
             + "add_art and add_metamagic; buy gear with add_weapon/add_armor/add_gear/add_cyberware/add_vehicle/add_lifestyle and fit it out with "
-            + "add_weapon_accessory/add_armor_mod/add_vehicle_mod; remove_item undoes any of these. Call save_character when the user wants it saved and "
+            + "add_weapon_accessory/add_armor_mod/add_vehicle_mod; remove_item undoes any of these. set_character_details fills in looks, concept and background. "
+            + "Call save_character when the user wants it saved and "
             + "export_character_sheet for a sheet to play from; open_character reopens saved files. Unless asked otherwise, stick to the core rulebook (the Standard settings). "
-            + "Edits only work while the character is in creation mode.";
+            + "Edits only work while the character is in creation mode, except set_character_details.";
 
         private const string CharacterArgDescription =
             "Which open character to use (matches name, alias or file name). Defaults to the character in the active editor tab.";

@@ -632,6 +632,19 @@ namespace Chummer.Tests
             Assert.IsTrue(((JArray)objAfter["knowledgeSkills"]).Any(x => x.Value<string>("name") == "Agent Test Lore"), objAfter["knowledgeSkills"].ToString());
             await CallToolOkAsync("remove_item", new JObject { ["id"] = "Agent Test Fixer" }, token).ConfigureAwait(false);
 
+            // Personal details change only the fields passed, and multi-line text keeps its paragraphs
+            await CallToolOkAsync("set_character_details", new JObject
+            {
+                ["age"] = "31",
+                ["concept"] = "Agent test concept",
+                ["background"] = "First paragraph.\n\nSecond paragraph."
+            }, token).ConfigureAwait(false);
+            Assert.AreEqual("31", ((JObject)await CallToolOkAsync("export_character", new JObject { ["section"] = "age" }, token).ConfigureAwait(false)).Value<string>("age"));
+            StringAssert.Contains(((JObject)await CallToolOkAsync("export_character", new JObject { ["section"] = "background" }, token).ConfigureAwait(false))
+                                  .Value<string>("background"), "Second paragraph.");
+            (bool blnDetailsError, string strDetailsText) = await CallToolAsync("set_character_details", new JObject(), token).ConfigureAwait(false);
+            Assert.IsTrue(blnDetailsError, strDetailsText);
+
             // A quality with no choices; if Skink is at the positive quality limit the refusal must say so
             (bool blnQualityError, string strQualityText) = await CallToolAsync("add_quality", new JObject { ["id"] = "Photographic Memory" }, token).ConfigureAwait(false);
             if (blnQualityError)

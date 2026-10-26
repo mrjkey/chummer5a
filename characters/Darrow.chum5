@@ -5,7 +5,7 @@
   <appversion>5.226.0</appversion>
   <gameedition>SR5</gameedition>
   <settings>223a11ff-80e0-428b-89a9-6ef1c243b8b6</settings>
-  <settingshashcode>-1135598158</settingshashcode>
+  <settingshashcode>791380349</settingshashcode>
   <buildmethod>Priority</buildmethod>
   <sources>
     <source>SR5</source>
@@ -35,16 +35,20 @@
   <name>Darrow Vance</name>
   <mainmugshotindex>-1</mainmugshotindex>
   <mugshots />
-  <gender />
-  <age />
-  <eyes />
-  <height />
-  <weight />
-  <skin />
-  <hair />
-  <description />
-  <background />
-  <concept />
+  <gender>Male</gender>
+  <age>26</age>
+  <eyes>Grey-green</eyes>
+  <height>1.85 m</height>
+  <weight>78 kg</weight>
+  <skin>Fair</skin>
+  <hair>Dark, expensively cut</hair>
+  <description>Tall, lean and polished, with perfect teeth and an easy smile. Always in a tailored suit (armored, though you'd never know it). Up close he smells faintly of something expensive nobody can quite name. His voice is warm and practiced, and he can make it sound like anyone.</description>
+  <background>Darrow grew up inside a Horizon executive family: a penthouse, the VIP list at every club in Seattle, a corporate SIN, and designer bioware paid for by his father. He has always been able to talk his way into or out of anything, and he never had to work for it.
+
+Then his parents cut him off. Maybe it was the novacoke, maybe the scandal, maybe one favor too many. The trust fund is gone and the penthouse lease runs out at the end of the month. He still has expensive tastes and a habit to feed, and the only skill he has is making people want to say yes. So now he does that for money, as the voice of a shadowrunner crew.
+
+He is not a fighter. When guns come out, he gets small, finds cover, and keeps talking.</background>
+  <concept>Disowned Horizon heir turned shadowrunner face</concept>
   <notes />
   <alias>Darrow</alias>
   <playername />
@@ -55,7 +59,7 @@
   <totalspecial>3</totalspecial>
   <totalattributes>20</totalattributes>
   <edgeused>0</edgeused>
-  <contactpoints>18</contactpoints>
+  <contactpoints>21</contactpoints>
   <spelllimit>0</spelllimit>
   <cfplimit>0</cfplimit>
   <ainormalprogramlimit>0</ainormalprogramlimit>
@@ -75,7 +79,7 @@
   <created>False</created>
   <nuyen>140000</nuyen>
   <startingnuyen>140000</startingnuyen>
-  <nuyenbp>1</nuyenbp>
+  <nuyenbp>2</nuyenbp>
   <adept>False</adept>
   <magician>False</magician>
   <technomancer>False</technomancer>
@@ -120,10 +124,10 @@
       <metatypemin>1</metatypemin>
       <metatypemax>6</metatypemax>
       <metatypeaugmax>10</metatypeaugmax>
-      <base>5</base>
+      <base>6</base>
       <karma>0</karma>
       <metatypecategory>Standard</metatypecategory>
-      <totalvalue>6</totalvalue>
+      <totalvalue>7</totalvalue>
     </attribute>
     <attribute>
       <name>INT</name>
@@ -220,10 +224,10 @@
       <metatypemin>1</metatypemin>
       <metatypemax>6</metatypemax>
       <metatypeaugmax>10</metatypeaugmax>
-      <base>2</base>
+      <base>1</base>
       <karma>0</karma>
       <metatypecategory>Standard</metatypecategory>
-      <totalvalue>3</totalvalue>
+      <totalvalue>2</totalvalue>
     </attribute>
   </attributes>
   <magenabled>False</magenabled>
@@ -1993,38 +1997,6 @@
       <notesColor>Chocolate</notesColor>
     </quality>
     <quality>
-      <sourceid>78f7456d-78b8-461e-a2b2-bd0d63c48712</sourceid>
-      <guid>7d0e85ca-4031-464e-b95c-8455e4fcd21b</guid>
-      <name>Lucky</name>
-      <extra />
-      <bp>12</bp>
-      <implemented>True</implemented>
-      <contributetobp>True</contributetobp>
-      <contributetolimit>True</contributetolimit>
-      <stagedpurchase>False</stagedpurchase>
-      <doublecareer>True</doublecareer>
-      <canbuywithspellpoints>False</canbuywithspellpoints>
-      <metagenic>False</metagenic>
-      <print>True</print>
-      <qualitytype>Positive</qualitytype>
-      <qualitysource>Selected</qualitysource>
-      <mutant>False</mutant>
-      <source>SR5</source>
-      <page>76</page>
-      <sourcename />
-      <bonus>
-        <notoriety>-1</notoriety>
-        <specificattribute>
-          <name>EDG</name>
-          <max>1</max>
-        </specificattribute>
-      </bonus>
-      <firstlevelbonus />
-      <naturalweapons />
-      <notes />
-      <notesColor>Chocolate</notesColor>
-    </quality>
-    <quality>
       <sourceid>9f25cc0a-c47c-49dd-953c-8fe60628bae8</sourceid>
       <guid>6e5088d7-b873-4b92-ab69-ee68251aeda5</guid>
       <name>First Impression</name>
@@ -2051,6 +2023,39 @@
           <bonus>2</bonus>
           <condition>Meeting people the first time</condition>
         </skillcategory>
+      </bonus>
+      <firstlevelbonus />
+      <naturalweapons />
+      <notes />
+      <notesColor>Chocolate</notesColor>
+    </quality>
+    <quality>
+      <sourceid>2ac8a95a-a4d0-4bef-a2f2-dcde020258cf</sourceid>
+      <guid>fcaa76b8-d60d-48fa-89d5-22cb61660019</guid>
+      <name>Exceptional Attribute</name>
+      <extra>CHA</extra>
+      <bp>14</bp>
+      <implemented>True</implemented>
+      <contributetobp>True</contributetobp>
+      <contributetolimit>True</contributetolimit>
+      <stagedpurchase>False</stagedpurchase>
+      <doublecareer>True</doublecareer>
+      <canbuywithspellpoints>False</canbuywithspellpoints>
+      <metagenic>False</metagenic>
+      <print>True</print>
+      <qualitytype>Positive</qualitytype>
+      <qualitysource>Selected</qualitysource>
+      <mutant>False</mutant>
+      <source>SR5</source>
+      <page>72</page>
+      <sourcename />
+      <bonus>
+        <selectattributes>
+          <selectattribute>
+            <excludeattribute>EDG</excludeattribute>
+            <max>1</max>
+          </selectattribute>
+        </selectattributes>
       </bonus>
       <firstlevelbonus />
       <naturalweapons />
@@ -2102,63 +2107,6 @@
     </lifestyle>
   </lifestyles>
   <gears>
-    <gear>
-      <sourceid>0c800bca-e6ff-475b-a014-c2069f5e364c</sourceid>
-      <guid>42433ae4-8d74-4a18-99d9-4797c7b7b596</guid>
-      <name>Fake SIN</name>
-      <category>ID/Credsticks</category>
-      <capacity />
-      <armorcapacity />
-      <minrating />
-      <maxrating>6</maxrating>
-      <rating>3</rating>
-      <qty>1.0</qty>
-      <avail>(Rating * 3)F</avail>
-      <cost>Rating * 2500</cost>
-      <weight />
-      <extra>Darren Vale</extra>
-      <bonded>False</bonded>
-      <equipped>True</equipped>
-      <wirelesson>False</wirelesson>
-      <stolen>False</stolen>
-      <bonus />
-      <wirelessbonus />
-      <weaponbonus />
-      <flechetteweaponbonus />
-      <source>SR5</source>
-      <page>442</page>
-      <isflechetteammo>False</isflechetteammo>
-      <ammoforweapontype />
-      <canformpersona />
-      <devicerating />
-      <gearname />
-      <forcedvalue>Darren Vale</forcedvalue>
-      <matrixcmfilled>0</matrixcmfilled>
-      <matrixcmbonus>0</matrixcmbonus>
-      <parentid />
-      <allowrename>True</allowrename>
-      <children />
-      <location />
-      <notes />
-      <notesColor>Chocolate</notesColor>
-      <discountedcost>False</discountedcost>
-      <programlimit />
-      <overclocked>None</overclocked>
-      <attack />
-      <sleaze />
-      <dataprocessing />
-      <firewall />
-      <attributearray />
-      <modattack />
-      <modsleaze />
-      <moddataprocessing />
-      <modfirewall />
-      <modattributearray />
-      <canswapattributes>False</canswapattributes>
-      <active>False</active>
-      <homenode>False</homenode>
-      <sortorder>0</sortorder>
-    </gear>
     <gear>
       <sourceid>8a16bbb2-8028-4c74-b22b-7aad9d001073</sourceid>
       <guid>f7e0aacd-8668-40f3-9aa8-be0b20ab5e76</guid>
@@ -3608,8 +3556,65 @@
       <sortorder>0</sortorder>
     </gear>
     <gear>
+      <sourceid>0c800bca-e6ff-475b-a014-c2069f5e364c</sourceid>
+      <guid>568598ab-35fa-4543-9a9f-97800ca5b640</guid>
+      <name>Fake SIN</name>
+      <category>ID/Credsticks</category>
+      <capacity />
+      <armorcapacity />
+      <minrating />
+      <maxrating>6</maxrating>
+      <rating>4</rating>
+      <qty>1.0</qty>
+      <avail>(Rating * 3)F</avail>
+      <cost>Rating * 2500</cost>
+      <weight />
+      <extra>Darren Vale</extra>
+      <bonded>False</bonded>
+      <equipped>True</equipped>
+      <wirelesson>False</wirelesson>
+      <stolen>False</stolen>
+      <bonus />
+      <wirelessbonus />
+      <weaponbonus />
+      <flechetteweaponbonus />
+      <source>SR5</source>
+      <page>442</page>
+      <isflechetteammo>False</isflechetteammo>
+      <ammoforweapontype />
+      <canformpersona />
+      <devicerating />
+      <gearname />
+      <forcedvalue>Darren Vale</forcedvalue>
+      <matrixcmfilled>0</matrixcmfilled>
+      <matrixcmbonus>0</matrixcmbonus>
+      <parentid />
+      <allowrename>True</allowrename>
+      <children />
+      <location />
+      <notes />
+      <notesColor>Chocolate</notesColor>
+      <discountedcost>False</discountedcost>
+      <programlimit />
+      <overclocked>None</overclocked>
+      <attack />
+      <sleaze />
+      <dataprocessing />
+      <firewall />
+      <attributearray />
+      <modattack />
+      <modsleaze />
+      <moddataprocessing />
+      <modfirewall />
+      <modattributearray />
+      <canswapattributes>False</canswapattributes>
+      <active>False</active>
+      <homenode>False</homenode>
+      <sortorder>0</sortorder>
+    </gear>
+    <gear>
       <sourceid>8a16bbb2-8028-4c74-b22b-7aad9d001073</sourceid>
-      <guid>33692d21-9b5c-4e9f-b209-ace5ae8b802c</guid>
+      <guid>22243a89-9347-4af0-908e-aa0ab5fdb562</guid>
       <name>Fake License</name>
       <category>ID/Credsticks</category>
       <capacity />
@@ -3621,7 +3626,7 @@
       <avail>(Rating * 3)F</avail>
       <cost>Rating * 200</cost>
       <weight />
-      <extra>Restricted Cyberware (Voice Modulator)</extra>
+      <extra>Restricted Bioware (Tailored Pheromones)</extra>
       <bonded>False</bonded>
       <equipped>True</equipped>
       <wirelesson>False</wirelesson>
@@ -3637,7 +3642,7 @@
       <canformpersona />
       <devicerating />
       <gearname />
-      <forcedvalue>Restricted Cyberware (Voice Modulator)</forcedvalue>
+      <forcedvalue>Restricted Bioware (Tailored Pheromones)</forcedvalue>
       <matrixcmfilled>0</matrixcmfilled>
       <matrixcmbonus>0</matrixcmbonus>
       <parentid />
@@ -3733,54 +3738,6 @@
       <exclude />
       <condition />
       <improvementttype>Text</improvementttype>
-      <improvementsource>Quality</improvementsource>
-      <custom>False</custom>
-      <customname />
-      <customid />
-      <customgroup />
-      <addtorating>0</addtorating>
-      <enabled>1</enabled>
-      <order>0</order>
-      <notes />
-      <notesColor>Chocolate</notesColor>
-    </improvement>
-    <improvement>
-      <target />
-      <improvedname />
-      <sourcename>7d0e85ca-4031-464e-b95c-8455e4fcd21b</sourcename>
-      <min>0</min>
-      <max>0</max>
-      <aug>0</aug>
-      <augmax>0</augmax>
-      <val>-1</val>
-      <rating>1</rating>
-      <exclude />
-      <condition />
-      <improvementttype>Notoriety</improvementttype>
-      <improvementsource>Quality</improvementsource>
-      <custom>False</custom>
-      <customname />
-      <customid />
-      <customgroup />
-      <addtorating>0</addtorating>
-      <enabled>1</enabled>
-      <order>0</order>
-      <notes />
-      <notesColor>Chocolate</notesColor>
-    </improvement>
-    <improvement>
-      <target />
-      <improvedname>EDG</improvedname>
-      <sourcename>7d0e85ca-4031-464e-b95c-8455e4fcd21b</sourcename>
-      <min>0</min>
-      <max>1</max>
-      <aug>0</aug>
-      <augmax>0</augmax>
-      <val>0</val>
-      <rating>1</rating>
-      <exclude />
-      <condition />
-      <improvementttype>Attribute</improvementttype>
       <improvementsource>Quality</improvementsource>
       <custom>False</custom>
       <customname />
@@ -3938,30 +3895,6 @@
     </improvement>
     <improvement>
       <target />
-      <improvedname>Darren Vale</improvedname>
-      <sourcename>42433ae4-8d74-4a18-99d9-4797c7b7b596</sourcename>
-      <min>0</min>
-      <max>0</max>
-      <aug>0</aug>
-      <augmax>0</augmax>
-      <val>0</val>
-      <rating>1</rating>
-      <exclude />
-      <condition />
-      <improvementttype>Text</improvementttype>
-      <improvementsource>Gear</improvementsource>
-      <custom>False</custom>
-      <customname />
-      <customid />
-      <customgroup />
-      <addtorating>0</addtorating>
-      <enabled>1</enabled>
-      <order>0</order>
-      <notes />
-      <notesColor>Chocolate</notesColor>
-    </improvement>
-    <improvement>
-      <target />
       <improvedname>Concealed Carry</improvedname>
       <sourcename>f7e0aacd-8668-40f3-9aa8-be0b20ab5e76</sourcename>
       <min>0</min>
@@ -4010,8 +3943,56 @@
     </improvement>
     <improvement>
       <target />
-      <improvedname>Restricted Cyberware (Voice Modulator)</improvedname>
-      <sourcename>33692d21-9b5c-4e9f-b209-ace5ae8b802c</sourcename>
+      <improvedname>CHA</improvedname>
+      <sourcename>fcaa76b8-d60d-48fa-89d5-22cb61660019</sourcename>
+      <min>0</min>
+      <max>1</max>
+      <aug>0</aug>
+      <augmax>0</augmax>
+      <val>0</val>
+      <rating>1</rating>
+      <exclude />
+      <condition />
+      <improvementttype>Attribute</improvementttype>
+      <improvementsource>Quality</improvementsource>
+      <custom>False</custom>
+      <customname />
+      <customid />
+      <customgroup />
+      <addtorating>0</addtorating>
+      <enabled>1</enabled>
+      <order>0</order>
+      <notes />
+      <notesColor>Chocolate</notesColor>
+    </improvement>
+    <improvement>
+      <target />
+      <improvedname>Darren Vale</improvedname>
+      <sourcename>568598ab-35fa-4543-9a9f-97800ca5b640</sourcename>
+      <min>0</min>
+      <max>0</max>
+      <aug>0</aug>
+      <augmax>0</augmax>
+      <val>0</val>
+      <rating>1</rating>
+      <exclude />
+      <condition />
+      <improvementttype>Text</improvementttype>
+      <improvementsource>Gear</improvementsource>
+      <custom>False</custom>
+      <customname />
+      <customid />
+      <customgroup />
+      <addtorating>0</addtorating>
+      <enabled>1</enabled>
+      <order>0</order>
+      <notes />
+      <notesColor>Chocolate</notesColor>
+    </improvement>
+    <improvement>
+      <target />
+      <improvedname>Restricted Bioware (Tailored Pheromones)</improvedname>
+      <sourcename>22243a89-9347-4af0-908e-aa0ab5fdb562</sourcename>
       <min>0</min>
       <max>0</max>
       <aug>0</aug>
@@ -4047,7 +4028,7 @@
     <physicalcm>10</physicalcm>
     <physicalcmthresholdoffset>0</physicalcmthresholdoffset>
     <physicalcmoverflow>4</physicalcmoverflow>
-    <stuncm>10</stuncm>
+    <stuncm>9</stuncm>
     <stuncmthresholdoffset>0</stuncmthresholdoffset>
   </calculatedvalues>
 </character>
