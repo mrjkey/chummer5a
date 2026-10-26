@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "chummer": {
+      "type": "http",
+      "url": "http://localhost:51723/mcp"
+    }
+  }
+}

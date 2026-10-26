@@ -146,13 +146,32 @@ namespace Chummer.Agent
             Character objCharacter = frmCreate.CharacterObject;
             SkillsSection objSkills = await objCharacter.GetSkillsSectionAsync(token).ConfigureAwait(false);
             (decimal decNuyen, decimal _) = await objCharacter.CalculateNuyenCreateModeAsync(token).ConfigureAwait(false);
+            int intKarma = await frmCreate.CalculateKarmaRemainingAsync(null, token).ConfigureAwait(false);
+            int intSkillPoints = await objSkills.GetSkillPointsAsync(token).ConfigureAwait(false);
+            int intSkillGroupPoints = await objSkills.GetSkillGroupPointsAsync(token).ConfigureAwait(false);
+            int intKnowledgePoints = await objSkills.GetKnowledgeSkillPointsRemainAsync(token).ConfigureAwait(false);
+            // Chummer lets the editor go over budget (it only complains when finishing creation), so say so loudly
+            List<string> lstOverspent = new List<string>();
+            if (intKarma < 0)
+                lstOverspent.Add("karma by " + (-intKarma).ToString(GlobalSettings.InvariantCultureInfo));
+            if (intSkillPoints < 0)
+                lstOverspent.Add("skill points by " + (-intSkillPoints).ToString(GlobalSettings.InvariantCultureInfo));
+            if (intSkillGroupPoints < 0)
+                lstOverspent.Add("skill group points by " + (-intSkillGroupPoints).ToString(GlobalSettings.InvariantCultureInfo));
+            if (intKnowledgePoints < 0)
+                lstOverspent.Add("knowledge skill points by " + (-intKnowledgePoints).ToString(GlobalSettings.InvariantCultureInfo));
+            if (decNuyen < 0)
+                lstOverspent.Add("nuyen by " + (-decNuyen).ToString(GlobalSettings.InvariantCultureInfo));
             return new
             {
                 result = strResult,
-                karmaRemaining = await frmCreate.CalculateKarmaRemainingAsync(null, token).ConfigureAwait(false),
-                skillPointsRemaining = await objSkills.GetSkillPointsAsync(token).ConfigureAwait(false),
-                skillGroupPointsRemaining = await objSkills.GetSkillGroupPointsAsync(token).ConfigureAwait(false),
-                knowledgePointsRemaining = await objSkills.GetKnowledgeSkillPointsRemainAsync(token).ConfigureAwait(false),
+                warning = lstOverspent.Count > 0
+                    ? "Over budget: " + string.Join(", ", lstOverspent) + ". The character can't finish creation until this is fixed."
+                    : null,
+                karmaRemaining = intKarma,
+                skillPointsRemaining = intSkillPoints,
+                skillGroupPointsRemaining = intSkillGroupPoints,
+                knowledgePointsRemaining = intKnowledgePoints,
                 nuyenRemaining = decNuyen
             };
         }

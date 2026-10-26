@@ -160,7 +160,6 @@ namespace Chummer.Tests
             JObject objSummary = (JObject)await CallToolOkAsync("get_character_summary", null, token).ConfigureAwait(false);
             Assert.AreEqual("creation", objSummary.Value<string>("mode"));
             int intKarma = objSummary["karma"].Value<int>("remaining");
-            File.WriteAllText(@"C:\dev\agent-debug-summary.json", objSummary.ToString());
             Assert.IsNotNull(objSummary["points"]["skillPoints"], objSummary.ToString());
             Assert.IsTrue(((JArray)objSummary["attributes"]).Count >= 8);
             Assert.IsNotNull(objSummary["magic"], "Skink is an adept");
@@ -226,11 +225,22 @@ namespace Chummer.Tests
 
             // A quality with no choices; if Skink is at the positive quality limit the refusal must say so
             (bool blnQualityError, string strQualityText) = await CallToolAsync("add_quality", new JObject { ["id"] = "Photographic Memory" }, token).ConfigureAwait(false);
-            File.WriteAllText(@"C:\dev\agent-debug-quality.txt", strQualityText + "\n\nVALIDATION:\n" + objValidation + "\n\nPRIORITIES:\n" + objPriorities.ToString().Substring(0, 3000));
             if (blnQualityError)
                 StringAssert.Contains(strQualityText.ToLowerInvariant(), "karma", strQualityText);
             else
+            {
+                JObject objAdded = JObject.Parse(strQualityText);
+                if (objAdded.Value<int>("karmaRemaining") < 0)
+                {
+                    // Overspending is allowed in the editor but must be reported, and must block finishing creation
+                    Assert.IsNotNull(objAdded.Value<string>("warning"), strQualityText);
+                    JObject objOverspent = (JObject)await CallToolOkAsync("validate_character", null, token).ConfigureAwait(false);
+                    Assert.IsFalse(objOverspent.Value<bool>("valid"), objOverspent.ToString());
+                    Assert.IsTrue(((JArray)objOverspent["errors"]).Count > 0, objOverspent.ToString());
+                }
+
                 await CallToolOkAsync("remove_quality", new JObject { ["id"] = "Photographic Memory" }, token).ConfigureAwait(false);
+            }
         }
     }
 }
