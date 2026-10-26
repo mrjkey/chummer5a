@@ -52,33 +52,42 @@ namespace Chummer
             _xmlBaseChummerNode = _objCharacter.LoadDataXPath("martialarts.xml").SelectSingleNodeAndCacheExpression("/chummer");
             _setAllowedTechniques = Utils.StringHashSetPool.Get();
             // Populate the Martial Art Technique list.
-            XPathNavigator xmlMartialArtNode = _objMartialArt.GetNodeXPath();
-            if (xmlMartialArtNode != null)
+            FillAllowedTechniques(_objCharacter, _objMartialArt, _xmlBaseChummerNode, _setAllowedTechniques);
+        }
+
+        /// <summary>
+        /// Fill <paramref name="setAllowedTechniques"/> with the names of the techniques a martial art lets the character learn next.
+        /// Each technique must also meet its own requirements, checked against the martial art.
+        /// </summary>
+        internal static void FillAllowedTechniques(Character objCharacter, MartialArt objMartialArt, XPathNavigator xmlBaseChummerNode,
+                                                   ISet<string> setAllowedTechniques)
+        {
+            XPathNavigator xmlMartialArtNode = objMartialArt.GetNodeXPath();
+            if (xmlMartialArtNode == null)
+                return;
+            if (!xmlMartialArtNode.NodeExists("alltechniques"))
             {
-                if (!xmlMartialArtNode.NodeExists("alltechniques"))
+                foreach (XPathNavigator xmlTechnique in xmlMartialArtNode.SelectAndCacheExpression("techniques/technique"))
                 {
-                    foreach (XPathNavigator xmlTechnique in xmlMartialArtNode.SelectAndCacheExpression("techniques/technique"))
+                    string strTechniqueName = xmlTechnique.Value;
+                    if (objMartialArt.Techniques.All(x => x.Name != strTechniqueName))
                     {
-                        string strTechniqueName = xmlTechnique.Value;
-                        if (_objMartialArt.Techniques.All(x => x.Name != strTechniqueName))
-                        {
-                            _setAllowedTechniques.Add(strTechniqueName);
-                        }
+                        setAllowedTechniques.Add(strTechniqueName);
                     }
                 }
-                else if (_objMartialArt.Techniques.Count == 0)
+            }
+            else if (objMartialArt.Techniques.Count == 0)
+            {
+                //TODO: Support for allowing all techniques > 0.
+                foreach (XPathNavigator xmlTechnique in xmlBaseChummerNode.Select("techniques/technique[(" + objCharacter.Settings.BookXPath() + ")]"))
                 {
-                    //TODO: Support for allowing all techniques > 0.
-                    foreach (XPathNavigator xmlTechnique in _xmlBaseChummerNode.Select("techniques/technique[(" + _objCharacter.Settings.BookXPath() + ")]"))
-                    {
-                        string strTechnique = xmlTechnique.Value;
-                        if (_objMartialArt.Techniques.Any(x => x.Name == strTechnique))
-                            continue;
-                        string strTechniqueName = xmlTechnique.SelectSingleNodeAndCacheExpression("name")?.Value;
-                        if (string.IsNullOrEmpty(strTechniqueName))
-                            continue;
-                        _setAllowedTechniques.Add(strTechniqueName);
-                    }
+                    string strTechnique = xmlTechnique.Value;
+                    if (objMartialArt.Techniques.Any(x => x.Name == strTechnique))
+                        continue;
+                    string strTechniqueName = xmlTechnique.SelectSingleNodeAndCacheExpression("name")?.Value;
+                    if (string.IsNullOrEmpty(strTechniqueName))
+                        continue;
+                    setAllowedTechniques.Add(strTechniqueName);
                 }
             }
         }

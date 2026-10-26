@@ -23,9 +23,11 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Xml;
+using System.Xml.XPath;
 using Chummer.Backend.Attributes;
 using Chummer.Backend.Enums;
 using Chummer.Backend.Skills;
+using Chummer.Backend.Uniques;
 using Newtonsoft.Json.Linq;
 
 namespace Chummer.Agent
@@ -68,6 +70,34 @@ namespace Chummer.Agent
                                  ("native_language", "boolean", "Make this a native language (uses one of the character's native language slots)."),
                                  ("character", "string", CharacterArgDescription)),
                 AddKnowledgeSkillAsync);
+            yield return new AgentTool("set_specialization",
+                "Give a skill (active or knowledge) its specialization during creation, as typing it into the skill's specialization box does. "
+                + "Pass an empty specialization to remove it. The skill needs a rating, and skills in an unbroken group can't specialize.",
+                AgentTool.Schema(("skill!", "string", "Skill name, e.g. 'Pistols', 'Negotiation'."),
+                                 ("specialization", "string", "Specialization, e.g. 'Semi-Automatics', 'Bargaining'. Empty removes it."),
+                                 ("character", "string", CharacterArgDescription)),
+                SetSpecializationAsync);
+            yield return new AgentTool("add_exotic_skill",
+                "Add an exotic skill (search_catalog kind='skill' with exotic=True, e.g. 'Exotic Ranged Weapon') for a specific weapon or vehicle, "
+                + "as the skills tab's Add Exotic Skill does, then optionally set its ranks.",
+                AgentTool.Schema(("skill!", "string", "Exotic skill name, e.g. 'Exotic Melee Weapon', 'Pilot Exotic Vehicle'."),
+                                 ("specific!", "string", "What it is for, e.g. 'Monofilament Whip'."),
+                                 ("base", "integer", "Ranks paid with skill points. Default: one rank bought with karma, as the editor does."),
+                                 ("karma", "integer", "Ranks paid with karma."),
+                                 ("character", "string", CharacterArgDescription)),
+                AddExoticSkillAsync);
+            yield return new AgentTool("add_martial_art",
+                "Learn a martial art style (search_catalog kind='martialart'), as the editor's Add Martial Art does. Costs karma.",
+                AgentTool.Schema(("id!", "string", "Martial art id from search_catalog, or its exact English name."),
+                                 ("character", "string", CharacterArgDescription)),
+                AddMartialArtAsync);
+            yield return new AgentTool("add_technique",
+                "Learn a technique (search_catalog kind='technique') of a martial art the character knows. Only the style's own techniques "
+                + "whose requirements are met are allowed; the error lists them.",
+                AgentTool.Schema(("martial_art!", "string", "Martial art id from get_character_summary, or its name."),
+                                 ("id!", "string", "Technique id from search_catalog, or its exact English name."),
+                                 ("character", "string", CharacterArgDescription)),
+                AddTechniqueAsync);
             yield return new AgentTool("add_quality",
                 "Add a quality from search_catalog(kind='quality'). Checks requirements and the positive/negative quality karma limits like the Add Quality button.",
                 AgentTool.Schema(("id!", "string", "Quality id from search_catalog, or its exact English name."),
@@ -109,8 +139,9 @@ namespace Chummer.Agent
                                  ("character", "string", CharacterArgDescription)),
                 AddContactAsync);
             yield return new AgentTool("remove_item",
-                "Remove something the character has, by the id (or name) shown in get_character_summary: a spell, adept power, contact, weapon, armor, "
-                + "gear, cyberware/bioware, vehicle or lifestyle. Bought equipment is refunded. Use remove_quality for qualities.",
+                "Remove something the character has, by the id (or name) shown in get_character_summary: a spell, adept power, contact, spirit or sprite, "
+                + "complex form, martial art or technique, metamagic or echo, initiation grade, weapon (or accessory), armor (or mod), gear, "
+                + "cyberware/bioware, vehicle (or mod) or lifestyle. Bought equipment is refunded. Use remove_quality for qualities, including a mentor spirit.",
                 AgentTool.Schema(("id!", "string", "Id from get_character_summary."),
                                  ("character", "string", CharacterArgDescription)),
                 RemoveItemAsync);
@@ -184,6 +215,19 @@ namespace Chummer.Agent
             XmlDocument objDocument = await objCharacter.LoadDataAsync(strFile, token: token).ConfigureAwait(false);
             return objDocument.TryGetNodeByNameOrId(strPath, strId)
                    ?? throw new AgentToolException("Nothing in " + strFile + " has id or name '" + strId + "'. Use search_catalog to find it.");
+        }
+
+        /// <summary>
+        /// Refuse items from books the character's settings don't enable, as the selection dialogs only list enabled books.
+        /// </summary>
+        private static async Task EnsureBookEnabledAsync(XmlNode objNode, Character objCharacter, CancellationToken token)
+        {
+            if (await objCharacter.GetIgnoreRulesAsync(token).ConfigureAwait(false))
+                return;
+            string strSource = objNode["source"]?.InnerText;
+            if (!string.IsNullOrEmpty(strSource)
+                && !await (await objCharacter.GetSettingsAsync(token).ConfigureAwait(false)).BookEnabledAsync(strSource, token).ConfigureAwait(false))
+                throw new AgentToolException(objNode["name"]?.InnerText + " is from " + strSource + ", which isn't enabled in this character's settings.");
         }
 
         private static async Task EnsureRequirementsMetAsync(XmlNode objNode, Character objCharacter, CancellationToken token)
@@ -426,6 +470,108 @@ namespace Chummer.Agent
                                          token).ConfigureAwait(false);
         }
 
+        private static async Task<object> SetSpecializationAsync(JObject objArgs, CancellationToken token)
+        {
+            CharacterCreate frmCreate = await GetCreateFormAsync(objArgs, token).ConfigureAwait(false);
+            Character objCharacter = frmCreate.CharacterObject;
+            string strName = RequiredString(objArgs, "skill");
+            SkillsSection objSkillsSection = await objCharacter.GetSkillsSectionAsync(token).ConfigureAwait(false);
+            Skill objSkill = await objSkillsSection.GetActiveSkillAsync(strName, token).ConfigureAwait(false)
+                             ?? await FindSkillAsync(await objSkillsSection.Skills.ToListAsync(token).ConfigureAwait(false), strName, token).ConfigureAwait(false)
+                             ?? await FindSkillAsync((await objSkillsSection.KnowledgeSkills.ToListAsync(token).ConfigureAwait(false)).Cast<Skill>(), strName, token)
+                                 .ConfigureAwait(false)
+                             ?? throw new AgentToolException("The character has no skill named '" + strName + "'.");
+            string strSpec = objArgs.Value<string>("specialization")?.Trim() ?? string.Empty;
+            string strDisplayName = await objSkill.GetCurrentDisplayNameAsync(token).ConfigureAwait(false);
+            if (!string.IsNullOrEmpty(strSpec) && !await objSkill.GetCanHaveSpecsAsync(token).ConfigureAwait(false)
+                                               && !await objCharacter.GetIgnoreRulesAsync(token).ConfigureAwait(false))
+                throw new AgentToolException(strDisplayName + " can't have a specialization right now (it needs a rating, and it can't be part of an unbroken skill group).");
+            await objSkill.SetTopMostDisplaySpecializationAsync(strSpec, token).ConfigureAwait(false);
+            return await FinishEditAsync(frmCreate,
+                                         string.IsNullOrEmpty(strSpec)
+                                             ? "Removed the specialization from " + strDisplayName + "."
+                                             : strDisplayName + " is now specialized in " + strSpec + ".", token).ConfigureAwait(false);
+        }
+
+        private static async Task<object> AddExoticSkillAsync(JObject objArgs, CancellationToken token)
+        {
+            CharacterCreate frmCreate = await GetCreateFormAsync(objArgs, token).ConfigureAwait(false);
+            Character objCharacter = frmCreate.CharacterObject;
+            string strSkill = RequiredString(objArgs, "skill");
+            string strSpecific = RequiredString(objArgs, "specific");
+            // The Select Exotic Skill dialog lists the exotic skills in the enabled books
+            XmlNode xmlSkill = (await objCharacter.LoadDataAsync("skills.xml", token: token).ConfigureAwait(false))
+                               .SelectSingleNode("/chummer/skills/skill[name = " + strSkill.CleanXPath() + " and exotic = " + bool.TrueString.CleanXPath() + " and "
+                                                 + await (await objCharacter.GetSettingsAsync(token).ConfigureAwait(false)).BookXPathAsync(token: token).ConfigureAwait(false)
+                                                 + "]")
+                               ?? throw new AgentToolException("'" + strSkill + "' is not an exotic skill in the enabled books.");
+            strSkill = xmlSkill["name"]?.InnerText ?? strSkill;
+            SkillsSection objSkillsSection = await objCharacter.GetSkillsSectionAsync(token).ConfigureAwait(false);
+            foreach (Skill objLoop in await objSkillsSection.Skills.ToListAsync(token).ConfigureAwait(false))
+            {
+                if (objLoop is ExoticSkill objExotic && await objExotic.GetNameAsync(token).ConfigureAwait(false) == strSkill
+                                                     && string.Equals(await objExotic.GetSpecificAsync(token).ConfigureAwait(false), strSpecific, StringComparison.OrdinalIgnoreCase))
+                    throw new AgentToolException("The character already has " + strSkill + " (" + strSpecific + "); use set_skill to change its ranks.");
+            }
+
+            ExoticSkill objSkill = await objSkillsSection.AddExoticSkillAsync(strSkill, strSpecific, token).ConfigureAwait(false);
+            int? intBase = OptionalInt(objArgs, "base");
+            int? intKarma = OptionalInt(objArgs, "karma");
+            if (intBase != null || intKarma != null)
+                await SetSkillRanksAsync(objSkill, intBase, intKarma, await objCharacter.GetIgnoreRulesAsync(token).ConfigureAwait(false), token).ConfigureAwait(false);
+            else
+                await objSkill.Upgrade(token).ConfigureAwait(false);
+            return await FinishEditAsync(frmCreate, "Added " + await objSkill.GetCurrentDisplayNameAsync(token).ConfigureAwait(false) + " at rating "
+                                                    + (await objSkill.GetRatingAsync(token).ConfigureAwait(false)).ToString(GlobalSettings.InvariantCultureInfo) + ".",
+                                         token).ConfigureAwait(false);
+        }
+
+        private static async Task<object> AddMartialArtAsync(JObject objArgs, CancellationToken token)
+        {
+            CharacterCreate frmCreate = await GetCreateFormAsync(objArgs, token).ConfigureAwait(false);
+            Character objCharacter = frmCreate.CharacterObject;
+            XmlNode xmlArt = await GetDataNodeAsync(objCharacter, "martialarts.xml", "/chummer/martialarts/martialart", RequiredString(objArgs, "id"), token)
+                .ConfigureAwait(false);
+            string strArt = xmlArt["name"]?.InnerText;
+            if (await objCharacter.MartialArts.AnyAsync(x => x.Name == strArt, token).ConfigureAwait(false))
+                throw new AgentToolException("The character already knows " + strArt + ".");
+            await EnsureBookEnabledAsync(xmlArt, objCharacter, token).ConfigureAwait(false);
+            await EnsureRequirementsMetAsync(xmlArt, objCharacter, token).ConfigureAwait(false);
+            MartialArt objArt = await MartialArt.PurchaseFromNodeAsync(objCharacter, xmlArt, token).ConfigureAwait(false)
+                                ?? throw new AgentToolException("The character can't afford " + strArt + ".");
+            return await FinishEditAsync(frmCreate, "Learned " + await objArt.GetCurrentDisplayNameAsync(token).ConfigureAwait(false)
+                                                    + " (id " + objArt.InternalId + "). Add techniques with add_technique.", token).ConfigureAwait(false);
+        }
+
+        private static async Task<object> AddTechniqueAsync(JObject objArgs, CancellationToken token)
+        {
+            CharacterCreate frmCreate = await GetCreateFormAsync(objArgs, token).ConfigureAwait(false);
+            Character objCharacter = frmCreate.CharacterObject;
+            string strArt = RequiredString(objArgs, "martial_art");
+            MartialArt objArt = await FindOwnedAsync(await objCharacter.MartialArts.ToListAsync(token).ConfigureAwait(false), strArt, token).ConfigureAwait(false)
+                                ?? throw new AgentToolException("The character doesn't know a martial art '" + strArt + "'. Use add_martial_art first.");
+            XmlNode xmlTechnique = await GetDataNodeAsync(objCharacter, "martialarts.xml", "/chummer/techniques/technique", RequiredString(objArgs, "id"), token)
+                .ConfigureAwait(false);
+            await EnsureBookEnabledAsync(xmlTechnique, objCharacter, token).ConfigureAwait(false);
+            if (!await objCharacter.GetIgnoreRulesAsync(token).ConfigureAwait(false))
+            {
+                // The same list the Select Technique dialog offers for this style
+                HashSet<string> setAllowed = new HashSet<string>();
+                XPathNavigator xmlBase = (await objCharacter.LoadDataXPathAsync("martialarts.xml", token: token).ConfigureAwait(false)).SelectSingleNode("/chummer");
+                SelectMartialArtTechnique.FillAllowedTechniques(objCharacter, objArt, xmlBase, setAllowed);
+                string strTechnique = xmlTechnique["name"]?.InnerText;
+                if (!setAllowed.Contains(strTechnique)
+                    || !await xmlTechnique.CreateNavigator().RequirementsMetAsync(objCharacter, objArt, token: token).ConfigureAwait(false))
+                    throw new AgentToolException(strTechnique + " is not a technique " + objArt.Name + " can learn now. Options: "
+                                                 + (setAllowed.Count > 0 ? string.Join(", ", setAllowed.OrderBy(x => x)) : "none") + ".");
+            }
+
+            MartialArtTechnique objTechnique = await frmCreate.AddMartialArtTechniqueFromNodeAsync(objArt, xmlTechnique, token).ConfigureAwait(false)
+                                               ?? throw new AgentToolException("The technique was not added (a choice it needed was cancelled).");
+            return await FinishEditAsync(frmCreate, "Learned " + await objTechnique.GetCurrentDisplayNameAsync(token).ConfigureAwait(false)
+                                                    + " for " + objArt.Name + ".", token).ConfigureAwait(false);
+        }
+
         #endregion
 
         #region Qualities, magic, contacts
@@ -436,6 +582,7 @@ namespace Chummer.Agent
             Character objCharacter = frmCreate.CharacterObject;
             string strId = RequiredString(objArgs, "id");
             XmlNode objXmlQuality = await GetDataNodeAsync(objCharacter, "qualities.xml", "/chummer/qualities/quality", strId, token).ConfigureAwait(false);
+            await EnsureBookEnabledAsync(objXmlQuality, objCharacter, token).ConfigureAwait(false);
             await EnsureRequirementsMetAsync(objXmlQuality, objCharacter, token).ConfigureAwait(false);
             string strSourceId = objXmlQuality["id"]?.InnerText ?? strId;
             int intLevels = Math.Max(1, OptionalInt(objArgs, "levels") ?? 1);
@@ -507,6 +654,7 @@ namespace Chummer.Agent
                 if (intCount >= intLimit)
                     throw new AgentToolException("The character already knows the maximum of " + intLimit.ToString(GlobalSettings.InvariantCultureInfo)
                                                  + (blnAlchemical ? " preparations" : strCategory == "Rituals" ? " rituals" : " spells") + " (MAG x 2) allowed at creation.");
+                await EnsureBookEnabledAsync(objXmlSpell, objCharacter, token).ConfigureAwait(false);
                 await EnsureRequirementsMetAsync(objXmlSpell, objCharacter, token).ConfigureAwait(false);
             }
 
@@ -538,6 +686,7 @@ namespace Chummer.Agent
             CharacterCreate frmCreate = await GetCreateFormAsync(objArgs, token).ConfigureAwait(false);
             Character objCharacter = frmCreate.CharacterObject;
             XmlNode objXmlPower = await GetDataNodeAsync(objCharacter, "powers.xml", "/chummer/powers/power", RequiredString(objArgs, "id"), token).ConfigureAwait(false);
+            await EnsureBookEnabledAsync(objXmlPower, objCharacter, token).ConfigureAwait(false);
             await EnsureRequirementsMetAsync(objXmlPower, objCharacter, token).ConfigureAwait(false);
             int intRating = Math.Max(1, OptionalInt(objArgs, "rating") ?? 1);
             Power objPower = new Power(objCharacter);
@@ -666,6 +815,18 @@ namespace Chummer.Agent
                 string strName = await objContact.GetNameAsync(token).ConfigureAwait(false);
                 await objCharacter.Contacts.RemoveAsync(objContact, token).ConfigureAwait(false);
                 return await FinishEditAsync(frmCreate, "Removed contact " + strName + ".", token).ConfigureAwait(false);
+            }
+
+            foreach (Spirit objSpirit in await objCharacter.Spirits.ToListAsync(token).ConfigureAwait(false))
+            {
+                if (!string.Equals(objSpirit.InternalId, strId, StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(await objSpirit.GetNameAsync(token).ConfigureAwait(false), strId, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                // What the editor's spirit delete button does after its confirm prompt
+                string strName = await objSpirit.GetNameAsync(token).ConfigureAwait(false);
+                await objSpirit.SetFetteredAsync(false, token).ConfigureAwait(false);
+                await objCharacter.Spirits.RemoveAsync(objSpirit, token).ConfigureAwait(false);
+                return await FinishEditAsync(frmCreate, "Removed " + strName + ".", token).ConfigureAwait(false);
             }
 
             ICanRemove objEquipment = await FindOwnedEquipmentAsync(objCharacter, strId, token).ConfigureAwait(false);

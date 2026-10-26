@@ -47,7 +47,9 @@ namespace Chummer.Agent
             + "Chummer enforces the rules: use search_catalog with legal_only=true to find options the character can actually take, "
             + "and validate_character before calling a character finished. To start a character, pick settings (list_build_settings), plan with "
             + "get_priority_table, then create_character; set_priorities changes them later. Spend points with set_attribute/set_skill/add_quality "
-            + "and friends, buy gear with add_weapon/add_armor/add_gear/add_cyberware/add_vehicle/add_lifestyle, and save_character when the user wants it saved. "
+            + "and friends; magic and resonance with set_tradition, add_spell, add_power, add_complex_form, add_mentor_spirit, add_spirit, add_initiation, "
+            + "add_art and add_metamagic; buy gear with add_weapon/add_armor/add_gear/add_cyberware/add_vehicle/add_lifestyle and fit it out with "
+            + "add_weapon_accessory/add_armor_mod/add_vehicle_mod; remove_item undoes any of these. Call save_character when the user wants it saved. "
             + "Edits only work while the character is in creation mode.";
 
         private const string CharacterArgDescription =
@@ -78,6 +80,8 @@ namespace Chummer.Agent
             foreach (AgentTool objTool in CreateEditTools())
                 yield return objTool;
             foreach (AgentTool objTool in CreateGearTools())
+                yield return objTool;
+            foreach (AgentTool objTool in CreateMagicTools())
                 yield return objTool;
         }
 
@@ -275,8 +279,28 @@ namespace Chummer.Agent
                     {
                         total = await objCharacter.GetPowerPointsTotalAsync(token).ConfigureAwait(false),
                         used = await objCharacter.GetPowerPointsUsedAsync(token).ConfigureAwait(false)
-                    } : null
+                    } : null,
+                    mentorSpirits = await DescribeNamedAsync(objCharacter.MentorSpirits, token).ConfigureAwait(false),
+                    initiateGrade = await objCharacter.GetInitiateGradeAsync(token).ConfigureAwait(false),
+                    submersionGrade = await objCharacter.GetSubmersionGradeAsync(token).ConfigureAwait(false),
+                    metamagics = await DescribeNamedAsync(objCharacter.Metamagics, token).ConfigureAwait(false),
+                    arts = await DescribeNamedAsync(objCharacter.Arts, token).ConfigureAwait(false)
                 };
+                List<object> lstSpirits = new List<object>();
+                foreach (Spirit objSpirit in await objCharacter.Spirits.ToListAsync(token).ConfigureAwait(false))
+                {
+                    lstSpirits.Add(new
+                    {
+                        id = objSpirit.InternalId,
+                        kind = (await objSpirit.GetEntityTypeAsync(token).ConfigureAwait(false)).ToString(),
+                        type = await objSpirit.GetNameAsync(token).ConfigureAwait(false),
+                        force = await objSpirit.GetForceAsync(token).ConfigureAwait(false),
+                        services = await objSpirit.GetServicesOwedAsync(token).ConfigureAwait(false),
+                        bound = await objSpirit.GetBoundAsync(token).ConfigureAwait(false)
+                    });
+                }
+
+                dicReturn["spirits"] = lstSpirits;
             }
 
             List<object> lstSkillGroups = new List<object>();
@@ -315,7 +339,18 @@ namespace Chummer.Agent
             dicReturn["qualities"] = lstQualities;
             dicReturn["spells"] = await DescribeNamedAsync(await objCharacter.GetSpellsAsync(token).ConfigureAwait(false), token).ConfigureAwait(false);
             dicReturn["complexForms"] = await DescribeNamedAsync(await objCharacter.GetComplexFormsAsync(token).ConfigureAwait(false), token).ConfigureAwait(false);
-            dicReturn["martialArts"] = await DescribeNamedAsync(await objCharacter.GetMartialArtsAsync(token).ConfigureAwait(false), token).ConfigureAwait(false);
+            List<object> lstMartialArts = new List<object>();
+            foreach (MartialArt objArt in await (await objCharacter.GetMartialArtsAsync(token).ConfigureAwait(false)).ToListAsync(token).ConfigureAwait(false))
+            {
+                lstMartialArts.Add(new
+                {
+                    id = objArt.InternalId,
+                    name = await objArt.GetCurrentDisplayNameAsync(token).ConfigureAwait(false),
+                    techniques = await DescribeNamedAsync(objArt.Techniques, token).ConfigureAwait(false)
+                });
+            }
+
+            dicReturn["martialArts"] = lstMartialArts;
             List<object> lstPowers = new List<object>();
             foreach (Power objPower in await (await objCharacter.GetPowersAsync(token).ConfigureAwait(false)).ToListAsync(token).ConfigureAwait(false))
             {
@@ -356,9 +391,42 @@ namespace Chummer.Agent
             }
 
             dicReturn["gear"] = lstGear;
-            dicReturn["weapons"] = await DescribeNamedAsync(await objCharacter.GetWeaponsAsync(token).ConfigureAwait(false), token).ConfigureAwait(false);
-            dicReturn["armor"] = await DescribeNamedAsync(await objCharacter.GetArmorAsync(token).ConfigureAwait(false), token).ConfigureAwait(false);
-            dicReturn["vehicles"] = await DescribeNamedAsync(await objCharacter.GetVehiclesAsync(token).ConfigureAwait(false), token).ConfigureAwait(false);
+            List<object> lstWeapons = new List<object>();
+            foreach (Weapon objWeapon in await (await objCharacter.GetWeaponsAsync(token).ConfigureAwait(false)).ToListAsync(token).ConfigureAwait(false))
+            {
+                lstWeapons.Add(new
+                {
+                    id = objWeapon.InternalId,
+                    name = await objWeapon.GetCurrentDisplayNameAsync(token).ConfigureAwait(false),
+                    accessories = await DescribeNamedAsync(objWeapon.WeaponAccessories, token).ConfigureAwait(false)
+                });
+            }
+
+            dicReturn["weapons"] = lstWeapons;
+            List<object> lstArmor = new List<object>();
+            foreach (Armor objArmor in await (await objCharacter.GetArmorAsync(token).ConfigureAwait(false)).ToListAsync(token).ConfigureAwait(false))
+            {
+                lstArmor.Add(new
+                {
+                    id = objArmor.InternalId,
+                    name = await objArmor.GetCurrentDisplayNameAsync(token).ConfigureAwait(false),
+                    mods = await DescribeNamedAsync(objArmor.ArmorMods, token).ConfigureAwait(false)
+                });
+            }
+
+            dicReturn["armor"] = lstArmor;
+            List<object> lstVehicles = new List<object>();
+            foreach (Vehicle objVehicle in await (await objCharacter.GetVehiclesAsync(token).ConfigureAwait(false)).ToListAsync(token).ConfigureAwait(false))
+            {
+                lstVehicles.Add(new
+                {
+                    id = objVehicle.InternalId,
+                    name = await objVehicle.GetCurrentDisplayNameAsync(token).ConfigureAwait(false),
+                    mods = await DescribeNamedAsync(objVehicle.Mods, token).ConfigureAwait(false)
+                });
+            }
+
+            dicReturn["vehicles"] = lstVehicles;
             List<object> lstLifestyles = new List<object>();
             foreach (Lifestyle objLifestyle in await (await objCharacter.GetLifestylesAsync(token).ConfigureAwait(false)).ToListAsync(token).ConfigureAwait(false))
             {

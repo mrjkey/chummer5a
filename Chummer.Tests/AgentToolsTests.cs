@@ -182,6 +182,179 @@ namespace Chummer.Tests
             }
         }
 
+        [TestMethod]
+        public void MagicSkillsAndMods()
+        {
+            RunWithMainForm((frmMain, t) => RunMagicSkillsAndModsScenarioAsync(t));
+        }
+
+        /// <summary>
+        /// Call a tool on one named character and expect success.
+        /// </summary>
+        private static Task<JToken> CallOnAsync(string strCharacter, string strName, JObject objArguments, CancellationToken token)
+        {
+            objArguments["character"] = strCharacter;
+            return CallToolOkAsync(strName, objArguments, token);
+        }
+
+        private static Task<(bool IsError, string Text)> TryCallOnAsync(string strCharacter, string strName, JObject objArguments, CancellationToken token)
+        {
+            objArguments["character"] = strCharacter;
+            return CallToolAsync(strName, objArguments, token);
+        }
+
+        /// <summary>
+        /// The first option a refusal lists after "Options: ".
+        /// </summary>
+        private static string FirstOption(string strRefusal)
+        {
+            int intIndex = strRefusal.IndexOf("Options: ", StringComparison.Ordinal);
+            Assert.IsTrue(intIndex >= 0, strRefusal);
+            return strRefusal.Substring(intIndex + 9).Split(new[] { ", ", "; " }, StringSplitOptions.None)[0].TrimEnd('.');
+        }
+
+        private static async Task RunMagicSkillsAndModsScenarioAsync(CancellationToken token)
+        {
+            // A hermetic mage: tradition, spirits, mentor, specialization, initiation and metamagic
+            const string strMage = "Agent Test Mage";
+            await CallToolOkAsync("create_character", new JObject
+            {
+                ["metatype"] = "Human",
+                ["priorities"] = new JObject { ["heritage"] = "D", ["attributes"] = "C", ["talent"] = "A", ["skills"] = "B", ["resources"] = "E" },
+                ["talent"] = "Magician",
+                ["talent_skills"] = new JArray("Spellcasting", "Summoning"),
+                ["name"] = strMage
+            }, token).ConfigureAwait(false);
+            JObject objResult = (JObject)await CallOnAsync(strMage, "set_tradition", new JObject { ["id"] = "Hermetic" }, token).ConfigureAwait(false);
+            StringAssert.Contains(objResult.Value<string>("result"), "Spirit of Fire");
+            (bool blnIsError, string strText) = await TryCallOnAsync(strMage, "add_spirit", new JObject { ["type"] = "Spirit of Beasts" }, token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+            StringAssert.Contains(strText, "Spirit of Air");
+            await CallOnAsync(strMage, "add_spirit", new JObject { ["type"] = "Spirit of Air", ["force"] = 2, ["services"] = 2 }, token).ConfigureAwait(false);
+            await CallOnAsync(strMage, "add_mentor_spirit", new JObject { ["mentor"] = "Dog" }, token).ConfigureAwait(false);
+            await CallOnAsync(strMage, "set_specialization", new JObject { ["skill"] = "Spellcasting", ["specialization"] = "Combat Spells" }, token).ConfigureAwait(false);
+            objResult = (JObject)await CallOnAsync(strMage, "add_initiation", new JObject(), token).ConfigureAwait(false);
+            StringAssert.Contains(objResult.Value<string>("result"), "grade is now 1");
+            // SR5 metamagics need their art, and the arts are in Street Grimoire
+            (blnIsError, strText) = await TryCallOnAsync(strMage, "add_metamagic", new JObject { ["id"] = "Centering" }, token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+            StringAssert.Contains(strText, "requirements");
+            (blnIsError, strText) = await TryCallOnAsync(strMage, "add_art", new JObject { ["id"] = "Centering" }, token).ConfigureAwait(false);
+            bool blnHasArts = !blnIsError;
+            if (blnHasArts)
+                await CallOnAsync(strMage, "add_metamagic", new JObject { ["id"] = "Centering" }, token).ConfigureAwait(false);
+            else
+                StringAssert.Contains(strText, "isn't enabled");
+            JObject objSummary = (JObject)await CallOnAsync(strMage, "get_character_summary", new JObject(), token).ConfigureAwait(false);
+            JToken objSpirit = ((JArray)objSummary["spirits"]).Single();
+            Assert.AreEqual("Spirit of Air", objSpirit.Value<string>("type"));
+            Assert.AreEqual(2, objSpirit.Value<int>("force"));
+            Assert.AreEqual(2, objSpirit.Value<int>("services"));
+            Assert.AreEqual(1, ((JArray)objSummary["magic"]["mentorSpirits"]).Count, objSummary["magic"].ToString());
+            Assert.AreEqual(1, objSummary["magic"].Value<int>("initiateGrade"));
+            Assert.AreEqual(blnHasArts ? 1 : 0, ((JArray)objSummary["magic"]["metamagics"]).Count, objSummary["magic"].ToString());
+            Assert.IsTrue(((JArray)objSummary["skills"]).Any(x => x.Value<string>("name") == "Spellcasting"
+                                                                   && x["specializations"].Any(y => y.ToString() == "Combat Spells")),
+                          objSummary["skills"].ToString());
+            await CallOnAsync(strMage, "remove_item", new JObject { ["id"] = objSpirit.Value<string>("id") }, token).ConfigureAwait(false);
+            if (blnHasArts)
+                await CallOnAsync(strMage, "remove_item", new JObject { ["id"] = ((JArray)objSummary["magic"]["metamagics"]).Single().Value<string>("id") }, token)
+                    .ConfigureAwait(false);
+            objSummary = (JObject)await CallOnAsync(strMage, "get_character_summary", new JObject(), token).ConfigureAwait(false);
+            Assert.AreEqual(0, ((JArray)objSummary["spirits"]).Count);
+            Assert.AreEqual(0, ((JArray)objSummary["magic"]["metamagics"]).Count);
+
+            // A technomancer: stream, complex form, sprite
+            const string strTechno = "Agent Test Techno";
+            await CallToolOkAsync("create_character", new JObject
+            {
+                ["metatype"] = "Human",
+                ["priorities"] = new JObject { ["heritage"] = "D", ["attributes"] = "C", ["talent"] = "A", ["skills"] = "B", ["resources"] = "E" },
+                ["talent"] = "Technomancer",
+                ["talent_skills"] = new JArray("Compiling", "Registering", "Decompiling"),
+                ["name"] = strTechno
+            }, token).ConfigureAwait(false);
+            await CallOnAsync(strTechno, "set_tradition", new JObject { ["id"] = "Default" }, token).ConfigureAwait(false);
+            await CallOnAsync(strTechno, "add_complex_form", new JObject { ["id"] = "Cleaner" }, token).ConfigureAwait(false);
+            await CallOnAsync(strTechno, "add_spirit", new JObject { ["kind"] = "sprite", ["type"] = "Crack Sprite", ["force"] = 2 }, token).ConfigureAwait(false);
+            objSummary = (JObject)await CallOnAsync(strTechno, "get_character_summary", new JObject(), token).ConfigureAwait(false);
+            Assert.AreEqual(1, ((JArray)objSummary["complexForms"]).Count);
+            Assert.AreEqual("Sprite", ((JArray)objSummary["spirits"]).Single().Value<string>("kind"));
+
+            // A mundane: exotic skill, martial arts, weapon accessory, armor mod, vehicle mod
+            const string strSam = "Agent Test Sam";
+            await CallToolOkAsync("create_character", new JObject
+            {
+                ["metatype"] = "Human",
+                ["priorities"] = new JObject { ["heritage"] = "D", ["attributes"] = "B", ["talent"] = "E", ["skills"] = "A", ["resources"] = "C" },
+                ["talent"] = "Mundane",
+                ["name"] = strSam
+            }, token).ConfigureAwait(false);
+            objResult = (JObject)await CallOnAsync(strSam, "add_exotic_skill", new JObject { ["skill"] = "Exotic Ranged Weapon", ["specific"] = "Blowgun" }, token)
+                .ConfigureAwait(false);
+            StringAssert.Contains(objResult.Value<string>("result"), "rating 1");
+            (blnIsError, strText) = await TryCallOnAsync(strSam, "add_exotic_skill", new JObject { ["skill"] = "Exotic Ranged Weapon", ["specific"] = "Blowgun" }, token)
+                .ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+
+            await CallOnAsync(strSam, "add_weapon", new JObject { ["id"] = "Ares Predator V" }, token).ConfigureAwait(false);
+            await CallOnAsync(strSam, "add_armor", new JObject { ["id"] = "Armor Jacket" }, token).ConfigureAwait(false);
+            JObject objVehicles = (JObject)await CallToolOkAsync("search_catalog", new JObject { ["kind"] = "vehicle", ["limit"] = 1, ["character"] = strSam }, token)
+                .ConfigureAwait(false);
+            await CallOnAsync(strSam, "add_vehicle", new JObject { ["id"] = objVehicles["items"][0].Value<string>("id") }, token).ConfigureAwait(false);
+            objSummary = (JObject)await CallOnAsync(strSam, "get_character_summary", new JObject(), token).ConfigureAwait(false);
+            string strWeapon = ((JArray)objSummary["weapons"]).First(x => x.Value<string>("name").Contains("Predator")).Value<string>("id");
+            string strArmor = ((JArray)objSummary["armor"]).Single().Value<string>("id");
+            string strVehicle = ((JArray)objSummary["vehicles"]).Single().Value<string>("id");
+            (blnIsError, strText) = await TryCallOnAsync(strSam, "add_weapon_accessory", new JObject { ["weapon"] = strWeapon, ["id"] = "Laser Sight", ["mount"] = "Stock" }, token)
+                .ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+            await CallOnAsync(strSam, "add_weapon_accessory", new JObject { ["weapon"] = strWeapon, ["id"] = "Laser Sight" }, token).ConfigureAwait(false);
+            await CallOnAsync(strSam, "add_armor_mod", new JObject { ["armor"] = strArmor, ["id"] = "Fire Resistance", ["rating"] = 2 }, token).ConfigureAwait(false);
+            await CallOnAsync(strSam, "add_vehicle_mod", new JObject { ["vehicle"] = strVehicle, ["id"] = "Rigger Interface" }, token).ConfigureAwait(false);
+            objSummary = (JObject)await CallOnAsync(strSam, "get_character_summary", new JObject(), token).ConfigureAwait(false);
+            JToken objAccessory = ((JArray)objSummary["weapons"]).First(x => x.Value<string>("id") == strWeapon)["accessories"]
+                .First(x => x.Value<string>("name").Contains("Laser"));
+            Assert.AreEqual(1, ((JArray)((JArray)objSummary["armor"]).Single()["mods"]).Count, objSummary["armor"].ToString());
+            Assert.IsTrue(((JArray)((JArray)objSummary["vehicles"]).Single()["mods"]).Any(x => x.Value<string>("name").Contains("Rigger")),
+                          objSummary["vehicles"].ToString());
+            await CallOnAsync(strSam, "remove_item", new JObject { ["id"] = objAccessory.Value<string>("id") }, token).ConfigureAwait(false);
+            objSummary = (JObject)await CallOnAsync(strSam, "get_character_summary", new JObject(), token).ConfigureAwait(false);
+            Assert.IsFalse(((JArray)objSummary["weapons"]).First(x => x.Value<string>("id") == strWeapon)["accessories"].Any(x => x.Value<string>("name").Contains("Laser")));
+
+            // Martial arts come from Run & Gun, which the Standard settings don't enable
+            (blnIsError, strText) = await TryCallOnAsync(strSam, "add_martial_art", new JObject { ["id"] = "Krav Maga" }, token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+            StringAssert.Contains(strText, "isn't enabled");
+
+            // With every book enabled: arts unlock metamagics, and martial arts take techniques
+            const string strFullHouse = "Agent Test Full House";
+            await CallToolOkAsync("create_character", new JObject
+            {
+                ["settings"] = "Full House",
+                ["metatype"] = "Human",
+                ["priorities"] = new JObject { ["heritage"] = "D", ["attributes"] = "C", ["talent"] = "A", ["skills"] = "B", ["resources"] = "E" },
+                ["talent"] = "Magician",
+                ["talent_skills"] = new JArray("Spellcasting", "Summoning"),
+                ["name"] = strFullHouse
+            }, token).ConfigureAwait(false);
+            await CallOnAsync(strFullHouse, "add_initiation", new JObject(), token).ConfigureAwait(false);
+            await CallOnAsync(strFullHouse, "add_art", new JObject { ["id"] = "Centering" }, token).ConfigureAwait(false);
+            await CallOnAsync(strFullHouse, "add_metamagic", new JObject { ["id"] = "Centering" }, token).ConfigureAwait(false);
+            await CallOnAsync(strFullHouse, "add_martial_art", new JObject { ["id"] = "Krav Maga" }, token).ConfigureAwait(false);
+            (blnIsError, strText) = await TryCallOnAsync(strFullHouse, "add_technique", new JObject { ["martial_art"] = "Krav Maga", ["id"] = "Not A Technique" }, token)
+                .ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+            (blnIsError, strText) = await TryCallOnAsync(strFullHouse, "add_technique", new JObject { ["martial_art"] = "Krav Maga", ["id"] = "Kick Attack" }, token)
+                .ConfigureAwait(false);
+            if (blnIsError)
+                await CallOnAsync(strFullHouse, "add_technique", new JObject { ["martial_art"] = "Krav Maga", ["id"] = FirstOption(strText) }, token).ConfigureAwait(false);
+            objSummary = (JObject)await CallOnAsync(strFullHouse, "get_character_summary", new JObject(), token).ConfigureAwait(false);
+            Assert.AreEqual(1, ((JArray)objSummary["magic"]["arts"]).Count, objSummary["magic"].ToString());
+            Assert.AreEqual(1, ((JArray)objSummary["magic"]["metamagics"]).Count, objSummary["magic"].ToString());
+            Assert.AreEqual(1, ((JArray)((JArray)objSummary["martialArts"]).Single()["techniques"]).Count, objSummary["martialArts"].ToString());
+        }
+
         private static async Task RunCreationScenarioAsync(ChummerMainForm frmMain, string strSaveFile, CancellationToken token)
         {
             // The Heritage rows used to embed every metatype in full (~130 KB); they must now be compact

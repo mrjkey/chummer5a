@@ -14,23 +14,24 @@ Chummer is a .NET Framework 4.8 WinForms app (Windows only). The repo lives on t
 
 - `Chummer/Backend/Agent/` holds the MCP server:
   - `McpServer.cs`: Streamable HTTP, JSON responses, localhost only. Port 51723; override with `/mcpport:N`.
-  - `AgentTools*.cs`: the tools. `AgentTools.cs` reads, `.Catalog.cs` searches the rules data, `.Create.cs` creates/saves characters and sets priorities, `.Edit.cs` edits attributes/skills/qualities/magic/contacts, and `.Gear.cs` buys equipment.
+  - `AgentTools*.cs`: the tools. `AgentTools.cs` reads, `.Catalog.cs` searches the rules data, `.Create.cs` creates/saves characters and sets priorities, `.Edit.cs` edits attributes/skills/qualities/spells/powers/contacts/martial arts, `.Magic.cs` handles tradition, mentor, spirits, complex forms and initiation, and `.Gear.cs` buys equipment and its accessories/mods.
 - `Program.cs` starts the server around `Application.Run(MainForm)`.
 - Tools work on the characters open in the editor (`Program.MainForm.OpenCharacterEditorForms`).
 - Every edit goes through code the GUI also uses. These methods were refactored out of the forms' button/dialog code, so the results always match the UI:
 
   | Form | Methods |
   |---|---|
-  | `CharacterCreate` | `CalculateKarmaRemainingAsync`, `CollectValidityIssuesAsync`, `AddQualityFromNodeAsync`, `RemoveQuality`, and `Add{Weapon,Armor,Gear,Cyberware,Vehicle}FromNodeAsync` |
+  | `CharacterCreate` | `CalculateKarmaRemainingAsync`, `CollectValidityIssuesAsync`, `AddQualityFromNodeAsync`, `RemoveQuality`, `SetTraditionAsync`, `AddInitiationGradeAsync`, and `Add{Weapon,Armor,ArmorMod,Gear,Cyberware,Vehicle,ComplexForm,Art,Metamagic,MartialArtTechnique}FromNodeAsync` |
   | `SelectMetatypePriority` | `ValidatePrioritySelectionAsync` (agent input only) and `ApplyPrioritySelectionAsync` |
   | `SelectMetatypeKarma` | `ApplyMetatypeSelectionAsync` |
   | `ChummerMainForm` | `OpenNewCharacterEditorAsync` |
-  | `CharacterShared` | `SaveCharacterToFileAsync` |
+  | `CharacterShared` | `SaveCharacterToFileAsync`, `AddSpirit`/`AddSprite`, `Add{WeaponAccessory,VehicleMod}FromNodeAsync` |
+  | Backend | `MartialArt.PurchaseFromNodeAsync`, `Spirit.FillSpiritTypeChoicesAsync`, `SelectMartialArtTechnique.FillAllowedTechniques` |
 
   The agent constructs the metatype dialogs without showing them, and calls these cores on them.
 - `.mcp.json` registers the server with Claude Code. `.claude/skills/sr5-build-advisor` is the conversational build workflow.
 - Chummer must be running (and built with the agent code) for the `chummer` MCP tools to connect. WSL uses mirrored networking, so `localhost` reaches Windows.
-- When adding a tool, put the rules logic in the same code path the GUI uses rather than re-implementing it, and add coverage to `Chummer.Tests/AgentToolsTests.cs`. `ToolsAgainstOpenCharacter` opens a real `CharacterCreate` form on `TestFiles/Skink.chum5`; `CreateCharacterAndGear` creates a character through the tools. Items that ask a question when added (e.g. a Fake SIN's name) need `forced_value` in tests, because the hidden test window can't show dialogs.
+- When adding a tool, put the rules logic in the same code path the GUI uses rather than re-implementing it, and add coverage to `Chummer.Tests/AgentToolsTests.cs`. `ToolsAgainstOpenCharacter` opens a real `CharacterCreate` form on `TestFiles/Skink.chum5`; `CreateCharacterAndGear` and `MagicSkillsAndMods` create characters through the tools (use the `Full House` settings for anything outside the core book). Items that ask a question when added (e.g. a Fake SIN's name) need `forced_value` in tests, because the hidden test window can't show dialogs.
 
 ## Code style
 

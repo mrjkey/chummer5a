@@ -3878,45 +3878,7 @@ public async Task qualitylevel(XmlNode bonusNode, CancellationToken token = defa
             token.ThrowIfCancellationRequested();
             if (bonusNode == null)
                 throw new ArgumentNullException(nameof(bonusNode));
-            using (ThreadSafeForm<SelectMentorSpirit> frmPickMentorSpirit = await ThreadSafeForm<SelectMentorSpirit>.GetAsync(() => new SelectMentorSpirit(_objCharacter)
-                   {
-                       ForcedMentor = ForcedValue
-                   }, token).ConfigureAwait(false))
-            {
-                // Make sure the dialogue window was not canceled.
-                if (await frmPickMentorSpirit.ShowDialogSafeAsync(_objCharacter, token).ConfigureAwait(false) == DialogResult.Cancel)
-                {
-                    throw new AbortedException();
-                }
-                XmlNode xmlMentor = (await _objCharacter.LoadDataAsync("mentors.xml", token: token).ConfigureAwait(false)).TryGetNodeByNameOrId("/chummer/mentors/mentor", frmPickMentorSpirit.MyForm.SelectedMentor)
-                                    ?? throw new AbortedException();
-                SelectedValue = xmlMentor["name"]?.InnerTextViaPool(token) ?? string.Empty;
-
-                string strHoldValue = SelectedValue;
-
-                string strForce = ForcedValue;
-                MentorSpirit objMentor = new MentorSpirit(_objCharacter);
-                try
-                {
-                    await objMentor.CreateAsync(xmlMentor, Improvement.ImprovementType.MentorSpirit, string.Empty,
-                        frmPickMentorSpirit.MyForm.Choice1, frmPickMentorSpirit.MyForm.Choice2, token).ConfigureAwait(false);
-                    if (objMentor.InternalId.IsEmptyGuid())
-                        throw new AbortedException();
-
-                    await _objCharacter.MentorSpirits.AddAsync(objMentor, token).ConfigureAwait(false);
-                }
-                catch
-                {
-                    await objMentor.DisposeAsync().ConfigureAwait(false);
-                    throw;
-                }
-
-                ForcedValue = strForce;
-                SelectedValue = strHoldValue;
-                await CreateImprovementAsync(objMentor.InternalId, _objImprovementSource, SourceName,
-                    Improvement.ImprovementType.MentorSpirit,
-                    frmPickMentorSpirit.MyForm.SelectedMentor, token: token).ConfigureAwait(false);
-            }
+            await SelectMentorAsync("mentors.xml", Improvement.ImprovementType.MentorSpirit, token).ConfigureAwait(false);
         }
 
         // Check for Paragon bonuses.
@@ -3925,44 +3887,70 @@ public async Task qualitylevel(XmlNode bonusNode, CancellationToken token = defa
             token.ThrowIfCancellationRequested();
             if (bonusNode == null)
                 throw new ArgumentNullException(nameof(bonusNode));
-            using (ThreadSafeForm<SelectMentorSpirit> frmPickMentorSpirit = await ThreadSafeForm<SelectMentorSpirit>.GetAsync(() => new SelectMentorSpirit(_objCharacter, "paragons.xml")
-                   {
-                       ForcedMentor = ForcedValue
-                   }, token).ConfigureAwait(false))
+            await SelectMentorAsync("paragons.xml", Improvement.ImprovementType.Paragon, token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Pick a mentor spirit or paragon and its bonus choices, then add it to the character. The selection dialog is skipped when
+        /// <see cref="ForcedValue"/> pre-answers everything as "Mentor|Choice 1|Choice 2", as the agent tools do.
+        /// </summary>
+        private async Task SelectMentorAsync(string strFile, Improvement.ImprovementType eType, CancellationToken token)
+        {
+            XmlDocument xmlDocument = await _objCharacter.LoadDataAsync(strFile, token: token).ConfigureAwait(false);
+            XmlNode xmlMentor = null;
+            string strChoice1 = string.Empty;
+            string strChoice2 = string.Empty;
+            string strForce = ForcedValue;
+            if (!string.IsNullOrEmpty(strForce) && strForce.IndexOf('|') >= 0)
             {
-                // Make sure the dialogue window was not canceled.
-                if (await frmPickMentorSpirit.ShowDialogSafeAsync(_objCharacter, token).ConfigureAwait(false) == DialogResult.Cancel)
-                {
-                    throw new AbortedException();
-                }
-
-                XmlNode xmlMentor = (await _objCharacter.LoadDataAsync("paragons.xml", token: token).ConfigureAwait(false)).TryGetNodeByNameOrId("/chummer/mentors/mentor", frmPickMentorSpirit.MyForm.SelectedMentor)
-                                    ?? throw new AbortedException();
-                SelectedValue = xmlMentor["name"]?.InnerTextViaPool(token) ?? string.Empty;
-
-                string strHoldValue = SelectedValue;
-
-                string strForce = ForcedValue;
-                MentorSpirit objMentor = new MentorSpirit(_objCharacter);
-                try
-                {
-                    await objMentor.CreateAsync(xmlMentor, Improvement.ImprovementType.Paragon, string.Empty,
-                        frmPickMentorSpirit.MyForm.Choice1, frmPickMentorSpirit.MyForm.Choice2, token).ConfigureAwait(false);
-                    if (objMentor.InternalId.IsEmptyGuid())
-                        throw new AbortedException();
-                    await _objCharacter.MentorSpirits.AddAsync(objMentor, token).ConfigureAwait(false);
-                }
-                catch
-                {
-                    await objMentor.DisposeAsync().ConfigureAwait(false);
-                    throw;
-                }
-
-                ForcedValue = strForce;
-                SelectedValue = strHoldValue;
-                await CreateImprovementAsync(objMentor.InternalId, _objImprovementSource, SourceName,
-                    Improvement.ImprovementType.Paragon, frmPickMentorSpirit.MyForm.SelectedMentor, token: token).ConfigureAwait(false);
+                string[] astrParts = strForce.Split('|');
+                xmlMentor = xmlDocument.TryGetNodeByNameOrId("/chummer/mentors/mentor", astrParts[0].Trim());
+                if (astrParts.Length > 1)
+                    strChoice1 = astrParts[1].Trim();
+                if (astrParts.Length > 2)
+                    strChoice2 = astrParts[2].Trim();
             }
+
+            if (xmlMentor == null)
+            {
+                using (ThreadSafeForm<SelectMentorSpirit> frmPickMentorSpirit = await ThreadSafeForm<SelectMentorSpirit>.GetAsync(() => new SelectMentorSpirit(_objCharacter, strFile)
+                       {
+                           ForcedMentor = ForcedValue
+                       }, token).ConfigureAwait(false))
+                {
+                    // Make sure the dialogue window was not canceled.
+                    if (await frmPickMentorSpirit.ShowDialogSafeAsync(_objCharacter, token).ConfigureAwait(false) == DialogResult.Cancel)
+                    {
+                        throw new AbortedException();
+                    }
+
+                    xmlMentor = xmlDocument.TryGetNodeByNameOrId("/chummer/mentors/mentor", frmPickMentorSpirit.MyForm.SelectedMentor)
+                                ?? throw new AbortedException();
+                    strChoice1 = frmPickMentorSpirit.MyForm.Choice1;
+                    strChoice2 = frmPickMentorSpirit.MyForm.Choice2;
+                }
+            }
+
+            SelectedValue = xmlMentor["name"]?.InnerTextViaPool(token) ?? string.Empty;
+            string strHoldValue = SelectedValue;
+            MentorSpirit objMentor = new MentorSpirit(_objCharacter);
+            try
+            {
+                await objMentor.CreateAsync(xmlMentor, eType, string.Empty, strChoice1, strChoice2, token).ConfigureAwait(false);
+                if (objMentor.InternalId.IsEmptyGuid())
+                    throw new AbortedException();
+                await _objCharacter.MentorSpirits.AddAsync(objMentor, token).ConfigureAwait(false);
+            }
+            catch
+            {
+                await objMentor.DisposeAsync().ConfigureAwait(false);
+                throw;
+            }
+
+            ForcedValue = strForce;
+            SelectedValue = strHoldValue;
+            await CreateImprovementAsync(objMentor.InternalId, _objImprovementSource, SourceName,
+                eType, xmlMentor["id"]?.InnerTextViaPool(token) ?? SelectedValue, token: token).ConfigureAwait(false);
         }
 
         // Check for Smartlink bonus.

@@ -4855,13 +4855,7 @@ namespace Chummer
                     do
                     {
                         // The number of Complex Forms cannot exceed twice the character's RES.
-                        if (await CharacterObject.ComplexForms.GetCountAsync(GenericToken).ConfigureAwait(false)
-                            >= await (await CharacterObject.GetAttributeAsync("RES", token: GenericToken).ConfigureAwait(false)).GetTotalValueAsync(GenericToken).ConfigureAwait(false) * 2
-                            + await ImprovementManager.ValueOfAsync(CharacterObject,
-                                                                    Improvement.ImprovementType.ComplexFormLimit,
-                                                                    token: GenericToken)
-                                                      .ConfigureAwait(false)
-                            && !await CharacterObject.GetIgnoreRulesAsync(GenericToken).ConfigureAwait(false))
+                        if (await IsAtComplexFormLimitAsync(GenericToken).ConfigureAwait(false))
                         {
                             await Program.ShowScrollableMessageBoxAsync(
                                 this,
@@ -4891,23 +4885,7 @@ namespace Chummer
                         if (objXmlComplexForm == null)
                             continue;
 
-                        ComplexForm objComplexForm = new ComplexForm(CharacterObject);
-                        try
-                        {
-                            await objComplexForm.CreateAsync(objXmlComplexForm, token: GenericToken).ConfigureAwait(false);
-                            if (objComplexForm.InternalId.IsEmptyGuid())
-                            {
-                                await objComplexForm.RemoveAsync(false, CancellationToken.None).ConfigureAwait(false);
-                                continue;
-                            }
-
-                            await CharacterObject.ComplexForms.AddAsync(objComplexForm, GenericToken).ConfigureAwait(false);
-                        }
-                        catch
-                        {
-                            await objComplexForm.RemoveAsync(false, CancellationToken.None).ConfigureAwait(false);
-                            throw;
-                        }
+                        await AddComplexFormFromNodeAsync(objXmlComplexForm, GenericToken).ConfigureAwait(false);
                     } while (blnAddAgain);
                 }
                 finally
@@ -4918,6 +4896,46 @@ namespace Chummer
             catch (OperationCanceledException)
             {
                 //swallow this
+            }
+        }
+
+        /// <summary>
+        /// Whether the character already has as many complex forms as they may (twice their RES, plus improvements), unless rules are ignored.
+        /// </summary>
+        internal async Task<bool> IsAtComplexFormLimitAsync(CancellationToken token = default)
+        {
+            return await CharacterObject.ComplexForms.GetCountAsync(token).ConfigureAwait(false)
+                   >= await (await CharacterObject.GetAttributeAsync("RES", token: token).ConfigureAwait(false)).GetTotalValueAsync(token).ConfigureAwait(false) * 2
+                   + await ImprovementManager.ValueOfAsync(CharacterObject,
+                                                           Improvement.ImprovementType.ComplexFormLimit,
+                                                           token: token)
+                                             .ConfigureAwait(false)
+                   && !await CharacterObject.GetIgnoreRulesAsync(token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Learn a complex form, as the Select Complex Form dialog's OK does.
+        /// </summary>
+        /// <returns>The new complex form, or null if it could not be created (e.g. a choice it needed was cancelled).</returns>
+        internal async Task<ComplexForm> AddComplexFormFromNodeAsync(XmlNode objXmlComplexForm, CancellationToken token = default)
+        {
+            ComplexForm objComplexForm = new ComplexForm(CharacterObject);
+            try
+            {
+                await objComplexForm.CreateAsync(objXmlComplexForm, token: token).ConfigureAwait(false);
+                if (objComplexForm.InternalId.IsEmptyGuid())
+                {
+                    await objComplexForm.RemoveAsync(false, CancellationToken.None).ConfigureAwait(false);
+                    return null;
+                }
+
+                await CharacterObject.ComplexForms.AddAsync(objComplexForm, token).ConfigureAwait(false);
+                return objComplexForm;
+            }
+            catch
+            {
+                await objComplexForm.RemoveAsync(false, CancellationToken.None).ConfigureAwait(false);
+                throw;
             }
         }
 
@@ -5537,107 +5555,26 @@ namespace Chummer
                 CursorWait objCursorWait = await CursorWait.NewAsync(this, token: GenericToken).ConfigureAwait(false);
                 try
                 {
-                    IAsyncDisposable objLocker =
-                        await CharacterObject.LockObject.EnterUpgradeableReadLockAsync(GenericToken).ConfigureAwait(false);
-                    try
+                    if (!await CharacterObject.GetMAGEnabledAsync(GenericToken).ConfigureAwait(false)
+                        && await CharacterObject.GetRESEnabledAsync(GenericToken).ConfigureAwait(false))
                     {
-                        GenericToken.ThrowIfCancellationRequested();
-                        if (await CharacterObject.GetMAGEnabledAsync(GenericToken).ConfigureAwait(false))
+                        string strText = await LanguageManager.GetStringAsync("Button_AddEcho", token: GenericToken)
+                            .ConfigureAwait(false);
+                        await cmsMetamagic.DoThreadSafeAsync(() =>
                         {
-                            int intGrade = await CharacterObject.GetInitiateGradeAsync(GenericToken).ConfigureAwait(false);
-                            // Make sure that the Initiate Grade is not attempting to go above the character's MAG CharacterAttribute.
-                            if (intGrade + 1
-                                > await (await CharacterObject.GetAttributeAsync("MAG", token: GenericToken)
-                                        .ConfigureAwait(false))
-                                    .GetTotalValueAsync(GenericToken).ConfigureAwait(false) ||
-                                await CharacterObject.GetIsMysticAdeptAsync(GenericToken).ConfigureAwait(false) && await CharacterObjectSettings.GetMysAdeptSecondMAGAttributeAsync(GenericToken).ConfigureAwait(false)
-                                && intGrade + 1
-                                > await (await CharacterObject
-                                        .GetAttributeAsync(
-                                            "MAGAdept",
-                                            token: GenericToken)
-                                        .ConfigureAwait(false))
-                                    .GetTotalValueAsync(GenericToken)
-                                    .ConfigureAwait(false))
-                            {
-                                await Program.ShowScrollableMessageBoxAsync(
-                                    this,
-                                    await LanguageManager.GetStringAsync("Message_CannotIncreaseInitiateGrade",
-                                            token: GenericToken)
-                                        .ConfigureAwait(false),
-                                    await LanguageManager.GetStringAsync("MessageTitle_CannotIncreaseInitiateGrade",
-                                            token: GenericToken)
-                                        .ConfigureAwait(false),
-                                    MessageBoxButtons.OK,
-                                    MessageBoxIcon.Information, token: GenericToken).ConfigureAwait(false);
-                                return;
-                            }
-
-                            // Create the Initiate Grade object.
-                            InitiationGrade objGrade = new InitiationGrade(CharacterObject);
-                            await objGrade.CreateAsync(
-                                await CharacterObject.GetInitiateGradeAsync(GenericToken).ConfigureAwait(false) + 1,
-                                false,
-                                await chkInitiationGroup.DoThreadSafeFuncAsync(x => x.Checked, GenericToken)
-                                    .ConfigureAwait(false),
-                                await chkInitiationOrdeal.DoThreadSafeFuncAsync(x => x.Checked, GenericToken)
-                                    .ConfigureAwait(false),
-                                await chkInitiationSchooling.DoThreadSafeFuncAsync(x => x.Checked, GenericToken)
-                                    .ConfigureAwait(false), GenericToken).ConfigureAwait(false);
-                            await CharacterObject.InitiationGrades.AddWithSortAsync(objGrade, token: GenericToken)
-                                .ConfigureAwait(false);
-                        }
-                        else if (await CharacterObject.GetRESEnabledAsync(GenericToken).ConfigureAwait(false))
-                        {
-                            string strText = await LanguageManager.GetStringAsync("Button_AddEcho", token: GenericToken)
-                                .ConfigureAwait(false);
-                            await cmsMetamagic.DoThreadSafeAsync(() =>
-                            {
-                                tsMetamagicAddArt.Visible = false;
-                                tsMetamagicAddEnchantment.Visible = false;
-                                tsMetamagicAddEnhancement.Visible = false;
-                                tsMetamagicAddRitual.Visible = false;
-                                tsMetamagicAddMetamagic.Text = strText;
-                            }, GenericToken).ConfigureAwait(false);
-
-                            // Make sure that the Initiate Grade is not attempting to go above the character's RES CharacterAttribute.
-                            if (await CharacterObject.GetSubmersionGradeAsync(GenericToken).ConfigureAwait(false) + 1
-                                > await (await CharacterObject.GetAttributeAsync("RES", token: GenericToken)
-                                        .ConfigureAwait(false))
-                                    .GetTotalValueAsync(GenericToken).ConfigureAwait(false))
-                            {
-                                await Program.ShowScrollableMessageBoxAsync(
-                                    this,
-                                    await LanguageManager.GetStringAsync("Message_CannotIncreaseSubmersionGrade",
-                                            token: GenericToken)
-                                        .ConfigureAwait(false),
-                                    await LanguageManager.GetStringAsync("MessageTitle_CannotIncreaseSubmersionGrade",
-                                            token: GenericToken)
-                                        .ConfigureAwait(false),
-                                    MessageBoxButtons.OK,
-                                    MessageBoxIcon.Information, token: GenericToken).ConfigureAwait(false);
-                                return;
-                            }
-
-                            // Create the Initiate Grade object.
-                            InitiationGrade objGrade = new InitiationGrade(CharacterObject);
-                            await objGrade.CreateAsync(
-                                await CharacterObject.GetSubmersionGradeAsync(GenericToken).ConfigureAwait(false) + 1,
-                                true,
-                                await chkInitiationGroup.DoThreadSafeFuncAsync(x => x.Checked, GenericToken)
-                                    .ConfigureAwait(false),
-                                await chkInitiationOrdeal.DoThreadSafeFuncAsync(x => x.Checked, GenericToken)
-                                    .ConfigureAwait(false),
-                                await chkInitiationSchooling.DoThreadSafeFuncAsync(x => x.Checked, GenericToken)
-                                    .ConfigureAwait(false), GenericToken).ConfigureAwait(false);
-                            await CharacterObject.InitiationGrades.AddWithSortAsync(objGrade, token: GenericToken)
-                                .ConfigureAwait(false);
-                        }
+                            tsMetamagicAddArt.Visible = false;
+                            tsMetamagicAddEnchantment.Visible = false;
+                            tsMetamagicAddEnhancement.Visible = false;
+                            tsMetamagicAddRitual.Visible = false;
+                            tsMetamagicAddMetamagic.Text = strText;
+                        }, GenericToken).ConfigureAwait(false);
                     }
-                    finally
-                    {
-                        await objLocker.DisposeAsync().ConfigureAwait(false);
-                    }
+
+                    await AddInitiationGradeAsync(
+                        await chkInitiationGroup.DoThreadSafeFuncAsync(x => x.Checked, GenericToken).ConfigureAwait(false),
+                        await chkInitiationOrdeal.DoThreadSafeFuncAsync(x => x.Checked, GenericToken).ConfigureAwait(false),
+                        await chkInitiationSchooling.DoThreadSafeFuncAsync(x => x.Checked, GenericToken).ConfigureAwait(false),
+                        true, GenericToken).ConfigureAwait(false);
                 }
                 finally
                 {
@@ -5647,6 +5584,102 @@ namespace Chummer
             catch (OperationCanceledException)
             {
                 //swallow this
+            }
+        }
+
+        /// <summary>
+        /// Add the next initiation grade (or submersion grade, for technomancers), as the Add Initiation/Submersion button does.
+        /// </summary>
+        /// <param name="blnGroup">Whether it is a group initiation.</param>
+        /// <param name="blnOrdeal">Whether an ordeal is taken.</param>
+        /// <param name="blnSchooling">Whether schooling is taken.</param>
+        /// <param name="blnShowMessages">Whether to tell the user (in a message box) when the grade can't go up.</param>
+        /// <param name="token">Cancellation token to listen to.</param>
+        /// <returns>The new grade, or null if the character can't take another one.</returns>
+        internal async Task<InitiationGrade> AddInitiationGradeAsync(bool blnGroup, bool blnOrdeal, bool blnSchooling, bool blnShowMessages,
+                                                                     CancellationToken token = default)
+        {
+            IAsyncDisposable objLocker =
+                await CharacterObject.LockObject.EnterUpgradeableReadLockAsync(token).ConfigureAwait(false);
+            try
+            {
+                token.ThrowIfCancellationRequested();
+                if (await CharacterObject.GetMAGEnabledAsync(token).ConfigureAwait(false))
+                {
+                    int intGrade = await CharacterObject.GetInitiateGradeAsync(token).ConfigureAwait(false);
+                    // Make sure that the Initiate Grade is not attempting to go above the character's MAG CharacterAttribute.
+                    if (intGrade + 1
+                        > await (await CharacterObject.GetAttributeAsync("MAG", token: token)
+                                .ConfigureAwait(false))
+                            .GetTotalValueAsync(token).ConfigureAwait(false) ||
+                        await CharacterObject.GetIsMysticAdeptAsync(token).ConfigureAwait(false) && await CharacterObjectSettings.GetMysAdeptSecondMAGAttributeAsync(token).ConfigureAwait(false)
+                        && intGrade + 1
+                        > await (await CharacterObject
+                                .GetAttributeAsync(
+                                    "MAGAdept",
+                                    token: token)
+                                .ConfigureAwait(false))
+                            .GetTotalValueAsync(token)
+                            .ConfigureAwait(false))
+                    {
+                        if (blnShowMessages)
+                            await Program.ShowScrollableMessageBoxAsync(
+                                this,
+                                await LanguageManager.GetStringAsync("Message_CannotIncreaseInitiateGrade",
+                                        token: token)
+                                    .ConfigureAwait(false),
+                                await LanguageManager.GetStringAsync("MessageTitle_CannotIncreaseInitiateGrade",
+                                        token: token)
+                                    .ConfigureAwait(false),
+                                MessageBoxButtons.OK,
+                                MessageBoxIcon.Information, token: token).ConfigureAwait(false);
+                        return null;
+                    }
+
+                    // Create the Initiate Grade object.
+                    InitiationGrade objGrade = new InitiationGrade(CharacterObject);
+                    await objGrade.CreateAsync(intGrade + 1, false, blnGroup, blnOrdeal, blnSchooling, token).ConfigureAwait(false);
+                    await CharacterObject.InitiationGrades.AddWithSortAsync(objGrade, token: token)
+                        .ConfigureAwait(false);
+                    return objGrade;
+                }
+
+                if (await CharacterObject.GetRESEnabledAsync(token).ConfigureAwait(false))
+                {
+                    int intGrade = await CharacterObject.GetSubmersionGradeAsync(token).ConfigureAwait(false);
+                    // Make sure that the Initiate Grade is not attempting to go above the character's RES CharacterAttribute.
+                    if (intGrade + 1
+                        > await (await CharacterObject.GetAttributeAsync("RES", token: token)
+                                .ConfigureAwait(false))
+                            .GetTotalValueAsync(token).ConfigureAwait(false))
+                    {
+                        if (blnShowMessages)
+                            await Program.ShowScrollableMessageBoxAsync(
+                                this,
+                                await LanguageManager.GetStringAsync("Message_CannotIncreaseSubmersionGrade",
+                                        token: token)
+                                    .ConfigureAwait(false),
+                                await LanguageManager.GetStringAsync("MessageTitle_CannotIncreaseSubmersionGrade",
+                                        token: token)
+                                    .ConfigureAwait(false),
+                                MessageBoxButtons.OK,
+                                MessageBoxIcon.Information, token: token).ConfigureAwait(false);
+                        return null;
+                    }
+
+                    // Create the Initiate Grade object.
+                    InitiationGrade objGrade = new InitiationGrade(CharacterObject);
+                    await objGrade.CreateAsync(intGrade + 1, true, blnGroup, blnOrdeal, blnSchooling, token).ConfigureAwait(false);
+                    await CharacterObject.InitiationGrades.AddWithSortAsync(objGrade, token: token)
+                        .ConfigureAwait(false);
+                    return objGrade;
+                }
+
+                return null;
+            }
+            finally
+            {
+                await objLocker.DisposeAsync().ConfigureAwait(false);
             }
         }
 
@@ -6912,22 +6945,7 @@ namespace Chummer
 
                 XmlNode objXmlArmor = await objArmor.GetNodeAsync(GenericToken).ConfigureAwait(false);
 
-                string strAllowedCategories = objArmor.Category + "," + objArmor.Name;
-                bool blnExcludeGeneralCategory = false;
-                XmlElement xmlAddModCategory = objXmlArmor["forcemodcategory"];
-                if (xmlAddModCategory != null)
-                {
-                    strAllowedCategories = xmlAddModCategory.InnerTextViaPool(GenericToken);
-                    blnExcludeGeneralCategory = true;
-                }
-                else
-                {
-                    xmlAddModCategory = objXmlArmor["addmodcategory"];
-                    if (xmlAddModCategory != null)
-                    {
-                        strAllowedCategories += "," + xmlAddModCategory.InnerTextViaPool(GenericToken);
-                    }
-                }
+                (string strAllowedCategories, bool blnExcludeGeneralCategory) = GetArmorModCategories(objArmor, objXmlArmor, GenericToken);
 
                 CursorWait objCursorWait = await CursorWait.NewAsync(this, token: GenericToken).ConfigureAwait(false);
                 try
@@ -6956,46 +6974,8 @@ namespace Chummer
                                 objXmlArmor = objXmlDocument.TryGetNodeByNameOrId("/chummer/mods/mod",
                                     frmPickArmorMod.MyForm.SelectedArmorMod);
 
-                                List<Weapon> lstWeapons = new List<Weapon>(1);
-                                int.TryParse(objXmlArmor["maxrating"]?.InnerTextViaPool(GenericToken), NumberStyles.Integer, GlobalSettings.InvariantCultureInfo, out int intMaxRating);
-                                int intRating
-                                        = intMaxRating > 1
-                                            ? frmPickArmorMod.MyForm.SelectedRating
-                                            : 0;
-                                ArmorMod objMod = new ArmorMod(CharacterObject, objArmor);
-                                try
-                                {
-                                    await objMod.CreateAsync(objXmlArmor, intRating, lstWeapons, token: GenericToken)
-                                        .ConfigureAwait(false);
-                                    if (objMod.InternalId.IsEmptyGuid())
-                                    {
-                                        foreach (Weapon objWeapon in lstWeapons)
-                                            await objWeapon.DeleteWeaponAsync(token: GenericToken).ConfigureAwait(false);
-                                        await objMod.DeleteArmorModAsync(token: GenericToken).ConfigureAwait(false);
-                                        continue;
-                                    }
-
-                                    if (frmPickArmorMod.MyForm.FreeCost)
-                                    {
-                                        objMod.Cost = "0";
-                                    }
-
-                                    await objArmor.ArmorMods.AddAsync(objMod, GenericToken).ConfigureAwait(false);
-
-                                    // Add any Weapons created by the Mod.
-                                    foreach (Weapon objWeapon in lstWeapons)
-                                    {
-                                        await CharacterObject.Weapons.AddAsync(objWeapon, GenericToken)
-                                            .ConfigureAwait(false);
-                                    }
-                                }
-                                catch
-                                {
-                                    foreach (Weapon objWeapon in lstWeapons)
-                                        await objWeapon.DeleteWeaponAsync(token: CancellationToken.None).ConfigureAwait(false);
-                                    await objMod.DeleteArmorModAsync(token: CancellationToken.None).ConfigureAwait(false);
-                                    throw;
-                                }
+                                await AddArmorModFromNodeAsync(objArmor, objXmlArmor, frmPickArmorMod.MyForm.SelectedRating,
+                                                               frmPickArmorMod.MyForm.FreeCost, GenericToken).ConfigureAwait(false);
                             }
                         }
                         finally
@@ -7012,6 +6992,83 @@ namespace Chummer
             catch (OperationCanceledException)
             {
                 //swallow this
+            }
+        }
+
+        /// <summary>
+        /// The mod categories a piece of armor accepts, as the Add Armor Mod menu passes them to the Select Armor Mod dialog.
+        /// </summary>
+        internal static (string AllowedCategories, bool ExcludeGeneralCategory) GetArmorModCategories(Armor objArmor, XmlNode objXmlArmor,
+                                                                                                       CancellationToken token = default)
+        {
+            string strAllowedCategories = objArmor.Category + "," + objArmor.Name;
+            bool blnExcludeGeneralCategory = false;
+            XmlElement xmlAddModCategory = objXmlArmor?["forcemodcategory"];
+            if (xmlAddModCategory != null)
+            {
+                strAllowedCategories = xmlAddModCategory.InnerTextViaPool(token);
+                blnExcludeGeneralCategory = true;
+            }
+            else
+            {
+                xmlAddModCategory = objXmlArmor?["addmodcategory"];
+                if (xmlAddModCategory != null)
+                {
+                    strAllowedCategories += "," + xmlAddModCategory.InnerTextViaPool(token);
+                }
+            }
+
+            return (strAllowedCategories, blnExcludeGeneralCategory);
+        }
+
+        /// <summary>
+        /// Fit a mod to a piece of armor (and add any weapons it comes with), as the Select Armor Mod dialog's OK does.
+        /// </summary>
+        /// <returns>The new mod, or null if it could not be created (e.g. a choice it needed was cancelled).</returns>
+        internal async Task<ArmorMod> AddArmorModFromNodeAsync(Armor objArmor, XmlNode objXmlMod, int intSelectedRating, bool blnFree,
+                                                               CancellationToken token = default)
+        {
+            List<Weapon> lstWeapons = new List<Weapon>(1);
+            int.TryParse(objXmlMod["maxrating"]?.InnerTextViaPool(token), NumberStyles.Integer, GlobalSettings.InvariantCultureInfo, out int intMaxRating);
+            int intRating
+                    = intMaxRating > 1
+                        ? intSelectedRating
+                        : 0;
+            ArmorMod objMod = new ArmorMod(CharacterObject, objArmor);
+            try
+            {
+                await objMod.CreateAsync(objXmlMod, intRating, lstWeapons, token: token)
+                    .ConfigureAwait(false);
+                if (objMod.InternalId.IsEmptyGuid())
+                {
+                    foreach (Weapon objWeapon in lstWeapons)
+                        await objWeapon.DeleteWeaponAsync(token: token).ConfigureAwait(false);
+                    await objMod.DeleteArmorModAsync(token: token).ConfigureAwait(false);
+                    return null;
+                }
+
+                if (blnFree)
+                {
+                    objMod.Cost = "0";
+                }
+
+                await objArmor.ArmorMods.AddAsync(objMod, token).ConfigureAwait(false);
+
+                // Add any Weapons created by the Mod.
+                foreach (Weapon objWeapon in lstWeapons)
+                {
+                    await CharacterObject.Weapons.AddAsync(objWeapon, token)
+                        .ConfigureAwait(false);
+                }
+
+                return objMod;
+            }
+            catch
+            {
+                foreach (Weapon objWeapon in lstWeapons)
+                    await objWeapon.DeleteWeaponAsync(token: CancellationToken.None).ConfigureAwait(false);
+                await objMod.DeleteArmorModAsync(token: CancellationToken.None).ConfigureAwait(false);
+                throw;
             }
         }
 
@@ -7304,13 +7361,8 @@ namespace Chummer
                             xmlTechnique = xmlDocument.TryGetNodeByNameOrId("/chummer/techniques/technique", frmPickMartialArtTechnique.MyForm.SelectedTechnique);
                         }
 
-                        // Create the Improvements for the Technique if there are any.
-                        MartialArtTechnique objTechnique = new MartialArtTechnique(CharacterObject);
-                        await objTechnique.CreateAsync(xmlTechnique, GenericToken).ConfigureAwait(false);
-                        if (objTechnique.InternalId.IsEmptyGuid())
+                        if (await AddMartialArtTechniqueFromNodeAsync(objMartialArt, xmlTechnique, GenericToken).ConfigureAwait(false) == null)
                             return;
-
-                        await objMartialArt.Techniques.AddAsync(objTechnique, GenericToken).ConfigureAwait(false);
                     } while (blnAddAgain);
                 }
                 finally
@@ -7322,6 +7374,23 @@ namespace Chummer
             {
                 //swallow this
             }
+        }
+
+        /// <summary>
+        /// Teach a martial art one of its techniques, as the Select Technique dialog's OK does.
+        /// </summary>
+        /// <returns>The new technique, or null if it could not be created (e.g. a choice it needed was cancelled).</returns>
+        internal async Task<MartialArtTechnique> AddMartialArtTechniqueFromNodeAsync(MartialArt objMartialArt, XmlNode xmlTechnique,
+                                                                                    CancellationToken token = default)
+        {
+            // Create the Improvements for the Technique if there are any.
+            MartialArtTechnique objTechnique = new MartialArtTechnique(CharacterObject);
+            await objTechnique.CreateAsync(xmlTechnique, token).ConfigureAwait(false);
+            if (objTechnique.InternalId.IsEmptyGuid())
+                return null;
+
+            await objMartialArt.Techniques.AddAsync(objTechnique, token).ConfigureAwait(false);
+            return objTechnique;
         }
 
         private async void tsVehicleAddGear_Click(object sender, EventArgs e)
@@ -12180,175 +12249,7 @@ namespace Chummer
                                         .ConfigureAwait(false);
                 if (string.IsNullOrEmpty(strSelectedId))
                     return;
-
-                bool blnUseTechnoTraditions = await CharacterObject.GetRESEnabledAsync(GenericToken).ConfigureAwait(false);
-                XmlNode xmlTradition = (await CharacterObject.LoadDataAsync(
-                    blnUseTechnoTraditions
-                                                    ? "streams.xml"
-                                                    : "traditions.xml", token: GenericToken)
-                                                             .ConfigureAwait(false))
-                    .TryGetNodeByNameOrId("/chummer/traditions/tradition", strSelectedId);
-
-                Tradition objTradition =
-                    await CharacterObject.GetMagicTraditionAsync(GenericToken).ConfigureAwait(false);
-                if (xmlTradition == null)
-                {
-                    await lblTraditionName.DoThreadSafeAsync(x => x.Visible = false, GenericToken)
-                                          .ConfigureAwait(false);
-                    await txtTraditionName.DoThreadSafeAsync(x => x.Visible = false, GenericToken)
-                                          .ConfigureAwait(false);
-                    await lblSpiritCombat.DoThreadSafeAsync(x => x.Visible = false, GenericToken).ConfigureAwait(false);
-                    await lblSpiritDetection.DoThreadSafeAsync(x => x.Visible = false, GenericToken)
-                                            .ConfigureAwait(false);
-                    await lblSpiritHealth.DoThreadSafeAsync(x => x.Visible = false, GenericToken).ConfigureAwait(false);
-                    await lblSpiritIllusion.DoThreadSafeAsync(x => x.Visible = false, GenericToken)
-                                           .ConfigureAwait(false);
-                    await lblSpiritManipulation.DoThreadSafeAsync(x => x.Visible = false, GenericToken)
-                                               .ConfigureAwait(false);
-                    await lblTraditionSource.DoThreadSafeAsync(x => x.Visible = false, GenericToken)
-                                            .ConfigureAwait(false);
-                    await lblTraditionSourceLabel.DoThreadSafeAsync(x => x.Visible = false, GenericToken)
-                                                 .ConfigureAwait(false);
-                    await cboSpiritCombat.DoThreadSafeAsync(x => x.Visible = false, GenericToken).ConfigureAwait(false);
-                    await cboSpiritDetection.DoThreadSafeAsync(x => x.Visible = false, GenericToken)
-                                            .ConfigureAwait(false);
-                    await cboSpiritHealth.DoThreadSafeAsync(x => x.Visible = false, GenericToken).ConfigureAwait(false);
-                    await cboSpiritIllusion.DoThreadSafeAsync(x => x.Visible = false, GenericToken)
-                                           .ConfigureAwait(false);
-                    await cboSpiritManipulation.DoThreadSafeAsync(x => x.Visible = false, GenericToken)
-                                               .ConfigureAwait(false);
-
-                    if (await objTradition.GetTypeAsync(GenericToken).ConfigureAwait(false) != TraditionType.None)
-                    {
-                        await objTradition.ResetTraditionAsync(GenericToken).ConfigureAwait(false);
-                        await MakeDirtyWithCharacterUpdate(GenericToken).ConfigureAwait(false);
-                    }
-
-                    string strSourceIDString = await objTradition.GetSourceIDStringAsync(GenericToken).ConfigureAwait(false);
-                    if (!string.IsNullOrEmpty(strSourceIDString))
-                        await cboTradition.DoThreadSafeAsync(x => x.SelectedValue = strSourceIDString, GenericToken)
-                            .ConfigureAwait(false);
-                }
-                else if (strSelectedId == Tradition.CustomMagicalTraditionGuidString)
-                {
-                    if (await objTradition.CreateAsync(xmlTradition, token: GenericToken).ConfigureAwait(false))
-                    {
-                        await lblTraditionName.DoThreadSafeAsync(x => x.Visible = true, GenericToken)
-                                              .ConfigureAwait(false);
-                        await txtTraditionName.DoThreadSafeAsync(x => x.Visible = true, GenericToken)
-                                              .ConfigureAwait(false);
-                        await lblSpiritCombat.DoThreadSafeAsync(x => x.Visible = true, GenericToken)
-                                             .ConfigureAwait(false);
-                        await lblSpiritDetection.DoThreadSafeAsync(x => x.Visible = true, GenericToken)
-                                                .ConfigureAwait(false);
-                        await lblSpiritHealth.DoThreadSafeAsync(x => x.Visible = true, GenericToken)
-                                             .ConfigureAwait(false);
-                        await lblSpiritIllusion.DoThreadSafeAsync(x => x.Visible = true, GenericToken)
-                                               .ConfigureAwait(false);
-                        await lblSpiritManipulation.DoThreadSafeAsync(x => x.Visible = true, GenericToken)
-                                                   .ConfigureAwait(false);
-                        await lblTraditionSource.DoThreadSafeAsync(x => x.Visible = false, GenericToken)
-                                                .ConfigureAwait(false);
-                        await lblTraditionSourceLabel.DoThreadSafeAsync(x => x.Visible = false, GenericToken)
-                                                     .ConfigureAwait(false);
-                        await cboSpiritCombat.DoThreadSafeAsync(x =>
-                        {
-                            x.Enabled = true;
-                            x.Visible = true;
-                        }, GenericToken).ConfigureAwait(false);
-                        await cboSpiritDetection.DoThreadSafeAsync(x =>
-                        {
-                            x.Enabled = true;
-                            x.Visible = true;
-                        }, GenericToken).ConfigureAwait(false);
-                        await cboSpiritHealth.DoThreadSafeAsync(x =>
-                        {
-                            x.Enabled = true;
-                            x.Visible = true;
-                        }, GenericToken).ConfigureAwait(false);
-                        await cboSpiritIllusion.DoThreadSafeAsync(x =>
-                        {
-                            x.Enabled = true;
-                            x.Visible = true;
-                        }, GenericToken).ConfigureAwait(false);
-                        await cboSpiritManipulation.DoThreadSafeAsync(x =>
-                        {
-                            x.Enabled = true;
-                            x.Visible = true;
-                        }, GenericToken).ConfigureAwait(false);
-
-                        await MakeDirtyWithCharacterUpdate(GenericToken).ConfigureAwait(false);
-                    }
-                    else
-                    {
-                        await objTradition.ResetTraditionAsync(GenericToken).ConfigureAwait(false);
-                        string strSourceIDString = await objTradition.GetSourceIDStringAsync(GenericToken).ConfigureAwait(false);
-                        if (!string.IsNullOrEmpty(strSourceIDString))
-                            await cboTradition.DoThreadSafeAsync(x => x.SelectedValue = strSourceIDString, GenericToken)
-                                .ConfigureAwait(false);
-                    }
-                }
-                else if (await objTradition.CreateAsync(xmlTradition, blnUseTechnoTraditions, token: GenericToken).ConfigureAwait(false))
-                {
-                    await lblTraditionName.DoThreadSafeAsync(x => x.Visible = false, GenericToken)
-                                          .ConfigureAwait(false);
-                    await txtTraditionName.DoThreadSafeAsync(x => x.Visible = false, GenericToken)
-                                          .ConfigureAwait(false);
-                    await lblSpiritCombat.DoThreadSafeAsync(x => x.Visible = !blnUseTechnoTraditions, GenericToken).ConfigureAwait(false);
-                    await lblSpiritDetection.DoThreadSafeAsync(x => x.Visible = !blnUseTechnoTraditions, GenericToken)
-                                            .ConfigureAwait(false);
-                    await lblSpiritHealth.DoThreadSafeAsync(x => x.Visible = !blnUseTechnoTraditions, GenericToken).ConfigureAwait(false);
-                    await lblSpiritIllusion.DoThreadSafeAsync(x => x.Visible = !blnUseTechnoTraditions, GenericToken)
-                                           .ConfigureAwait(false);
-                    await lblSpiritManipulation.DoThreadSafeAsync(x => x.Visible = !blnUseTechnoTraditions, GenericToken)
-                                               .ConfigureAwait(false);
-                    await cboSpiritCombat.DoThreadSafeAsync(x =>
-                    {
-                        x.Enabled = false;
-                        x.Visible = !blnUseTechnoTraditions;
-                    }, GenericToken).ConfigureAwait(false);
-                    await cboSpiritDetection.DoThreadSafeAsync(x =>
-                    {
-                        x.Enabled = false;
-                        x.Visible = !blnUseTechnoTraditions;
-                    }, GenericToken).ConfigureAwait(false);
-                    await cboSpiritHealth.DoThreadSafeAsync(x =>
-                    {
-                        x.Enabled = false;
-                        x.Visible = !blnUseTechnoTraditions;
-                    }, GenericToken).ConfigureAwait(false);
-                    await cboSpiritIllusion.DoThreadSafeAsync(x =>
-                    {
-                        x.Enabled = false;
-                        x.Visible = !blnUseTechnoTraditions;
-                    }, GenericToken).ConfigureAwait(false);
-                    await cboSpiritManipulation.DoThreadSafeAsync(x =>
-                    {
-                        x.Enabled = false;
-                        x.Visible = !blnUseTechnoTraditions;
-                    }, GenericToken).ConfigureAwait(false);
-
-                    await lblTraditionSource.DoThreadSafeAsync(x => x.Visible = true, GenericToken)
-                                            .ConfigureAwait(false);
-                    await lblTraditionSourceLabel.DoThreadSafeAsync(x => x.Visible = true, GenericToken)
-                                                 .ConfigureAwait(false);
-                    await objTradition.SetSourceDetailAsync(lblTraditionSource, GenericToken)
-                                         .ConfigureAwait(false);
-                    await MakeDirtyWithCharacterUpdate(GenericToken).ConfigureAwait(false);
-                }
-                else
-                {
-                    await objTradition.ResetTraditionAsync(GenericToken).ConfigureAwait(false);
-                    string strSourceIDString = await objTradition.GetSourceIDStringAsync(GenericToken).ConfigureAwait(false);
-                    if (!string.IsNullOrEmpty(strSourceIDString))
-                        await cboTradition.DoThreadSafeAsync(x => x.SelectedValue = strSourceIDString, GenericToken)
-                            .ConfigureAwait(false);
-                }
-
-                bool blnDrainVisible = (!await CharacterObject.GetAdeptEnabledAsync(GenericToken).ConfigureAwait(false)
-                                        || await CharacterObject.GetMagicianEnabledAsync(GenericToken).ConfigureAwait(false)) &&
-                                       await objTradition.GetCanChooseDrainAttributeAsync(GenericToken).ConfigureAwait(false);
-                await cboDrain.DoThreadSafeAsync(x => x.Visible = blnDrainVisible, GenericToken).ConfigureAwait(false);
+                await ApplyTraditionSelectionAsync(strSelectedId, GenericToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -12358,6 +12259,207 @@ namespace Chummer
             {
                 SkipUpdate = false;
             }
+        }
+
+        /// <summary>
+        /// Select a tradition (or stream, for technomancers) by id, as picking it in the tradition list does, and show it in that list.
+        /// </summary>
+        internal async Task SetTraditionAsync(string strSelectedId, CancellationToken token = default)
+        {
+            IsRefreshing = true;
+            try
+            {
+                await cboTradition.DoThreadSafeAsync(x => x.SelectedValue = strSelectedId, token).ConfigureAwait(false);
+            }
+            finally
+            {
+                IsRefreshing = false;
+            }
+
+            SkipUpdate = true;
+            try
+            {
+                await ApplyTraditionSelectionAsync(strSelectedId, token).ConfigureAwait(false);
+            }
+            finally
+            {
+                SkipUpdate = false;
+            }
+        }
+
+        /// <summary>
+        /// What picking a tradition (or stream) in the tradition list does.
+        /// </summary>
+        private async Task ApplyTraditionSelectionAsync(string strSelectedId, CancellationToken token = default)
+        {
+            bool blnUseTechnoTraditions = await CharacterObject.GetRESEnabledAsync(token).ConfigureAwait(false);
+            XmlNode xmlTradition = (await CharacterObject.LoadDataAsync(
+                blnUseTechnoTraditions
+                                                ? "streams.xml"
+                                                : "traditions.xml", token: token)
+                                                         .ConfigureAwait(false))
+                .TryGetNodeByNameOrId("/chummer/traditions/tradition", strSelectedId);
+
+            Tradition objTradition =
+                await CharacterObject.GetMagicTraditionAsync(token).ConfigureAwait(false);
+            if (xmlTradition == null)
+            {
+                await lblTraditionName.DoThreadSafeAsync(x => x.Visible = false, token)
+                                      .ConfigureAwait(false);
+                await txtTraditionName.DoThreadSafeAsync(x => x.Visible = false, token)
+                                      .ConfigureAwait(false);
+                await lblSpiritCombat.DoThreadSafeAsync(x => x.Visible = false, token).ConfigureAwait(false);
+                await lblSpiritDetection.DoThreadSafeAsync(x => x.Visible = false, token)
+                                        .ConfigureAwait(false);
+                await lblSpiritHealth.DoThreadSafeAsync(x => x.Visible = false, token).ConfigureAwait(false);
+                await lblSpiritIllusion.DoThreadSafeAsync(x => x.Visible = false, token)
+                                       .ConfigureAwait(false);
+                await lblSpiritManipulation.DoThreadSafeAsync(x => x.Visible = false, token)
+                                           .ConfigureAwait(false);
+                await lblTraditionSource.DoThreadSafeAsync(x => x.Visible = false, token)
+                                        .ConfigureAwait(false);
+                await lblTraditionSourceLabel.DoThreadSafeAsync(x => x.Visible = false, token)
+                                             .ConfigureAwait(false);
+                await cboSpiritCombat.DoThreadSafeAsync(x => x.Visible = false, token).ConfigureAwait(false);
+                await cboSpiritDetection.DoThreadSafeAsync(x => x.Visible = false, token)
+                                        .ConfigureAwait(false);
+                await cboSpiritHealth.DoThreadSafeAsync(x => x.Visible = false, token).ConfigureAwait(false);
+                await cboSpiritIllusion.DoThreadSafeAsync(x => x.Visible = false, token)
+                                       .ConfigureAwait(false);
+                await cboSpiritManipulation.DoThreadSafeAsync(x => x.Visible = false, token)
+                                           .ConfigureAwait(false);
+
+                if (await objTradition.GetTypeAsync(token).ConfigureAwait(false) != TraditionType.None)
+                {
+                    await objTradition.ResetTraditionAsync(token).ConfigureAwait(false);
+                    await MakeDirtyWithCharacterUpdate(token).ConfigureAwait(false);
+                }
+
+                string strSourceIDString = await objTradition.GetSourceIDStringAsync(token).ConfigureAwait(false);
+                if (!string.IsNullOrEmpty(strSourceIDString))
+                    await cboTradition.DoThreadSafeAsync(x => x.SelectedValue = strSourceIDString, token)
+                        .ConfigureAwait(false);
+            }
+            else if (strSelectedId == Tradition.CustomMagicalTraditionGuidString)
+            {
+                if (await objTradition.CreateAsync(xmlTradition, token: token).ConfigureAwait(false))
+                {
+                    await lblTraditionName.DoThreadSafeAsync(x => x.Visible = true, token)
+                                          .ConfigureAwait(false);
+                    await txtTraditionName.DoThreadSafeAsync(x => x.Visible = true, token)
+                                          .ConfigureAwait(false);
+                    await lblSpiritCombat.DoThreadSafeAsync(x => x.Visible = true, token)
+                                         .ConfigureAwait(false);
+                    await lblSpiritDetection.DoThreadSafeAsync(x => x.Visible = true, token)
+                                            .ConfigureAwait(false);
+                    await lblSpiritHealth.DoThreadSafeAsync(x => x.Visible = true, token)
+                                         .ConfigureAwait(false);
+                    await lblSpiritIllusion.DoThreadSafeAsync(x => x.Visible = true, token)
+                                           .ConfigureAwait(false);
+                    await lblSpiritManipulation.DoThreadSafeAsync(x => x.Visible = true, token)
+                                               .ConfigureAwait(false);
+                    await lblTraditionSource.DoThreadSafeAsync(x => x.Visible = false, token)
+                                            .ConfigureAwait(false);
+                    await lblTraditionSourceLabel.DoThreadSafeAsync(x => x.Visible = false, token)
+                                                 .ConfigureAwait(false);
+                    await cboSpiritCombat.DoThreadSafeAsync(x =>
+                    {
+                        x.Enabled = true;
+                        x.Visible = true;
+                    }, token).ConfigureAwait(false);
+                    await cboSpiritDetection.DoThreadSafeAsync(x =>
+                    {
+                        x.Enabled = true;
+                        x.Visible = true;
+                    }, token).ConfigureAwait(false);
+                    await cboSpiritHealth.DoThreadSafeAsync(x =>
+                    {
+                        x.Enabled = true;
+                        x.Visible = true;
+                    }, token).ConfigureAwait(false);
+                    await cboSpiritIllusion.DoThreadSafeAsync(x =>
+                    {
+                        x.Enabled = true;
+                        x.Visible = true;
+                    }, token).ConfigureAwait(false);
+                    await cboSpiritManipulation.DoThreadSafeAsync(x =>
+                    {
+                        x.Enabled = true;
+                        x.Visible = true;
+                    }, token).ConfigureAwait(false);
+
+                    await MakeDirtyWithCharacterUpdate(token).ConfigureAwait(false);
+                }
+                else
+                {
+                    await objTradition.ResetTraditionAsync(token).ConfigureAwait(false);
+                    string strSourceIDString = await objTradition.GetSourceIDStringAsync(token).ConfigureAwait(false);
+                    if (!string.IsNullOrEmpty(strSourceIDString))
+                        await cboTradition.DoThreadSafeAsync(x => x.SelectedValue = strSourceIDString, token)
+                            .ConfigureAwait(false);
+                }
+            }
+            else if (await objTradition.CreateAsync(xmlTradition, blnUseTechnoTraditions, token: token).ConfigureAwait(false))
+            {
+                await lblTraditionName.DoThreadSafeAsync(x => x.Visible = false, token)
+                                      .ConfigureAwait(false);
+                await txtTraditionName.DoThreadSafeAsync(x => x.Visible = false, token)
+                                      .ConfigureAwait(false);
+                await lblSpiritCombat.DoThreadSafeAsync(x => x.Visible = !blnUseTechnoTraditions, token).ConfigureAwait(false);
+                await lblSpiritDetection.DoThreadSafeAsync(x => x.Visible = !blnUseTechnoTraditions, token)
+                                        .ConfigureAwait(false);
+                await lblSpiritHealth.DoThreadSafeAsync(x => x.Visible = !blnUseTechnoTraditions, token).ConfigureAwait(false);
+                await lblSpiritIllusion.DoThreadSafeAsync(x => x.Visible = !blnUseTechnoTraditions, token)
+                                       .ConfigureAwait(false);
+                await lblSpiritManipulation.DoThreadSafeAsync(x => x.Visible = !blnUseTechnoTraditions, token)
+                                           .ConfigureAwait(false);
+                await cboSpiritCombat.DoThreadSafeAsync(x =>
+                {
+                    x.Enabled = false;
+                    x.Visible = !blnUseTechnoTraditions;
+                }, token).ConfigureAwait(false);
+                await cboSpiritDetection.DoThreadSafeAsync(x =>
+                {
+                    x.Enabled = false;
+                    x.Visible = !blnUseTechnoTraditions;
+                }, token).ConfigureAwait(false);
+                await cboSpiritHealth.DoThreadSafeAsync(x =>
+                {
+                    x.Enabled = false;
+                    x.Visible = !blnUseTechnoTraditions;
+                }, token).ConfigureAwait(false);
+                await cboSpiritIllusion.DoThreadSafeAsync(x =>
+                {
+                    x.Enabled = false;
+                    x.Visible = !blnUseTechnoTraditions;
+                }, token).ConfigureAwait(false);
+                await cboSpiritManipulation.DoThreadSafeAsync(x =>
+                {
+                    x.Enabled = false;
+                    x.Visible = !blnUseTechnoTraditions;
+                }, token).ConfigureAwait(false);
+
+                await lblTraditionSource.DoThreadSafeAsync(x => x.Visible = true, token)
+                                        .ConfigureAwait(false);
+                await lblTraditionSourceLabel.DoThreadSafeAsync(x => x.Visible = true, token)
+                                             .ConfigureAwait(false);
+                await objTradition.SetSourceDetailAsync(lblTraditionSource, token)
+                                     .ConfigureAwait(false);
+                await MakeDirtyWithCharacterUpdate(token).ConfigureAwait(false);
+            }
+            else
+            {
+                await objTradition.ResetTraditionAsync(token).ConfigureAwait(false);
+                string strSourceIDString = await objTradition.GetSourceIDStringAsync(token).ConfigureAwait(false);
+                if (!string.IsNullOrEmpty(strSourceIDString))
+                    await cboTradition.DoThreadSafeAsync(x => x.SelectedValue = strSourceIDString, token)
+                        .ConfigureAwait(false);
+            }
+
+            bool blnDrainVisible = (!await CharacterObject.GetAdeptEnabledAsync(token).ConfigureAwait(false)
+                                    || await CharacterObject.GetMagicianEnabledAsync(token).ConfigureAwait(false)) &&
+                                   await objTradition.GetCanChooseDrainAttributeAsync(token).ConfigureAwait(false);
+            await cboDrain.DoThreadSafeAsync(x => x.Visible = blnDrainVisible, token).ConfigureAwait(false);
         }
 
         #endregion Additional Spells and Spirits Tab Control Events
@@ -23620,8 +23722,6 @@ namespace Chummer
                         == DialogResult.Cancel)
                         return;
 
-                    Metamagic objNewMetamagic = new Metamagic(CharacterObject);
-
                     XmlNode objXmlMetamagic;
                     Improvement.ImprovementSource objSource;
                     if (await CharacterObject.GetRESEnabledAsync(GenericToken).ConfigureAwait(false))
@@ -23642,18 +23742,31 @@ namespace Chummer
                         objSource = Improvement.ImprovementSource.Metamagic;
                     }
 
-                    await objNewMetamagic.CreateAsync(objXmlMetamagic, objSource, token: GenericToken).ConfigureAwait(false);
-                    objNewMetamagic.Grade = objGrade.Grade;
-                    if (objNewMetamagic.InternalId.IsEmptyGuid())
-                        return;
-
-                    await CharacterObject.Metamagics.AddAsync(objNewMetamagic, GenericToken).ConfigureAwait(false);
+                    await AddMetamagicFromNodeAsync(objGrade, objXmlMetamagic, objSource, token: GenericToken).ConfigureAwait(false);
                 }
             }
             catch (OperationCanceledException)
             {
                 //swallow this
             }
+        }
+
+        /// <summary>
+        /// Learn a metamagic (or echo) at an initiation (or submersion) grade, as the Select Metamagic dialog's OK does.
+        /// </summary>
+        /// <returns>The new metamagic, or null if it could not be created (e.g. a choice it needed was cancelled).</returns>
+        internal async Task<Metamagic> AddMetamagicFromNodeAsync(InitiationGrade objGrade, XmlNode objXmlMetamagic,
+                                                                 Improvement.ImprovementSource objSource, string strForcedValue = "",
+                                                                 CancellationToken token = default)
+        {
+            Metamagic objNewMetamagic = new Metamagic(CharacterObject);
+            await objNewMetamagic.CreateAsync(objXmlMetamagic, objSource, strForcedValue ?? string.Empty, token: token).ConfigureAwait(false);
+            objNewMetamagic.Grade = objGrade.Grade;
+            if (objNewMetamagic.InternalId.IsEmptyGuid())
+                return null;
+
+            await CharacterObject.Metamagics.AddAsync(objNewMetamagic, token).ConfigureAwait(false);
+            return objNewMetamagic;
         }
 
         private async void tsMetamagicAddArt_Click(object sender, EventArgs e)
@@ -23680,20 +23793,30 @@ namespace Chummer
                                                 .ConfigureAwait(false))
                         .TryGetNodeByNameOrId("/chummer/arts/art", frmPickArt.MyForm.SelectedItem);
 
-                    Art objArt = new Art(CharacterObject);
-
-                    await objArt.CreateAsync(objXmlArt, Improvement.ImprovementSource.Metamagic, GenericToken).ConfigureAwait(false);
-                    objArt.Grade = objGrade.Grade;
-                    if (objArt.InternalId.IsEmptyGuid())
-                        return;
-
-                    await CharacterObject.Arts.AddAsync(objArt, GenericToken).ConfigureAwait(false);
+                    await AddArtFromNodeAsync(objGrade, objXmlArt, GenericToken).ConfigureAwait(false);
                 }
             }
             catch (OperationCanceledException)
             {
                 //swallow this
             }
+        }
+
+        /// <summary>
+        /// Learn a magical art at an initiation grade, as the Select Art dialog's OK does.
+        /// </summary>
+        /// <returns>The new art, or null if it could not be created.</returns>
+        internal async Task<Art> AddArtFromNodeAsync(InitiationGrade objGrade, XmlNode objXmlArt, CancellationToken token = default)
+        {
+            Art objArt = new Art(CharacterObject);
+
+            await objArt.CreateAsync(objXmlArt, Improvement.ImprovementSource.Metamagic, token).ConfigureAwait(false);
+            objArt.Grade = objGrade.Grade;
+            if (objArt.InternalId.IsEmptyGuid())
+                return null;
+
+            await CharacterObject.Arts.AddAsync(objArt, token).ConfigureAwait(false);
+            return objArt;
         }
 
         private async void tsMetamagicAddEnchantment_Click(object sender, EventArgs e)

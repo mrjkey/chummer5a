@@ -29,7 +29,7 @@
 
 ## Status
 
-Steps 0–6 are done: built, and 80/80 tests pass (76 existing plus 4 agent tests). The server was verified live from WSL and from Claude Code with Chummer running. Step 6 was also checked live: an elf face was created, edited, given gear and saved over MCP, and showed up correctly in the Chummer window.
+Steps 0–7 are done: built, and 81/81 tests pass (76 existing plus 5 agent tests). The server was verified live from WSL and from Claude Code with Chummer running. Step 6 was also checked live: an elf face was created, edited, given gear and saved over MCP, and showed up correctly in the Chummer window.
 
 ### Step 0: Build/run loop (done)
 
@@ -141,6 +141,34 @@ Steps 0–6 are done: built, and 80/80 tests pass (76 existing plus 4 agent test
 - `FinishEditAsync` results now include essence.
 - Validation (PLAN step 4): in collect mode, leftover-point warnings are reported even when there are errors. The GUI still only asks about them once everything else is fine.
 
+### Step 7: Magic, skills, martial arts and mods (done, `AgentTools.Magic.cs`, `.Edit.cs`, `.Gear.cs`)
+
+Each tool calls a core extracted from the GUI. The GUI now calls the same core:
+
+| Tool | GUI code it shares |
+|---|---|
+| `set_tradition` (tradition or stream) | `CharacterCreate.SetTraditionAsync`, the body of the tradition combo's handler. It syncs the combo under `IsRefreshing`. |
+| `add_mentor_spirit` | The Mentor Spirit quality with forced value `"Mentor|Choice 1|Choice 2"`. The async `selectmentorspirit`/`selectparagon` improvements skip their dialog only for that `|` format. |
+| `add_complex_form` | `AddComplexFormFromNodeAsync`, `IsAtComplexFormLimitAsync` |
+| `add_spirit` (spirit or sprite) | `AddSpirit`/`AddSprite` now return the entity. Allowed types come from `Spirit.FillSpiritTypeChoicesAsync`, moved out of `SpiritControl.RebuildSpiritList`. |
+| `add_initiation` | `AddInitiationGradeAsync` |
+| `add_art` | `AddArtFromNodeAsync` |
+| `add_metamagic` | `AddMetamagicFromNodeAsync` |
+| `set_specialization` | `Skill.SetTopMostDisplaySpecializationAsync`, as the spec box does |
+| `add_exotic_skill` | `SkillsSection.AddExoticSkillAsync`, then `Upgrade` as the button does, or explicit ranks |
+| `add_martial_art` | `MartialArt.PurchaseFromNodeAsync` |
+| `add_technique` | `AddMartialArtTechniqueFromNodeAsync`; allowed list from `SelectMartialArtTechnique.FillAllowedTechniques` |
+| `add_weapon_accessory` | `AddWeaponAccessoryFromNodeAsync`; mounts as the dialog picks them from `Weapon.GetAccessoryMountsAsync` |
+| `add_armor_mod` | `AddArmorModFromNodeAsync`; categories from `GetArmorModCategories` |
+| `add_vehicle_mod` | `AddVehicleModFromNodeAsync` |
+
+Other changes:
+- `remove_item` also removes spirits (unfettered first, as the editor does), complex forms, martial arts and techniques, arts, metamagics, initiation grades, accessories and mods.
+- `get_character_summary` now lists mentors, spirits, initiation/submersion grade, arts, metamagics, techniques, accessories and mods.
+- `search_catalog` gained the stream, art, technique, accessory, armormod and vehiclemod kinds.
+- `add_quality`, `add_spell`, `add_power` and all the new tools now refuse items from books the settings don't enable, as the dialogs do.
+- Every SR5 magician metamagic needs an art, and all the arts are in Street Grimoire. With the Standard (core-only) settings, mages therefore can't take metamagics.
+
 ### Tests (`Chummer.Tests/AgentToolsTests.cs`)
 
 - `Protocol_InitializeListAndErrors`: initialize, tools/list, notifications, unknown method and unknown tool.
@@ -158,6 +186,11 @@ Steps 0–6 are done: built, and 80/80 tests pass (76 existing plus 4 agent test
   - removing everything back to the starting nuyen and essence 6
   - unspent-point warnings while there are errors
   - saving to a temp file
+- `MagicSkillsAndMods` covers:
+  - a hermetic mage: tradition, a spirit (and a refused type), the Dog mentor, a Spellcasting specialization, initiation, and a metamagic refused for lack of its art
+  - a technomancer: stream, complex form, sprite
+  - a mundane: exotic skill, laser sight (and a refused mount), armor mod, vehicle mod, and martial arts refused under Standard
+  - a Full House mage: art, metamagic, Krav Maga with a technique
 - `RunWithMainForm` is the shared hidden-main-window helper. The hidden window can't show dialogs, so items that ask a question need `forced_value` in tests.
 - Only test files listed in `Chummer.Tests.csproj` are copied to the output (`Gangerbean.chum5` is not).
 
@@ -165,13 +198,15 @@ Steps 0–6 are done: built, and 80/80 tests pass (76 existing plus 4 agent test
 
 ## Next steps (goal 1)
 
-1. More edit tools, each reusing the GUI code path:
-   - Tradition and mentor spirit selection.
-   - Skill specializations and exotic skills.
-   - Complex forms, martial arts, spirits/sprites, metamagics.
-   - Weapon accessories, armor mods, vehicle mods, gear locations.
-2. Career mode: the tools only edit characters in creation.
-3. An optional on/off toggle or token for the MCP server. It is currently always on and localhost-only, with no auth.
+1. Career mode: the tools only edit characters in creation.
+2. Smaller gaps, each reusing the GUI code path when needed:
+   - enchanting, enhancements and rituals
+   - AI programs and critter powers
+   - vehicle weapon mounts and weapons
+   - gear inside armor or vehicles
+   - locations
+
+The MCP server stays always on and unauthenticated by design: it only listens on localhost, and anyone running this build wants it.
 
 ## Later (goal 2): cross-platform / web UI
 

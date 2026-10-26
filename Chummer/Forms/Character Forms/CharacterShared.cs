@@ -706,102 +706,122 @@ namespace Chummer
                     return false;
 
                 XmlNode objXmlMod = objXmlDocument.TryGetNodeByNameOrId("/chummer/mods/mod", frmPickVehicleMod.MyForm.SelectedMod);
-                VehicleMod objMod = new VehicleMod(CharacterObject);
-                try
+                await AddVehicleModFromNodeAsync(objVehicle, objXmlMod, frmPickVehicleMod.MyForm.SelectedRating,
+                                                 frmPickVehicleMod.MyForm.FreeCost, frmPickVehicleMod.MyForm.BlackMarketDiscount,
+                                                 frmPickVehicleMod.MyForm.Markup, blnChargeCost, strExpenseString, eUndoType,
+                                                 blnSetCostToZeroWhenFree, blnEnforceCapacity, true, token).ConfigureAwait(false);
+                return frmPickVehicleMod.MyForm.AddAgain;
+            }
+        }
+
+        /// <summary>
+        /// Install a mod in a vehicle, as the Select Vehicle Mod dialog's OK does.
+        /// </summary>
+        /// <returns>The new mod, or null if it doesn't fit (with <paramref name="blnEnforceCapacity"/>) or can't be paid for
+        /// (with <paramref name="blnChargeCost"/>).</returns>
+        internal async Task<VehicleMod> AddVehicleModFromNodeAsync(Vehicle objVehicle, XmlNode objXmlMod, int intRating, bool blnFree,
+                                                                   bool blnBlackMarketDiscount, decimal decMarkup, bool blnChargeCost,
+                                                                   string strExpenseString, NuyenExpenseType eUndoType,
+                                                                   bool blnSetCostToZeroWhenFree, bool blnEnforceCapacity,
+                                                                   bool blnShowMessages, CancellationToken token = default)
+        {
+            VehicleMod objMod = new VehicleMod(CharacterObject);
+            try
+            {
+                objMod.DiscountCost = blnBlackMarketDiscount;
+                await objMod.CreateAsync(objXmlMod, intRating, objVehicle, token: token).ConfigureAwait(false);
+
+                decimal decOriginalCost = 0;
+                if (blnChargeCost)
+                    decOriginalCost = await objVehicle.GetTotalCostAsync(token).ConfigureAwait(false);
+
+                if (blnFree && blnSetCostToZeroWhenFree)
+                    objMod.Cost = "0";
+
+                await objVehicle.Mods.AddAsync(objMod, token).ConfigureAwait(false);
+
+                if (blnEnforceCapacity && await CharacterObjectSettings.GetEnforceCapacityAsync(token).ConfigureAwait(false))
                 {
-                    objMod.DiscountCost = frmPickVehicleMod.MyForm.BlackMarketDiscount;
-                    await objMod.CreateAsync(objXmlMod, frmPickVehicleMod.MyForm.SelectedRating, objVehicle, token: token).ConfigureAwait(false);
-
-                    decimal decOriginalCost = 0;
-                    if (blnChargeCost)
-                        decOriginalCost = await objVehicle.GetTotalCostAsync(token).ConfigureAwait(false);
-
-                    if (frmPickVehicleMod.MyForm.FreeCost && blnSetCostToZeroWhenFree)
-                        objMod.Cost = "0";
-
-                    await objVehicle.Mods.AddAsync(objMod, token).ConfigureAwait(false);
-
-                    if (blnEnforceCapacity && await CharacterObjectSettings.GetEnforceCapacityAsync(token).ConfigureAwait(false))
+                    bool blnOverCapacity;
+                    if (await CharacterObjectSettings.BookEnabledAsync("R5", token).ConfigureAwait(false))
                     {
-                        bool blnOverCapacity;
-                        if (await CharacterObjectSettings.BookEnabledAsync("R5", token).ConfigureAwait(false))
+                        if (objVehicle.IsDrone && await CharacterObjectSettings.GetDroneModsAsync(token).ConfigureAwait(false))
                         {
-                            if (objVehicle.IsDrone && await CharacterObjectSettings.GetDroneModsAsync(token).ConfigureAwait(false))
-                            {
-                                blnOverCapacity = await objVehicle.GetDroneModSlotsUsedAsync(token).ConfigureAwait(false)
-                                                  > await objVehicle.GetDroneModSlotsAsync(token).ConfigureAwait(false);
-                            }
-                            else
-                            {
-                                blnOverCapacity = await objVehicle.OverR5CapacityAsync(objMod.Category, token).ConfigureAwait(false);
-                            }
+                            blnOverCapacity = await objVehicle.GetDroneModSlotsUsedAsync(token).ConfigureAwait(false)
+                                              > await objVehicle.GetDroneModSlotsAsync(token).ConfigureAwait(false);
                         }
                         else
                         {
-                            blnOverCapacity = await objVehicle.GetSlotsAsync(token).ConfigureAwait(false)
-                                              < await objVehicle.GetSlotsUsedAsync(token).ConfigureAwait(false);
+                            blnOverCapacity = await objVehicle.OverR5CapacityAsync(objMod.Category, token).ConfigureAwait(false);
                         }
+                    }
+                    else
+                    {
+                        blnOverCapacity = await objVehicle.GetSlotsAsync(token).ConfigureAwait(false)
+                                          < await objVehicle.GetSlotsUsedAsync(token).ConfigureAwait(false);
+                    }
 
-                        if (blnOverCapacity)
-                        {
+                    if (blnOverCapacity)
+                    {
+                        if (blnShowMessages)
                             await Program.ShowScrollableMessageBoxAsync(
                                 this,
                                 await LanguageManager.GetStringAsync("Message_CapacityReached", token: token).ConfigureAwait(false),
                                 await LanguageManager.GetStringAsync("MessageTitle_CapacityReached", token: token).ConfigureAwait(false),
                                 MessageBoxButtons.OK, MessageBoxIcon.Information, token: token).ConfigureAwait(false);
-                            await objVehicle.Mods.RemoveAsync(objMod, token).ConfigureAwait(false);
-                            return frmPickVehicleMod.MyForm.AddAgain;
-                        }
+                        await objVehicle.Mods.RemoveAsync(objMod, token).ConfigureAwait(false);
+                        return null;
+                    }
+                }
+
+                if (blnChargeCost && !blnFree)
+                {
+                    decimal decCost = await objVehicle.GetTotalCostAsync(token).ConfigureAwait(false) - decOriginalCost;
+                    if (decMarkup != 0)
+                        decCost *= 1 + decMarkup / 100.0m;
+
+                    char chrAvail = (await objMod.TotalAvailTupleAsync(token: token).ConfigureAwait(false)).Suffix;
+                    switch (chrAvail)
+                    {
+                        case 'R' when CharacterObjectSettings.MultiplyRestrictedCost:
+                            decCost *= CharacterObjectSettings.RestrictedCostMultiplier;
+                            break;
+                        case 'F' when CharacterObjectSettings.MultiplyForbiddenCost:
+                            decCost *= CharacterObjectSettings.ForbiddenCostMultiplier;
+                            break;
                     }
 
-                    if (blnChargeCost && !frmPickVehicleMod.MyForm.FreeCost)
+                    if (decCost > await CharacterObject.GetNuyenAsync(token).ConfigureAwait(false))
                     {
-                        decimal decCost = await objVehicle.GetTotalCostAsync(token).ConfigureAwait(false) - decOriginalCost;
-                        if (frmPickVehicleMod.MyForm.Markup != 0)
-                            decCost *= 1 + frmPickVehicleMod.MyForm.Markup / 100.0m;
-
-                        char chrAvail = (await objMod.TotalAvailTupleAsync(token: token).ConfigureAwait(false)).Suffix;
-                        switch (chrAvail)
-                        {
-                            case 'R' when CharacterObjectSettings.MultiplyRestrictedCost:
-                                decCost *= CharacterObjectSettings.RestrictedCostMultiplier;
-                                break;
-                            case 'F' when CharacterObjectSettings.MultiplyForbiddenCost:
-                                decCost *= CharacterObjectSettings.ForbiddenCostMultiplier;
-                                break;
-                        }
-
-                        if (decCost > await CharacterObject.GetNuyenAsync(token).ConfigureAwait(false))
-                        {
-                            await objVehicle.Mods.RemoveAsync(objMod, token).ConfigureAwait(false);
+                        await objVehicle.Mods.RemoveAsync(objMod, token).ConfigureAwait(false);
+                        if (blnShowMessages)
                             await Program.ShowScrollableMessageBoxAsync(
                                 this,
                                 await LanguageManager.GetStringAsync("Message_NotEnoughNuyen", token: token).ConfigureAwait(false),
                                 await LanguageManager.GetStringAsync("MessageTitle_NotEnoughNuyen", token: token).ConfigureAwait(false),
                                 MessageBoxButtons.OK, MessageBoxIcon.Information, token: token).ConfigureAwait(false);
-                            return frmPickVehicleMod.MyForm.AddAgain;
-                        }
-
-                        ExpenseLogEntry objExpense = new ExpenseLogEntry(CharacterObject);
-                        objExpense.Create(decCost * -1,
-                            strExpenseString + await LanguageManager.GetStringAsync("String_Space", token: token).ConfigureAwait(false)
-                            + await objMod.GetCurrentDisplayNameShortAsync(token).ConfigureAwait(false),
-                            ExpenseType.Nuyen, DateTime.Now);
-                        await CharacterObject.ExpenseEntries.AddWithSortAsync(objExpense, token: token).ConfigureAwait(false);
-                        await CharacterObject.ModifyNuyenAsync(-decCost, token).ConfigureAwait(false);
-
-                        ExpenseUndo objUndo = new ExpenseUndo();
-                        objUndo.CreateNuyen(eUndoType, objMod.InternalId);
-                        objExpense.Undo = objUndo;
+                        return null;
                     }
-                }
-                catch
-                {
-                    await objMod.DeleteVehicleModAsync(token: CancellationToken.None).ConfigureAwait(false);
-                    throw;
+
+                    ExpenseLogEntry objExpense = new ExpenseLogEntry(CharacterObject);
+                    objExpense.Create(decCost * -1,
+                        strExpenseString + await LanguageManager.GetStringAsync("String_Space", token: token).ConfigureAwait(false)
+                        + await objMod.GetCurrentDisplayNameShortAsync(token).ConfigureAwait(false),
+                        ExpenseType.Nuyen, DateTime.Now);
+                    await CharacterObject.ExpenseEntries.AddWithSortAsync(objExpense, token: token).ConfigureAwait(false);
+                    await CharacterObject.ModifyNuyenAsync(-decCost, token).ConfigureAwait(false);
+
+                    ExpenseUndo objUndo = new ExpenseUndo();
+                    objUndo.CreateNuyen(eUndoType, objMod.InternalId);
+                    objExpense.Undo = objUndo;
                 }
 
-                return frmPickVehicleMod.MyForm.AddAgain;
+                return objMod;
+            }
+            catch
+            {
+                await objMod.DeleteVehicleModAsync(token: CancellationToken.None).ConfigureAwait(false);
+                throw;
             }
         }
 
@@ -843,76 +863,97 @@ namespace Chummer
 
                 XmlNode objXmlAccessory = objXmlDocument.TryGetNodeByNameOrId(
                     "/chummer/accessories/accessory", frmPickWeaponAccessory.MyForm.SelectedAccessory);
-                WeaponAccessory objAccessory = new WeaponAccessory(CharacterObject);
-                try
+                await AddWeaponAccessoryFromNodeAsync(objWeapon, objXmlAccessory, frmPickWeaponAccessory.MyForm.SelectedMount,
+                                                      frmPickWeaponAccessory.MyForm.SelectedRating, frmPickWeaponAccessory.MyForm.FreeCost,
+                                                      frmPickWeaponAccessory.MyForm.BlackMarketDiscount, frmPickWeaponAccessory.MyForm.Markup,
+                                                      blnChargeCost, strExpenseString, eUndoType, blnSetCostToZeroWhenFree, true, token)
+                    .ConfigureAwait(false);
+                return frmPickWeaponAccessory.MyForm.AddAgain;
+            }
+        }
+
+        /// <summary>
+        /// Fit an accessory to a weapon, as the Select Weapon Accessory dialog's OK does.
+        /// </summary>
+        /// <returns>The new accessory, or null if the character can't pay for it (only when <paramref name="blnChargeCost"/> is set).</returns>
+        internal async Task<WeaponAccessory> AddWeaponAccessoryFromNodeAsync(Weapon objWeapon, XmlNode objXmlAccessory,
+                                                                             ValueTuple<string, string> tupMount, int intRating,
+                                                                             bool blnFree, bool blnBlackMarketDiscount, decimal decMarkup,
+                                                                             bool blnChargeCost, string strExpenseString,
+                                                                             NuyenExpenseType eUndoType, bool blnSetCostToZeroWhenFree,
+                                                                             bool blnShowMessages, CancellationToken token = default)
+        {
+            WeaponAccessory objAccessory = new WeaponAccessory(CharacterObject);
+            try
+            {
+                await objAccessory.CreateAsync(
+                    objXmlAccessory,
+                    tupMount,
+                    intRating,
+                    token: token).ConfigureAwait(false);
+                await objAccessory.SetParentAsync(objWeapon, token).ConfigureAwait(false);
+                objAccessory.DiscountCost = blnBlackMarketDiscount;
+
+                decimal decOriginalCost = 0;
+                if (blnChargeCost)
+                    decOriginalCost = await objWeapon.GetTotalCostAsync(token).ConfigureAwait(false);
+
+                if (blnFree && blnSetCostToZeroWhenFree)
+                    objAccessory.Cost = "0";
+
+                await objWeapon.WeaponAccessories.AddAsync(objAccessory, token).ConfigureAwait(false);
+
+                if (blnChargeCost && !blnFree)
                 {
-                    await objAccessory.CreateAsync(
-                        objXmlAccessory,
-                        frmPickWeaponAccessory.MyForm.SelectedMount,
-                        frmPickWeaponAccessory.MyForm.SelectedRating,
-                        token: token).ConfigureAwait(false);
-                    await objAccessory.SetParentAsync(objWeapon, token).ConfigureAwait(false);
-                    objAccessory.DiscountCost = frmPickWeaponAccessory.MyForm.BlackMarketDiscount;
+                    decimal decCost = await objWeapon.GetTotalCostAsync(token).ConfigureAwait(false) - decOriginalCost;
+                    if (decMarkup != 0)
+                        decCost *= 1 + decMarkup / 100.0m;
 
-                    decimal decOriginalCost = 0;
-                    if (blnChargeCost)
-                        decOriginalCost = await objWeapon.GetTotalCostAsync(token).ConfigureAwait(false);
-
-                    if (frmPickWeaponAccessory.MyForm.FreeCost && blnSetCostToZeroWhenFree)
-                        objAccessory.Cost = "0";
-
-                    await objWeapon.WeaponAccessories.AddAsync(objAccessory, token).ConfigureAwait(false);
-
-                    if (blnChargeCost && !frmPickWeaponAccessory.MyForm.FreeCost)
+                    char chrAvail = (await objAccessory.TotalAvailTupleAsync(token: token).ConfigureAwait(false)).Suffix;
+                    switch (chrAvail)
                     {
-                        decimal decCost = await objWeapon.GetTotalCostAsync(token).ConfigureAwait(false) - decOriginalCost;
-                        if (frmPickWeaponAccessory.MyForm.Markup != 0)
-                            decCost *= 1 + frmPickWeaponAccessory.MyForm.Markup / 100.0m;
+                        case 'R' when CharacterObjectSettings.MultiplyRestrictedCost:
+                            decCost *= CharacterObjectSettings.RestrictedCostMultiplier;
+                            break;
+                        case 'F' when CharacterObjectSettings.MultiplyForbiddenCost:
+                            decCost *= CharacterObjectSettings.ForbiddenCostMultiplier;
+                            break;
+                    }
 
-                        char chrAvail = (await objAccessory.TotalAvailTupleAsync(token: token).ConfigureAwait(false)).Suffix;
-                        switch (chrAvail)
-                        {
-                            case 'R' when CharacterObjectSettings.MultiplyRestrictedCost:
-                                decCost *= CharacterObjectSettings.RestrictedCostMultiplier;
-                                break;
-                            case 'F' when CharacterObjectSettings.MultiplyForbiddenCost:
-                                decCost *= CharacterObjectSettings.ForbiddenCostMultiplier;
-                                break;
-                        }
-
-                        if (decCost > await CharacterObject.GetNuyenAsync(token).ConfigureAwait(false))
-                        {
-                            await objWeapon.WeaponAccessories.RemoveAsync(objAccessory, token).ConfigureAwait(false);
+                    if (decCost > await CharacterObject.GetNuyenAsync(token).ConfigureAwait(false))
+                    {
+                        await objWeapon.WeaponAccessories.RemoveAsync(objAccessory, token).ConfigureAwait(false);
+                        if (blnShowMessages)
                             await Program.ShowScrollableMessageBoxAsync(
                                 this,
                                 await LanguageManager.GetStringAsync("Message_NotEnoughNuyen", token: token).ConfigureAwait(false),
                                 await LanguageManager.GetStringAsync("MessageTitle_NotEnoughNuyen", token: token).ConfigureAwait(false),
                                 MessageBoxButtons.OK, MessageBoxIcon.Information, token: token).ConfigureAwait(false);
-                            return frmPickWeaponAccessory.MyForm.AddAgain;
-                        }
-
-                        ExpenseLogEntry objExpense = new ExpenseLogEntry(CharacterObject);
-                        objExpense.Create(decCost * -1,
-                            strExpenseString + await LanguageManager.GetStringAsync("String_Space", token: token).ConfigureAwait(false)
-                            + await objAccessory.GetCurrentDisplayNameShortAsync(token).ConfigureAwait(false),
-                            ExpenseType.Nuyen, DateTime.Now);
-                        await CharacterObject.ExpenseEntries.AddWithSortAsync(objExpense, token: token).ConfigureAwait(false);
-                        await CharacterObject.ModifyNuyenAsync(-decCost, token).ConfigureAwait(false);
-
-                        ExpenseUndo objUndo = new ExpenseUndo();
-                        objUndo.CreateNuyen(eUndoType, objAccessory.InternalId);
-                        objExpense.Undo = objUndo;
+                        return null;
                     }
 
-                    return frmPickWeaponAccessory.MyForm.AddAgain;
+                    ExpenseLogEntry objExpense = new ExpenseLogEntry(CharacterObject);
+                    objExpense.Create(decCost * -1,
+                        strExpenseString + await LanguageManager.GetStringAsync("String_Space", token: token).ConfigureAwait(false)
+                        + await objAccessory.GetCurrentDisplayNameShortAsync(token).ConfigureAwait(false),
+                        ExpenseType.Nuyen, DateTime.Now);
+                    await CharacterObject.ExpenseEntries.AddWithSortAsync(objExpense, token: token).ConfigureAwait(false);
+                    await CharacterObject.ModifyNuyenAsync(-decCost, token).ConfigureAwait(false);
+
+                    ExpenseUndo objUndo = new ExpenseUndo();
+                    objUndo.CreateNuyen(eUndoType, objAccessory.InternalId);
+                    objExpense.Undo = objUndo;
                 }
-                catch
-                {
-                    await objAccessory.DeleteWeaponAccessoryAsync(token: CancellationToken.None).ConfigureAwait(false);
-                    throw;
-                }
+
+                return objAccessory;
+            }
+            catch
+            {
+                await objAccessory.DeleteWeaponAccessoryAsync(token: CancellationToken.None).ConfigureAwait(false);
+                throw;
             }
         }
+
         /// <summary>
         /// Handles adding cyberware to a vehicle mod/cyberware node selected in the vehicle tree, including
         /// modular-mount filtering and purchase execution.
@@ -11753,7 +11794,10 @@ namespace Chummer
 
         #region SpiritControl Events
 
-        protected async Task AddSpirit(CancellationToken token = default)
+        /// <summary>
+        /// Add a spirit at the character's maximum force, as the Add Spirit button does. At the bound spirit limit it starts unbound.
+        /// </summary>
+        internal async Task<Spirit> AddSpirit(CancellationToken token = default)
         {
             token.ThrowIfCancellationRequested();
             // The number of bound Spirits cannot exceed the character's CHA.
@@ -11794,9 +11838,16 @@ namespace Chummer
                 throw;
             }
             await MakeDirtyWithCharacterUpdate(token).ConfigureAwait(false);
+            return objSpirit;
         }
 
-        protected async Task AddSprite(CancellationToken token = default)
+        /// <summary>
+        /// Add a registered sprite at the character's maximum level, as the Add Sprite button does.
+        /// </summary>
+        /// <param name="token">Cancellation token to listen to.</param>
+        /// <param name="blnShowMessages">Whether to tell the user (in a message box) when they are at the registered sprite limit.</param>
+        /// <returns>The new sprite, or null at the registered sprite limit.</returns>
+        internal async Task<Spirit> AddSprite(CancellationToken token = default, bool blnShowMessages = true)
         {
             token.ThrowIfCancellationRequested();
             // In create, all sprites are added as Bound/Registered. The number of registered Sprites cannot exceed the character's LOG.
@@ -11807,6 +11858,8 @@ namespace Chummer
                                    await x.GetBoundAsync(t).ConfigureAwait(false) && !await x.GetFetteredAsync(t).ConfigureAwait(false), token).ConfigureAwait(false) >=
                 await CharacterObject.GetRegisteredSpriteLimitAsync(token).ConfigureAwait(false))
             {
+                if (!blnShowMessages)
+                    return null;
                 string strExpression = await CharacterObject.ProcessAttributesInXPathForTooltipAsync(
                     await CharacterObjectSettings.GetRegisteredSpriteExpressionAsync(token).ConfigureAwait(false), token: token).ConfigureAwait(false);
                 await Program.ShowScrollableMessageBoxAsync(
@@ -11819,7 +11872,7 @@ namespace Chummer
                     await LanguageManager.GetStringAsync("MessageTitle_RegisteredSpriteLimit", token: token)
                         .ConfigureAwait(false),
                     MessageBoxButtons.OK, MessageBoxIcon.Information, token: token).ConfigureAwait(false);
-                return;
+                return null;
             }
 
             Spirit objSprite = new Spirit(CharacterObject);
@@ -11843,6 +11896,7 @@ namespace Chummer
                 throw;
             }
             await MakeDirtyWithCharacterUpdate(token).ConfigureAwait(false);
+            return objSprite;
         }
 
         protected async Task DeleteSpirit(object sender, EventArgs e, CancellationToken token = default)

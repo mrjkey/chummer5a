@@ -41,6 +41,11 @@ namespace Chummer.Agent
             public string[] SummaryFields { get; }
             public bool HasAvailability { get; }
 
+            /// <summary>
+            /// Where the file lists the categories of these items.
+            /// </summary>
+            public string CategoryPath { get; set; } = "categories/category";
+
             public CatalogKind(string strFile, string strItemPath, bool blnHasAvailability, params string[] astrSummaryFields)
             {
                 File = strFile;
@@ -63,10 +68,16 @@ namespace Chummer.Agent
             ["armor"] = new CatalogKind("armor.xml", "armors/armor", true, "armor", "armorcapacity", "avail", "cost"),
             ["vehicle"] = new CatalogKind("vehicles.xml", "vehicles/vehicle", true, "handling", "speed", "accel", "body", "armor", "pilot", "sensor", "seats", "avail", "cost"),
             ["martialart"] = new CatalogKind("martialarts.xml", "martialarts/martialart", false, "cost"),
+            ["technique"] = new CatalogKind("martialarts.xml", "techniques/technique", false),
+            ["accessory"] = new CatalogKind("weapons.xml", "accessories/accessory", true, "mount", "extramount", "rating", "avail", "cost"),
+            ["armormod"] = new CatalogKind("armor.xml", "mods/mod", true, "armor", "armorcapacity", "maxrating", "avail", "cost") { CategoryPath = "modcategories/category" },
+            ["vehiclemod"] = new CatalogKind("vehicles.xml", "mods/mod", true, "slots", "rating", "avail", "cost") { CategoryPath = "modcategories/category" },
             ["metamagic"] = new CatalogKind("metamagic.xml", "metamagics/metamagic", false, "adept", "magician"),
             ["echo"] = new CatalogKind("echoes.xml", "echoes/echo", false),
+            ["art"] = new CatalogKind("metamagic.xml", "arts/art", false),
             ["mentor"] = new CatalogKind("mentors.xml", "mentors/mentor", false, "advantage", "disadvantage"),
             ["tradition"] = new CatalogKind("traditions.xml", "traditions/tradition", false, "drain"),
+            ["stream"] = new CatalogKind("streams.xml", "traditions/tradition", false, "drain"),
             ["lifestyle"] = new CatalogKind("lifestyles.xml", "lifestyles/lifestyle", false, "cost", "dice", "multiplier"),
             ["critterpower"] = new CatalogKind("critterpowers.xml", "powers/power", false, "karma", "type", "action", "range", "duration"),
             ["program"] = new CatalogKind("programs.xml", "programs/program", true, "avail", "cost"),
@@ -232,7 +243,7 @@ namespace Chummer.Agent
                 excludedAsIllegal = intExcluded,
                 bookFilterApplied = objSettings != null,
                 note = objCharacter == null && blnLegalOnly ? "No character is open, so results are not filtered by legality." : null,
-                categories = objRoot.Select("categories/category").Cast<XPathNavigator>().Select(x => x.Value).Distinct().ToList(),
+                categories = objRoot.Select(objKind.CategoryPath).Cast<XPathNavigator>().Select(x => x.Value).Distinct().ToList(),
                 items = lstResults.OrderBy(x => x.Value<string>("name"), StringComparer.OrdinalIgnoreCase).ToList()
             };
         }
