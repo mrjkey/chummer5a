@@ -5856,151 +5856,8 @@ namespace Chummer
                             int intRatingToAdd = frmPickQuality.MyForm.SelectedRating;
                             string strSelectedQuality = frmPickQuality.MyForm.SelectedQuality;
                             XmlNode objXmlQuality = objXmlDocument.TryGetNodeByNameOrId("/chummer/qualities/quality", strSelectedQuality);
-                            int intDummy = 0;
-                            if (objXmlQuality != null && objXmlQuality["nolevels"] == null
-                                                      && objXmlQuality.TryGetInt32FieldQuickly(
-                                                          "limit", ref intDummy))
-                            {
-                                intRatingToAdd -= await (await CharacterObject.GetQualitiesAsync(GenericToken).ConfigureAwait(false))
-                                    .CountAsync(async (x, t) =>
-                                        (await x.GetSourceIDStringAsync(t).ConfigureAwait(false))
-                                            .Equals(strSelectedQuality, StringComparison.OrdinalIgnoreCase)
-                                        && string.IsNullOrEmpty(await x.GetSourceNameAsync(t).ConfigureAwait(false)), GenericToken).ConfigureAwait(false);
-                            }
-
-                            // Helps to capture a write lock here for performance purposes
-                            IAsyncDisposable objLocker = await CharacterObject
-                                                               .LockObject.EnterWriteLockAsync(GenericToken)
-                                                               .ConfigureAwait(false);
-                            try
-                            {
-                                GenericToken.ThrowIfCancellationRequested();
-                                for (int i = 1; i <= intRatingToAdd; ++i)
-                                {
-                                    List<Weapon> lstWeapons = new List<Weapon>(1);
-                                    Quality objQuality = new Quality(CharacterObject);
-                                    try
-                                    {
-                                        await objQuality.CreateAsync(objXmlQuality, QualitySource.Selected, lstWeapons,
-                                            token: GenericToken).ConfigureAwait(false);
-                                        if (objQuality.InternalId.IsEmptyGuid())
-                                        {
-                                            // If the Quality could not be added, remove the Improvements that were added during the Quality Creation process.
-                                            await objQuality.DeleteQualityAsync(token: GenericToken).ConfigureAwait(false);
-                                            break;
-                                        }
-
-                                        if (frmPickQuality.MyForm.FreeCost)
-                                            await objQuality.SetBPAsync(0, GenericToken).ConfigureAwait(false);
-
-                                        // Make sure that adding the Quality would not cause the character to exceed their BP limits.
-                                        bool blnAddItem = true;
-                                        if (await objQuality.GetContributeToLimitAsync(GenericToken).ConfigureAwait(false) && !await CharacterObject.GetIgnoreRulesAsync(GenericToken).ConfigureAwait(false))
-                                        {
-                                            // If the item being checked would cause the limit of 25 BP spent on Positive Qualities to be exceed, do not let it be checked and display a message.
-                                            int intMaxQualityAmount = await CharacterObjectSettings.GetQualityKarmaLimitAsync(GenericToken).ConfigureAwait(false);
-                                            string strAmount =
-                                                intMaxQualityAmount.ToString(
-                                                    GlobalSettings.CultureInfo) +
-                                                await LanguageManager.GetStringAsync("String_Space", token: GenericToken)
-                                                                     .ConfigureAwait(false) +
-                                                await LanguageManager.GetStringAsync("String_Karma", token: GenericToken)
-                                                                     .ConfigureAwait(false);
-
-                                            // Add the cost of the Quality that is being added.
-                                            int intBP = await objQuality.GetBPAsync(GenericToken).ConfigureAwait(false);
-
-                                            if (await objQuality.GetTypeAsync(GenericToken).ConfigureAwait(false) == QualityType.Negative)
-                                            {
-                                                // Check if adding this Quality would put the character over their limit.
-                                                if (!await CharacterObjectSettings.GetExceedNegativeQualitiesAsync(GenericToken).ConfigureAwait(false))
-                                                {
-                                                    intBP += await CharacterObject.GetNegativeQualityLimitKarmaAsync(GenericToken).ConfigureAwait(false);
-                                                    if (intBP < intMaxQualityAmount * -1)
-                                                    {
-                                                        await Program.ShowScrollableMessageBoxAsync(this,
-                                                            StringExtensions.FastFormat(
-                                                                await LanguageManager.GetStringAsync(
-                                                                        "Message_NegativeQualityLimit", token: GenericToken)
-                                                                    .ConfigureAwait(false),
-                                                                strAmount),
-                                                            await LanguageManager.GetStringAsync(
-                                                                    "MessageTitle_NegativeQualityLimit", token: GenericToken)
-                                                                .ConfigureAwait(false),
-                                                            MessageBoxButtons.OK,
-                                                            MessageBoxIcon.Information, token: GenericToken).ConfigureAwait(false);
-                                                        blnAddItem = false;
-                                                    }
-                                                    else if (await CharacterObject.GetMetatypeBPAsync(GenericToken).ConfigureAwait(false) < 0
-                                                             && intBP + await CharacterObject.GetMetatypeBPAsync(GenericToken).ConfigureAwait(false)
-                                                             < intMaxQualityAmount * -1)
-                                                    {
-                                                        await Program.ShowScrollableMessageBoxAsync(this,
-                                                            StringExtensions.FastFormat(
-                                                                await LanguageManager.GetStringAsync(
-                                                                        "Message_NegativeQualityAndMetatypeLimit", token: GenericToken)
-                                                                    .ConfigureAwait(false),
-                                                                strAmount),
-                                                            await LanguageManager.GetStringAsync(
-                                                                    "MessageTitle_NegativeQualityLimit", token: GenericToken)
-                                                                .ConfigureAwait(false),
-                                                            MessageBoxButtons.OK,
-                                                            MessageBoxIcon.Information, token: GenericToken).ConfigureAwait(false);
-                                                        blnAddItem = false;
-                                                    }
-                                                }
-                                            }
-                                            // Check if adding this Quality would put the character over their limit.
-                                            else if (!await CharacterObjectSettings.GetExceedPositiveQualitiesAsync(GenericToken).ConfigureAwait(false))
-                                            {
-                                                intBP += await CharacterObject.GetPositiveQualityLimitKarmaAsync(GenericToken).ConfigureAwait(false);
-                                                if (intBP > intMaxQualityAmount)
-                                                {
-                                                    await Program.ShowScrollableMessageBoxAsync(this,
-                                                        StringExtensions.FastFormat(
-                                                            await LanguageManager.GetStringAsync(
-                                                                    "Message_PositiveQualityLimit", token: GenericToken)
-                                                                .ConfigureAwait(false),
-                                                            strAmount),
-                                                        await LanguageManager.GetStringAsync(
-                                                                "MessageTitle_PositiveQualityLimit", token: GenericToken)
-                                                            .ConfigureAwait(false),
-                                                        MessageBoxButtons.OK,
-                                                        MessageBoxIcon.Information, token: GenericToken).ConfigureAwait(false);
-                                                    blnAddItem = false;
-                                                }
-                                            }
-                                        }
-
-                                        if (blnAddItem)
-                                        {
-                                            await CharacterObject.Qualities.AddAsync(objQuality, GenericToken)
-                                                                 .ConfigureAwait(false);
-
-                                            // Add any created Weapons to the character.
-                                            foreach (Weapon objWeapon in lstWeapons)
-                                            {
-                                                await CharacterObject.Weapons.AddAsync(objWeapon, GenericToken)
-                                                                     .ConfigureAwait(false);
-                                            }
-                                        }
-                                        else
-                                        {
-                                            await objQuality.DeleteQualityAsync(token: GenericToken).ConfigureAwait(false);
-                                            break;
-                                        }
-                                    }
-                                    catch
-                                    {
-                                        await objQuality.DeleteQualityAsync(token: CancellationToken.None).ConfigureAwait(false);
-                                        throw;
-                                    }
-                                }
-                            }
-                            finally
-                            {
-                                await objLocker.DisposeAsync().ConfigureAwait(false);
-                            }
+                            await AddQualityFromNodeAsync(objXmlQuality, strSelectedQuality, intRatingToAdd,
+                                frmPickQuality.MyForm.FreeCost, token: GenericToken).ConfigureAwait(false);
                         }
                     } while (blnAddAgain);
                 }
@@ -6015,7 +5872,160 @@ namespace Chummer
             }
         }
 
-        private async Task<bool> RemoveQuality(Quality objSelectedQuality, bool blnConfirmDelete = true,
+        /// <summary>
+        /// Add a quality (one or more levels of it) with the same karma-limit checks as the Add Quality button.
+        /// Returns how many levels were added and, if one was refused for breaking a quality karma limit, why.
+        /// </summary>
+        internal async Task<(int Added, string Refusal)> AddQualityFromNodeAsync(XmlNode objXmlQuality, string strSelectedQuality,
+            int intRatingToAdd, bool blnFreeCost, string strForceValue = "", bool blnShowMessages = true,
+            CancellationToken token = default)
+        {
+            int intAdded = 0;
+            string strRefusal = string.Empty;
+            int intDummy = 0;
+            if (objXmlQuality != null && objXmlQuality["nolevels"] == null
+                                      && objXmlQuality.TryGetInt32FieldQuickly(
+                                          "limit", ref intDummy))
+            {
+                intRatingToAdd -= await (await CharacterObject.GetQualitiesAsync(token).ConfigureAwait(false))
+                    .CountAsync(async (x, t) =>
+                        (await x.GetSourceIDStringAsync(t).ConfigureAwait(false))
+                            .Equals(strSelectedQuality, StringComparison.OrdinalIgnoreCase)
+                        && string.IsNullOrEmpty(await x.GetSourceNameAsync(t).ConfigureAwait(false)), token).ConfigureAwait(false);
+            }
+
+            // Helps to capture a write lock here for performance purposes
+            IAsyncDisposable objLocker = await CharacterObject
+                                               .LockObject.EnterWriteLockAsync(token)
+                                               .ConfigureAwait(false);
+            try
+            {
+                token.ThrowIfCancellationRequested();
+                for (int i = 1; i <= intRatingToAdd; ++i)
+                {
+                    List<Weapon> lstWeapons = new List<Weapon>(1);
+                    Quality objQuality = new Quality(CharacterObject);
+                    try
+                    {
+                        await objQuality.CreateAsync(objXmlQuality, QualitySource.Selected, lstWeapons,
+                            strForceValue, token: token).ConfigureAwait(false);
+                        if (objQuality.InternalId.IsEmptyGuid())
+                        {
+                            // If the Quality could not be added, remove the Improvements that were added during the Quality Creation process.
+                            await objQuality.DeleteQualityAsync(token: token).ConfigureAwait(false);
+                            break;
+                        }
+
+                        if (blnFreeCost)
+                            await objQuality.SetBPAsync(0, token).ConfigureAwait(false);
+
+                        // Make sure that adding the Quality would not cause the character to exceed their BP limits.
+                        bool blnAddItem = true;
+                        if (await objQuality.GetContributeToLimitAsync(token).ConfigureAwait(false) && !await CharacterObject.GetIgnoreRulesAsync(token).ConfigureAwait(false))
+                        {
+                            // If the item being checked would cause the limit of 25 BP spent on Positive Qualities to be exceed, do not let it be checked and display a message.
+                            int intMaxQualityAmount = await CharacterObjectSettings.GetQualityKarmaLimitAsync(token).ConfigureAwait(false);
+                            string strAmount =
+                                intMaxQualityAmount.ToString(
+                                    GlobalSettings.CultureInfo) +
+                                await LanguageManager.GetStringAsync("String_Space", token: token)
+                                                     .ConfigureAwait(false) +
+                                await LanguageManager.GetStringAsync("String_Karma", token: token)
+                                                     .ConfigureAwait(false);
+
+                            // Add the cost of the Quality that is being added.
+                            int intBP = await objQuality.GetBPAsync(token).ConfigureAwait(false);
+
+                            if (await objQuality.GetTypeAsync(token).ConfigureAwait(false) == QualityType.Negative)
+                            {
+                                // Check if adding this Quality would put the character over their limit.
+                                if (!await CharacterObjectSettings.GetExceedNegativeQualitiesAsync(token).ConfigureAwait(false))
+                                {
+                                    intBP += await CharacterObject.GetNegativeQualityLimitKarmaAsync(token).ConfigureAwait(false);
+                                    if (intBP < intMaxQualityAmount * -1)
+                                    {
+                                        strRefusal = StringExtensions.FastFormat(
+                                            await LanguageManager.GetStringAsync(
+                                                    "Message_NegativeQualityLimit", token: token)
+                                                .ConfigureAwait(false),
+                                            strAmount);
+                                        if (blnShowMessages)
+                                            await Program.ShowScrollableMessageBoxAsync(this, strRefusal,
+                                                await LanguageManager.GetStringAsync("MessageTitle_NegativeQualityLimit", token: token).ConfigureAwait(false),
+                                                MessageBoxButtons.OK, MessageBoxIcon.Information, token: token).ConfigureAwait(false);
+                                        blnAddItem = false;
+                                    }
+                                    else if (await CharacterObject.GetMetatypeBPAsync(token).ConfigureAwait(false) < 0
+                                             && intBP + await CharacterObject.GetMetatypeBPAsync(token).ConfigureAwait(false)
+                                             < intMaxQualityAmount * -1)
+                                    {
+                                        strRefusal = StringExtensions.FastFormat(
+                                            await LanguageManager.GetStringAsync(
+                                                    "Message_NegativeQualityAndMetatypeLimit", token: token)
+                                                .ConfigureAwait(false),
+                                            strAmount);
+                                        if (blnShowMessages)
+                                            await Program.ShowScrollableMessageBoxAsync(this, strRefusal,
+                                                await LanguageManager.GetStringAsync("MessageTitle_NegativeQualityLimit", token: token).ConfigureAwait(false),
+                                                MessageBoxButtons.OK, MessageBoxIcon.Information, token: token).ConfigureAwait(false);
+                                        blnAddItem = false;
+                                    }
+                                }
+                            }
+                            // Check if adding this Quality would put the character over their limit.
+                            else if (!await CharacterObjectSettings.GetExceedPositiveQualitiesAsync(token).ConfigureAwait(false))
+                            {
+                                intBP += await CharacterObject.GetPositiveQualityLimitKarmaAsync(token).ConfigureAwait(false);
+                                if (intBP > intMaxQualityAmount)
+                                {
+                                    strRefusal = StringExtensions.FastFormat(
+                                        await LanguageManager.GetStringAsync(
+                                                "Message_PositiveQualityLimit", token: token)
+                                            .ConfigureAwait(false),
+                                        strAmount);
+                                    if (blnShowMessages)
+                                        await Program.ShowScrollableMessageBoxAsync(this, strRefusal,
+                                            await LanguageManager.GetStringAsync("MessageTitle_PositiveQualityLimit", token: token).ConfigureAwait(false),
+                                            MessageBoxButtons.OK, MessageBoxIcon.Information, token: token).ConfigureAwait(false);
+                                    blnAddItem = false;
+                                }
+                            }
+                        }
+
+                        if (blnAddItem)
+                        {
+                            await CharacterObject.Qualities.AddAsync(objQuality, token)
+                                                 .ConfigureAwait(false);
+                            ++intAdded;
+
+                            // Add any created Weapons to the character.
+                            foreach (Weapon objWeapon in lstWeapons)
+                            {
+                                await CharacterObject.Weapons.AddAsync(objWeapon, token)
+                                                     .ConfigureAwait(false);
+                            }
+                        }
+                        else
+                        {
+                            await objQuality.DeleteQualityAsync(token: token).ConfigureAwait(false);
+                            break;
+                        }
+                    }
+                    catch
+                    {
+                        await objQuality.DeleteQualityAsync(token: CancellationToken.None).ConfigureAwait(false);
+                        throw;
+                    }
+                }
+            }
+            finally
+            {
+                await objLocker.DisposeAsync().ConfigureAwait(false);
+            }
+            return (intAdded, strRefusal);
+        }
+
+        internal async Task<bool> RemoveQuality(Quality objSelectedQuality, bool blnConfirmDelete = true,
                                                     bool blnCompleteDelete = true, CancellationToken token = default)
         {
             XmlNode objXmlDeleteQuality = await objSelectedQuality.GetNodeAsync(token: token).ConfigureAwait(false);
@@ -12896,7 +12906,20 @@ namespace Chummer
         /// <summary>
         /// Calculate the number of Build Points the character has remaining.
         /// </summary>
-        private async Task<int> CalculateBPandRefreshBPDisplays(bool blnDoUIUpdate = true, CancellationToken token = default)
+        private Task<int> CalculateBPandRefreshBPDisplays(bool blnDoUIUpdate = true, CancellationToken token = default)
+        {
+            return CalculateBPandRefreshBPDisplays(blnDoUIUpdate, null, token);
+        }
+
+        /// <summary>
+        /// Calculate the karma the character has remaining without touching the UI, recording the karma spent per category in <paramref name="dicKarmaUsed"/>.
+        /// </summary>
+        internal Task<int> CalculateKarmaRemainingAsync(IDictionary<string, int> dicKarmaUsed, CancellationToken token = default)
+        {
+            return CalculateBPandRefreshBPDisplays(false, dicKarmaUsed, token);
+        }
+
+        private async Task<int> CalculateBPandRefreshBPDisplays(bool blnDoUIUpdate, IDictionary<string, int> dicKarmaUsed, CancellationToken token)
         {
             token.ThrowIfCancellationRequested();
             int intKarmaPointsRemain = await CharacterObjectSettings.GetBuildKarmaAsync(token).ConfigureAwait(false);
@@ -12929,6 +12952,8 @@ namespace Chummer
                 }
 
                 intKarmaPointsRemain -= intMetatypeBP;
+                if (dicKarmaUsed != null)
+                    dicKarmaUsed["metatype"] = intMetatypeBP;
 
                 token.ThrowIfCancellationRequested();
 
@@ -12946,6 +12971,8 @@ namespace Chummer
 
                 intKarmaPointsRemain -= Math.Max(0, intPointsInContacts - intContactPoints) +
                                         Math.Max(0, intHighPlacesFriends - intFriendsInHighPlacesPoints);
+                if (dicKarmaUsed != null)
+                    dicKarmaUsed["contacts"] = Math.Max(0, intPointsInContacts - intContactPoints) + Math.Max(0, intHighPlacesFriends - intFriendsInHighPlacesPoints);
 
                 token.ThrowIfCancellationRequested();
                 // ------------------------------------------------------------------------------
@@ -13063,6 +13090,8 @@ namespace Chummer
                                                .ConfigureAwait(false);
 
                 intKarmaPointsRemain -= intQualityPointsUsed;
+                if (dicKarmaUsed != null)
+                    dicKarmaUsed["qualities"] = intQualityPointsUsed;
                 intFreestyleBP += intQualityPointsUsed;
                 // Changelings must either have a balanced negative and positive number of metagenic qualities, or have 1 more point of positive than negative.
                 // If the latter, karma is used to balance them out.
@@ -13084,6 +13113,8 @@ namespace Chummer
                                 .GetSpecialAttributeListAsync(token).ConfigureAwait(false), token: token)
                         .ConfigureAwait(false);
                 intKarmaPointsRemain -= intAttributePointsUsed;
+                if (dicKarmaUsed != null)
+                    dicKarmaUsed["attributes"] = intAttributePointsUsed;
 
                 token.ThrowIfCancellationRequested();
 
@@ -13149,6 +13180,8 @@ namespace Chummer
                 }
 
                 intKarmaPointsRemain -= intMartialArtsPoints;
+                if (dicKarmaUsed != null)
+                    dicKarmaUsed["martialArts"] = intMartialArtsPoints;
 
                 SkillsSection objSkillSection =
                     await CharacterObject.GetSkillsSectionAsync(token).ConfigureAwait(false);
@@ -13160,6 +13193,8 @@ namespace Chummer
                     .SumAsync((x, t) => x.GetCurrentKarmaCostAsync(t),
                         token: token).ConfigureAwait(false);
                 intKarmaPointsRemain -= intSkillGroupsPoints;
+                if (dicKarmaUsed != null)
+                    dicKarmaUsed["skillGroups"] = intSkillGroupsPoints;
 
                 token.ThrowIfCancellationRequested();
                 // ------------------------------------------------------------------------------
@@ -13168,6 +13203,8 @@ namespace Chummer
                     .SumAsync((x, t) => x.GetCurrentKarmaCostAsync(t),
                         token: token).ConfigureAwait(false);
                 intKarmaPointsRemain -= skillPointsKarma;
+                if (dicKarmaUsed != null)
+                    dicKarmaUsed["activeSkills"] = skillPointsKarma;
 
                 token.ThrowIfCancellationRequested();
                 // ------------------------------------------------------------------------------
@@ -13179,6 +13216,8 @@ namespace Chummer
                 token.ThrowIfCancellationRequested();
                 //TODO: Remaining is named USED?
                 intKarmaPointsRemain -= knowledgeKarmaUsed;
+                if (dicKarmaUsed != null)
+                    dicKarmaUsed["knowledgeSkills"] = knowledgeKarmaUsed;
 
                 intFreestyleBP += knowledgeKarmaUsed;
 
@@ -13188,6 +13227,8 @@ namespace Chummer
                 int intNuyenBP = (await CharacterObject.GetNuyenBPAsync(token).ConfigureAwait(false)).StandardRound();
 
                 intKarmaPointsRemain -= intNuyenBP;
+                if (dicKarmaUsed != null)
+                    dicKarmaUsed["nuyen"] = intNuyenBP;
 
                 intFreestyleBP += intNuyenBP;
 
@@ -13346,6 +13387,8 @@ namespace Chummer
                             .GetKarmaMysticAdeptPowerPointAsync(token)
                             .ConfigureAwait(false);
                         intKarmaPointsRemain -= intAttributePointsUsed;
+                        if (dicKarmaUsed != null)
+                            dicKarmaUsed["mysticAdeptPowerPoints"] = intAttributePointsUsed;
                     }
 
                     spells -= intTouchOnlySpells - Math.Max(0, intTouchOnlySpells - intLimitModTouchOnly);
@@ -13537,6 +13580,12 @@ namespace Chummer
                 }
 
                 intFreestyleBP += intSpellPointsUsed + intRitualPointsUsed + intPrepPointsUsed;
+                if (dicKarmaUsed != null)
+                    dicKarmaUsed["spells"] = intSpellPointsUsed;
+                if (dicKarmaUsed != null)
+                    dicKarmaUsed["rituals"] = intRitualPointsUsed;
+                if (dicKarmaUsed != null)
+                    dicKarmaUsed["preparations"] = intPrepPointsUsed;
 
                 token.ThrowIfCancellationRequested();
                 // ------------------------------------------------------------------------------
@@ -13592,6 +13641,8 @@ namespace Chummer
                                 }, token).ConfigureAwait(false);
 
                     intFreestyleBP += intFociPointsUsed;
+                    if (dicKarmaUsed != null)
+                        dicKarmaUsed["foci"] = intFociPointsUsed;
 
                     if (blnDoUIUpdate)
                     {
@@ -13635,6 +13686,10 @@ namespace Chummer
                             return intReturn;
                         }, token).ConfigureAwait(false);
                 intFreestyleBP += intSpiritPointsUsed + intSpritePointsUsed;
+                if (dicKarmaUsed != null)
+                    dicKarmaUsed["spirits"] = intSpiritPointsUsed;
+                if (dicKarmaUsed != null)
+                    dicKarmaUsed["sprites"] = intSpritePointsUsed;
 
                 token.ThrowIfCancellationRequested();
                 // ------------------------------------------------------------------------------
@@ -13647,6 +13702,8 @@ namespace Chummer
                                             * await CharacterObject.GetComplexFormKarmaCostAsync(token)
                                                 .ConfigureAwait(false);
                 intFreestyleBP += intFormsPointsUsed;
+                if (dicKarmaUsed != null)
+                    dicKarmaUsed["complexForms"] = Math.Max(0, intFormsPointsUsed - intCfpLimit) * await CharacterObject.GetComplexFormKarmaCostAsync(token).ConfigureAwait(false);
 
                 token.ThrowIfCancellationRequested();
                 // ------------------------------------------------------------------------------
@@ -13697,6 +13754,8 @@ namespace Chummer
                 }
 
                 intKarmaPointsRemain -= intKarmaCost;
+                if (dicKarmaUsed != null)
+                    dicKarmaUsed["aiPrograms"] = intKarmaCost;
                 intFreestyleBP += intAIAdvancedProgramPointsUsed + intAINormalProgramPointsUsed
                                                                  + intNumAdvancedProgramPointsAsNormalPrograms;
 
@@ -13736,12 +13795,17 @@ namespace Chummer
                         += await CharacterObjectSettings.GetKarmaJoinGroupAsync(token).ConfigureAwait(false);
 
                 intKarmaPointsRemain -= intInitiationPoints;
+                if (dicKarmaUsed != null)
+                    dicKarmaUsed["initiation"] = intInitiationPoints;
                 intFreestyleBP += intInitiationPoints;
 
                 // Add the Karma cost of any Critter Powers.
-                intKarmaPointsRemain -= await (await CharacterObject.GetCritterPowersAsync(token).ConfigureAwait(false))
+                int intCritterPowerPoints = await (await CharacterObject.GetCritterPowersAsync(token).ConfigureAwait(false))
                     .SumAsync(
                         objPower => objPower.Karma, token).ConfigureAwait(false);
+                intKarmaPointsRemain -= intCritterPowerPoints;
+                if (dicKarmaUsed != null)
+                    dicKarmaUsed["critterPowers"] = intCritterPowerPoints;
 
                 if (!blnDoUIUpdate)
                     return intKarmaPointsRemain;
@@ -19895,8 +19959,38 @@ namespace Chummer
         /// <summary>
         /// Check the character and determine if it has broken any of the rules.
         /// </summary>
-        public async Task<bool> CheckCharacterValidity(bool blnUseArgBuildPoints = false, int intBuildPoints = 0,
-                                                            CancellationToken token = default)
+        public Task<bool> CheckCharacterValidity(bool blnUseArgBuildPoints = false, int intBuildPoints = 0,
+                                                 CancellationToken token = default)
+        {
+            return CheckCharacterValidity(blnUseArgBuildPoints, intBuildPoints, null, null, token);
+        }
+
+        /// <summary>
+        /// Run the same checks as <see cref="CheckCharacterValidity(bool, int, CancellationToken)"/> without any message boxes.
+        /// Problems that block finishing creation go into <paramref name="lstErrors"/>; Yes/No prompts (e.g. unspent points) go into <paramref name="lstWarnings"/>.
+        /// </summary>
+        internal Task<bool> CollectValidityIssuesAsync(ICollection<string> lstErrors, ICollection<string> lstWarnings,
+                                                       CancellationToken token = default)
+        {
+            return CheckCharacterValidity(false, 0, lstErrors ?? new List<string>(), lstWarnings ?? new List<string>(), token);
+        }
+
+        /// <summary>
+        /// Shows a Yes/No prompt from the validity check, or, when issues are being collected, records it as a warning and carries on as if the user had answered Yes.
+        /// </summary>
+        private Task<DialogResult> ShowValidityPromptAsync(ICollection<string> lstWarnings, string strMessage, string strCaption,
+                                                           MessageBoxButtons eButtons, MessageBoxIcon eIcon,
+                                                           CancellationToken token = default)
+        {
+            if (lstWarnings == null)
+                return Program.ShowScrollableMessageBoxAsync(this, strMessage, strCaption, eButtons, eIcon, token: token);
+            lstWarnings.Add(strMessage);
+            return Task.FromResult(DialogResult.Yes);
+        }
+
+        private async Task<bool> CheckCharacterValidity(bool blnUseArgBuildPoints, int intBuildPoints,
+                                                        ICollection<string> lstErrors, ICollection<string> lstWarnings,
+                                                        CancellationToken token)
         {
             token.ThrowIfCancellationRequested();
             if (await CharacterObject.GetIgnoreRulesAsync(token).ConfigureAwait(false))
@@ -20342,7 +20436,7 @@ namespace Chummer
                                                                                   token: token).ConfigureAwait(false),
                                                                               intLanguages, intLanguageLimit);
                         }
-                        else if (await Program.ShowScrollableMessageBoxAsync(this,
+                        else if (await ShowValidityPromptAsync(lstWarnings,
                                      StringExtensions.FastFormat(
                                          GlobalSettings.CultureInfo,
                                          await LanguageManager.GetStringAsync(
@@ -20788,7 +20882,7 @@ namespace Chummer
                         - await CalculateAttributePriorityPoints(lstAttributes,
                                                                  token: token).ConfigureAwait(false);
                     // Check if the character has extra Attribute points
-                    if (blnValid && i > 0 && await Program.ShowScrollableMessageBoxAsync(this,
+                    if (blnValid && i > 0 && await ShowValidityPromptAsync(lstWarnings,
                             StringExtensions.FastFormat(
                                 GlobalSettings.CultureInfo,
                                 await LanguageManager.GetStringAsync(
@@ -20816,7 +20910,7 @@ namespace Chummer
                         - await CalculateAttributePriorityPoints(lstSpecialAttributes, token: token)
                             .ConfigureAwait(false);
                     // Check if the character has extra Special Attribute points
-                    if (blnValid && i > 0 && await Program.ShowScrollableMessageBoxAsync(this,
+                    if (blnValid && i > 0 && await ShowValidityPromptAsync(lstWarnings,
                             StringExtensions.FastFormat(
                                 GlobalSettings.CultureInfo,
                                 await LanguageManager.GetStringAsync(
@@ -20842,7 +20936,7 @@ namespace Chummer
 
                     // Check if the character has extra Skill Group points
                     if (blnValid && intSkillGroupPoints > 0
-                                 && await Program.ShowScrollableMessageBoxAsync(this,
+                                 && await ShowValidityPromptAsync(lstWarnings,
                                      StringExtensions.FastFormat(
                                          GlobalSettings.CultureInfo,
                                          await LanguageManager.GetStringAsync(
@@ -20863,8 +20957,7 @@ namespace Chummer
                     }
 
                     // Check if the character has extra Active Skill points
-                    if (blnValid && intSkillPoints > 0 && await Program.ShowScrollableMessageBoxAsync(
-                            this,
+                    if (blnValid && intSkillPoints > 0 && await ShowValidityPromptAsync(lstWarnings,
                             StringExtensions.FastFormat(GlobalSettings.CultureInfo,
                                 await LanguageManager.GetStringAsync("Message_ExtraPoints", token: token)
                                     .ConfigureAwait(false),
@@ -20881,7 +20974,7 @@ namespace Chummer
 
                     // Check if the character has extra Knowledge Skill points
                     if (blnValid && intKnoSkillPoints > 0
-                                 && await Program.ShowScrollableMessageBoxAsync(this,
+                                 && await ShowValidityPromptAsync(lstWarnings,
                                      StringExtensions.FastFormat(
                                          GlobalSettings.CultureInfo,
                                          await LanguageManager.GetStringAsync(
@@ -20911,7 +21004,7 @@ namespace Chummer
                             intContactPointsRemain
                                 -= (await CharacterObject.GetContactPointsUsedAsync(token).ConfigureAwait(false)).Item1;
                             if (intContactPointsRemain > 0
-                                && await Program.ShowScrollableMessageBoxAsync(this,
+                                && await ShowValidityPromptAsync(lstWarnings,
                                     StringExtensions.FastFormat(
                                         GlobalSettings.CultureInfo,
                                         await LanguageManager.GetStringAsync(
@@ -21086,7 +21179,7 @@ namespace Chummer
                         int intPointsRemaining = intFreeSpells + intLimitMod - intUsedPoints;
 
                         if (intPointsRemaining > 0
-                            && await Program.ShowScrollableMessageBoxAsync(this,
+                            && await ShowValidityPromptAsync(lstWarnings,
                                 StringExtensions.FastFormat(
                                     GlobalSettings.CultureInfo,
                                     await LanguageManager.GetStringAsync(
@@ -21118,7 +21211,7 @@ namespace Chummer
                                 -= await (await CharacterObject.GetComplexFormsAsync(token).ConfigureAwait(false))
                                          .CountAsync(x => x.Grade == 0, token).ConfigureAwait(false);
                             if (intCFPointsRemain > 0
-                                && await Program.ShowScrollableMessageBoxAsync(this,
+                                && await ShowValidityPromptAsync(lstWarnings,
                                     StringExtensions.FastFormat(
                                         GlobalSettings.CultureInfo,
                                         await LanguageManager.GetStringAsync(
@@ -21145,7 +21238,16 @@ namespace Chummer
                     await objCursorWait.DisposeAsync().ConfigureAwait(false);
                 }
 
-                if (!blnValid && sbdMessage.Length > 0)
+                if (lstErrors != null)
+                {
+                    foreach (string strLine in sbdMessage.ToString().SplitNoAlloc(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries))
+                    {
+                        string strError = strLine.Trim();
+                        if (!string.IsNullOrEmpty(strError))
+                            lstErrors.Add(strError);
+                    }
+                }
+                else if (!blnValid && sbdMessage.Length > 0)
                 {
                     // StringBuilder.Insert can be slow because of in-place replaces, so use concat instead
                     string strMessage = string.Concat(await LanguageManager.GetStringAsync("Message_InvalidBeginning", token: token)

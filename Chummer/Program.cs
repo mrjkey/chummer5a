@@ -611,7 +611,9 @@ namespace Chummer
                             }
 
                             MainForm.MyStartupPvt = pvt;
-                            Application.Run(MainForm);
+                            // Local MCP endpoint so AI agents can inspect and edit open characters
+                            using (Agent.McpServer.TryStart(Agent.McpServer.GetPortFromCommandLine(Environment.GetCommandLineArgs())))
+                                Application.Run(MainForm);
                         }
 
                         OpenCharacters.Clear();
