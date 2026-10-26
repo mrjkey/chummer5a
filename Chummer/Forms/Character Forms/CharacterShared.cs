@@ -12926,8 +12926,7 @@ namespace Chummer
                             return false;
                         }
 
-                        string strOldFileName = await CharacterObject.GetFileNameAsync(token).ConfigureAwait(false);
-                        string strShowFileName = Path.GetFileName(strOldFileName);
+                        string strShowFileName = Path.GetFileName(await CharacterObject.GetFileNameAsync(token).ConfigureAwait(false));
                         if (string.IsNullOrEmpty(strShowFileName))
                         {
                             strShowFileName = (await CharacterObject.GetCharacterNameAsync(token).ConfigureAwait(false))
@@ -12950,20 +12949,7 @@ namespace Chummer
                                 : ".chum5";
                         }
 
-                        try
-                        {
-                            await CharacterObject.SetFileNameAsync(strFileName, token).ConfigureAwait(false);
-                            bool blnReturn = await SaveCharacter(false, blnDoCreated, token).ConfigureAwait(false);
-                            if (!blnReturn)
-                                await CharacterObject.SetFileNameAsync(strOldFileName, token).ConfigureAwait(false);
-                            return blnReturn;
-                        }
-                        catch
-                        {
-                            await CharacterObject.SetFileNameAsync(strOldFileName, CancellationToken.None)
-                                .ConfigureAwait(false);
-                            throw;
-                        }
+                        return await SaveCharacterToFileAsync(strFileName, blnDoCreated, token).ConfigureAwait(false);
                     }
                     finally
                     {
@@ -12978,6 +12964,29 @@ namespace Chummer
             finally
             {
                 objSource?.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// Save the character to a new file, going back to its old file name if saving fails. This is what Save As does once
+        /// the user has picked a file; the agent tools call it directly.
+        /// </summary>
+        internal async Task<bool> SaveCharacterToFileAsync(string strFileName, bool blnDoCreated = false, CancellationToken token = default)
+        {
+            string strOldFileName = await CharacterObject.GetFileNameAsync(token).ConfigureAwait(false);
+            try
+            {
+                await CharacterObject.SetFileNameAsync(strFileName, token).ConfigureAwait(false);
+                bool blnReturn = await SaveCharacter(false, blnDoCreated, token).ConfigureAwait(false);
+                if (!blnReturn)
+                    await CharacterObject.SetFileNameAsync(strOldFileName, token).ConfigureAwait(false);
+                return blnReturn;
+            }
+            catch
+            {
+                await CharacterObject.SetFileNameAsync(strOldFileName, CancellationToken.None)
+                    .ConfigureAwait(false);
+                throw;
             }
         }
 

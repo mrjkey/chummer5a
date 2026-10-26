@@ -1,6 +1,6 @@
 # Chummer5a with Claude Code
 
-This is Chummer5a, the Shadowrun 5th Edition character builder, with an MCP server built in. While Chummer is running, [Claude Code](https://code.claude.com/docs) can read the characters you have open and edit them live. Chummer still enforces the rules, so karma and point totals always match what the Chummer window shows.
+This is Chummer5a, the Shadowrun 5th Edition character builder, with an MCP server built in. While Chummer is running, [Claude Code](https://code.claude.com/docs) can create characters, edit the ones you have open live (priorities, attributes, skills, qualities, magic, contacts, gear and cyberware), and save them. Chummer still enforces the rules, so karma and point totals always match what the Chummer window shows.
 
 ## What's in this folder
 

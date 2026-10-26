@@ -29,7 +29,7 @@
 
 ## Status
 
-Steps 0–5 are done: built, and 79/79 tests pass (76 existing plus 3 new). The server was verified live from WSL and from Claude Code with Chummer running.
+Steps 0–6 are done: built, and 80/80 tests pass (76 existing plus 4 agent tests). The server was verified live from WSL and from Claude Code with Chummer running. Step 6 was also checked live: an elf face was created, edited, given gear and saved over MCP, and showed up correctly in the Chummer window.
 
 ### Step 0: Build/run loop (done)
 
@@ -41,9 +41,10 @@ Steps 0–5 are done: built, and 79/79 tests pass (76 existing plus 3 new). The 
   - `MSBuildEnableWorkloadResolver=false`
 - Build command: `MSBuild Chummer\Chummer.csproj -restore -p:Configuration=Debug -p:SolutionDir=<repo>\ -m`. Pass `SolutionDir` so the post-build `copy LICENSE` step finds the file.
 - Tests: build `Chummer.Tests\Chummer.Tests.csproj` the same way, then run `dotnet test Chummer.Tests\Chummer.Tests.csproj -c Debug --no-build`. The full suite takes about 5 minutes.
-- When the repo lived in WSL, the scripts `scripts/win-{env,sync,build,test,run}.sh` mirrored it to `C:\dev\chummer5a` (cmd build events break on `\\wsl$` paths) and ran the build there through a generated `.cmd` file.
-  - Now that the repo lives on `C:\`, build in place. The sync step is unnecessary.
+- The scripts `scripts/win-{env,sync,build,test,run,release}.sh` run the build on Windows through a generated `.cmd` file.
+  - The repo lives on `C:\` (`/mnt/c/dev/chummer5a`), so they build in place. A WSL-filesystem checkout is still mirrored to `C:\dev\chummer5a` first, because cmd build events break on `\\wsl$` paths.
   - `win-run.sh` must launch with `powershell Start-Process`. `cmd /c start` never returns to WSL.
+  - `win-release.sh` packages a release (see `docs/releasing.md`).
 
 ### Step 1: MCP server inside Chummer (done)
 
@@ -66,7 +67,8 @@ Steps 0–5 are done: built, and 79/79 tests pass (76 existing plus 3 new). The 
 | `export_character` | The `GenerateExportXml` export as JSON. Without `section` it lists the available sections. |
 | `search_catalog(kind, query, category, legal_only=true, limit)` | Catalog matches. `kind` is one of: quality, spell, power, complexform, cyberware, bioware, gear, weapon, armor, vehicle, martialart, metamagic, echo, mentor, tradition, lifestyle, critterpower, program, skill, knowledgeskill. Filtered by the character's book setting, metatype quality restrictions, `RequirementsMetAsync` and availability. Works without a character, using the default settings. |
 | `get_catalog_item(kind, id)` | The full data node, plus whether the character qualifies. |
-| `get_priority_table(category?)` | The priority table rows. |
+| `get_priority_table(category?, metatype?, settings?)` | The priority table rows, compact and limited to the enabled books. Heritage rows give each metatype's special attribute points and karma; Talent rows give the talents, what they grant and their free skills. |
+| `list_build_settings` | The settings profiles: build method, build karma, priority table, maximum availability and books. |
 | `list_metatypes(category?)` | Metatypes and their attributes. |
 
 ### Step 3: Extract accounting/validation out of `CharacterCreate` (done)
@@ -94,17 +96,50 @@ Steps 0–5 are done: built, and 79/79 tests pass (76 existing plus 3 new). The 
 - `.mcp.json`: `{"mcpServers":{"chummer":{"type":"http","url":"http://localhost:51723/mcp"}}}`
 - `.claude/skills/sr5-build-advisor/SKILL.md` covers the conversation flow:
   1. concept
-  2. priorities and metatype (the user applies them in the GUI)
+  2. settings, priorities and metatype (`create_character` / `set_priorities`)
   3. attributes
   4. magic
   5. skills
   6. qualities
   7. contacts
-  8. gear (the user adds it by hand for now)
-  9. `validate_character`
+  8. gear (`add_*`)
+  9. `validate_character` and `save_character`
 
   Rules for the agent: always confirm legality with tools, cite source and page, propose before applying, and re-read state.
 - Root `CLAUDE.md` documents the build/run/test commands and the agent architecture.
+
+### Step 6: Character creation, gear and saving (done, `AgentTools.Create.cs`, `AgentTools.Gear.cs`)
+
+- `create_character(settings, metatype, metavariant, priorities{heritage,attributes,talent,skills,resources}, talent, talent_skills, name, alias, force, ignore_rules)`. It goes through the same steps as File > New Character:
+  1. Set the settings key and ignore-rules flag, which is all `SelectBuildMethod` does.
+  2. Construct `SelectMetatypePriority` (or `SelectMetatypeKarma`) on the UI thread without showing it, then validate and apply. `MetatypeSelected` was split into a UI part and `ApplyPrioritySelectionAsync(PrioritySelection)` / `ApplyMetatypeSelectionAsync(...)`.
+  3. Open the editor with `ChummerMainForm.OpenNewCharacterEditorAsync`, which was extracted from `ShowNewForm`.
+- `ValidatePrioritySelectionAsync` covers what the dialog only ever offers:
+  - letters used once each (or the Sum-to-Ten total)
+  - the metatype and metavariant in the Heritage row and the enabled books
+  - the talent in the Talent row and allowed for the metatype (`IsTalentAvailableAsync`, extracted from `PopulateTalents`)
+  - the talent's free skill choices (`GetTalentSkillChoicesAsync`, extracted from `ProcessTalentsIndexChanged`)
+
+  Refusals list the valid options.
+- `set_priorities`: the same core on an open creation-mode character. Anything not passed keeps its current value; a new talent starts with no free skills.
+- Gear tools. Each checks books, requirements, rating and `CheckAvailRestrictionAsync`, then calls a core extracted from the post-dialog half of its editor method:
+
+  | Tool | Core | Notes |
+  |---|---|---|
+  | `add_weapon` | `AddWeaponFromNodeAsync` | |
+  | `add_armor` | `AddArmorFromNodeAsync` | |
+  | `add_gear` | `AddGearFromNodeAsync` | `parent`, `quantity` and `forced_value`. Identical items merge without the Yes/No prompt. |
+  | `add_cyberware` | `AddCyberwareFromNodeAsync` | `kind` = cyberware or bioware, `grade`, `parent`. The essence multipliers that `PickCyberware` sets on the dialog are display-only; `Purchase` computes essence itself. |
+  | `add_vehicle` | `AddVehicleFromNodeAsync` | |
+  | `add_lifestyle` | — | `Lifestyle.CreateAsync` + `SetIncrementsAsync`, as Chummer adds lifestyles itself. |
+- `remove_item` also removes weapons, armor, gear, cyberware, vehicles and lifestyles via `ICanRemove.RemoveAsync(false)`. That is what the editor's delete calls after its confirm prompt.
+- `save_character(path?, overwrite?)`:
+  - Saves to the existing file, otherwise to `<startup>\saves\<name>.chum5`.
+  - Translates `/mnt/<drive>/` paths from WSL agents.
+  - Uses `CharacterShared.SaveCharacterToFileAsync`, which was extracted from Save As.
+  - Refuses if the "Character Created" box is ticked, because saving would finish creation.
+- `FinishEditAsync` results now include essence.
+- Validation (PLAN step 4): in collect mode, leftover-point warnings are reported even when there are errors. The GUI still only asks about them once everything else is fine.
 
 ### Tests (`Chummer.Tests/AgentToolsTests.cs`)
 
@@ -115,22 +150,28 @@ Steps 0–5 are done: built, and 79/79 tests pass (76 existing plus 3 new). The 
   - that a karma-bought skill rank costs karma and an over-maximum skill or attribute is refused
   - contact and knowledge-skill add/remove
   - that adding a quality that overspends karma produces a warning and makes validation fail
+- `CreateCharacterAndGear` covers:
+  - the compact priority table (Heritage under 20 KB)
+  - refusals for a duplicate letter, a metatype not allowed by its Heritage priority, and a Magician without free skills
+  - creating a Human face (D/B/E/A/C, 140,000¥), then `set_priorities` raising resources to B (275,000¥)
+  - adding a commlink, a Fake SIN (with `forced_value`), a weapon, armor, alphaware cyberware, bioware, a vehicle and a lifestyle, and refusing over-availability items
+  - removing everything back to the starting nuyen and essence 6
+  - unspent-point warnings while there are errors
+  - saving to a temp file
+- `RunWithMainForm` is the shared hidden-main-window helper. The hidden window can't show dialogs, so items that ask a question need `forced_value` in tests.
 - Only test files listed in `Chummer.Tests.csproj` are copied to the output (`Gangerbean.chum5` is not).
 
 ---
 
 ## Next steps (goal 1)
 
-1. Fix the scripts and `CLAUDE.md` now that the repo lives on `C:\`: build in place, with no rsync.
-2. More edit tools, each reusing the GUI code path:
-   - `add_cyberware(id, grade, rating)`: refactor `PickCyberware`.
-   - `add_gear`, `add_weapon`, `add_armor`, `add_vehicle`, `add_lifestyle`: extract from their `cmdAdd*` handlers.
+1. More edit tools, each reusing the GUI code path:
    - Tradition and mentor spirit selection.
-   - Skill specializations.
-   - Complex forms, martial arts, spirits.
-3. A `set_priorities` / `new_character` tool: extract `SelectMetatypePriority.MetatypeSelected` (and its karma counterpart in `SelectMetatypeKarma`) into a backend method.
-4. Report leftover-point warnings even while there are errors (remove the `blnValid` gating in collect mode).
-5. An optional on/off toggle or token for the MCP server. It is currently always on and localhost-only, with no auth.
+   - Skill specializations and exotic skills.
+   - Complex forms, martial arts, spirits/sprites, metamagics.
+   - Weapon accessories, armor mods, vehicle mods, gear locations.
+2. Career mode: the tools only edit characters in creation.
+3. An optional on/off toggle or token for the MCP server. It is currently always on and localhost-only, with no auth.
 
 ## Later (goal 2): cross-platform / web UI
 

@@ -58,6 +58,7 @@ This only works when you start `claude` from this folder. If you've done Option 
 2. Open a terminal and run `claude`.
 3. Type `/mcp`. `chummer` should show as **connected**.
 4. Ask for what you want, for example:
+   - "Start a new face character for me."
    - "Help me build a street samurai for a priority game."
    - "What's my character's Pistols dice pool?"
    - "Is this character legal? What's still unspent?"
@@ -127,7 +128,7 @@ Start Chummer on a different port: make a shortcut to `Chummer5a.exe` and add `/
 
 **Claude says no character is open.**
 
-Open or create a character in Chummer. Closing a character's tab makes it unavailable to Claude Code.
+Ask Claude to create one, or open or create one in Chummer. Closing a character's tab makes it unavailable to Claude Code.
 
 **A dialog popped up in Chummer.**
 

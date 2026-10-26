@@ -109,7 +109,8 @@ namespace Chummer.Agent
                                  ("character", "string", CharacterArgDescription)),
                 AddContactAsync);
             yield return new AgentTool("remove_item",
-                "Remove a spell, adept power or contact the character has, by the id shown in get_character_summary.",
+                "Remove something the character has, by the id (or name) shown in get_character_summary: a spell, adept power, contact, weapon, armor, "
+                + "gear, cyberware/bioware, vehicle or lifestyle. Bought equipment is refunded. Use remove_quality for qualities.",
                 AgentTool.Schema(("id!", "string", "Id from get_character_summary."),
                                  ("character", "string", CharacterArgDescription)),
                 RemoveItemAsync);
@@ -150,6 +151,7 @@ namespace Chummer.Agent
             int intSkillPoints = await objSkills.GetSkillPointsAsync(token).ConfigureAwait(false);
             int intSkillGroupPoints = await objSkills.GetSkillGroupPointsAsync(token).ConfigureAwait(false);
             int intKnowledgePoints = await objSkills.GetKnowledgeSkillPointsRemainAsync(token).ConfigureAwait(false);
+            decimal decEssence = await objCharacter.EssenceAsync(token: token).ConfigureAwait(false);
             // Chummer lets the editor go over budget (it only complains when finishing creation), so say so loudly
             List<string> lstOverspent = new List<string>();
             if (intKarma < 0)
@@ -172,7 +174,8 @@ namespace Chummer.Agent
                 skillPointsRemaining = intSkillPoints,
                 skillGroupPointsRemaining = intSkillGroupPoints,
                 knowledgePointsRemaining = intKnowledgePoints,
-                nuyenRemaining = decNuyen
+                nuyenRemaining = decNuyen,
+                essence = decEssence
             };
         }
 
@@ -665,7 +668,18 @@ namespace Chummer.Agent
                 return await FinishEditAsync(frmCreate, "Removed contact " + strName + ".", token).ConfigureAwait(false);
             }
 
-            throw new AgentToolException("No spell, power or contact with id or name '" + strId + "'. Use remove_quality for qualities.");
+            ICanRemove objEquipment = await FindOwnedEquipmentAsync(objCharacter, strId, token).ConfigureAwait(false);
+            if (objEquipment != null)
+            {
+                string strName = objEquipment is IHasName objNamed
+                    ? await objNamed.GetCurrentDisplayNameAsync(token).ConfigureAwait(false)
+                    : strId;
+                if (!await objEquipment.RemoveAsync(false, token).ConfigureAwait(false))
+                    throw new AgentToolException("Chummer did not remove " + strName + " (it may come with something else the character has; remove that instead).");
+                return await FinishEditAsync(frmCreate, "Removed " + strName + ".", token).ConfigureAwait(false);
+            }
+
+            throw new AgentToolException("Nothing the character has matches '" + strId + "'. Use get_character_summary for ids, and remove_quality for qualities.");
         }
 
         #endregion

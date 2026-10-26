@@ -401,136 +401,16 @@ namespace Chummer
         {
             token.ThrowIfCancellationRequested();
             string strSelectedMetatype = await lstMetatypes.DoThreadSafeFuncAsync(x => x.SelectedValue?.ToString(), token).ConfigureAwait(false);
-            if (!string.IsNullOrEmpty(strSelectedMetatype))
+            if (!string.IsNullOrEmpty(strSelectedMetatype)
+                && string.IsNullOrEmpty(await ApplyMetatypeSelectionAsync(
+                    strSelectedMetatype,
+                    await cboMetavariant.DoThreadSafeFuncAsync(x => x.SelectedValue?.ToString(), token).ConfigureAwait(false),
+                    await cboCategory.DoThreadSafeFuncAsync(x => x.SelectedValue?.ToString(), token).ConfigureAwait(false),
+                    await nudForce.DoThreadSafeFuncAsync(x => x.Visible ? x.ValueAsInt : 0, token).ConfigureAwait(false),
+                    await chkPossessionBased.DoThreadSafeFuncAsync(x => x.Checked, token).ConfigureAwait(false)
+                        ? await cboPossessionMethod.DoThreadSafeFuncAsync(x => x.SelectedValue?.ToString(), token).ConfigureAwait(false)
+                        : string.Empty, token).ConfigureAwait(false)))
             {
-                string strSelectedMetatypeCategory = await cboCategory.DoThreadSafeFuncAsync(x => x.SelectedValue?.ToString(), token).ConfigureAwait(false);
-                string strSelectedMetavariant = await cboMetavariant.DoThreadSafeFuncAsync(x => x.SelectedValue?.ToString(), token).ConfigureAwait(false) ?? Utils.GuidEmptyString;
-
-                XmlNode objXmlMetatype
-                    = _xmlMetatypeDocumentMetatypesNode.TryGetNodeByNameOrId("metatype", strSelectedMetatype);
-
-                if (objXmlMetatype == null)
-                {
-                    await Program.ShowScrollableMessageBoxAsync(
-                        this, await LanguageManager.GetStringAsync("Message_Metatype_SelectMetatype", token: token).ConfigureAwait(false),
-                        await LanguageManager.GetStringAsync("MessageTitle_Metatype_SelectMetatype", token: token).ConfigureAwait(false),
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Information, token: token).ConfigureAwait(false);
-                    return;
-                }
-
-                IAsyncDisposable objLocker = await _objCharacter.LockObject.EnterWriteLockAsync(token).ConfigureAwait(false);
-                try
-                {
-                    token.ThrowIfCancellationRequested();
-                    // Remove all priority-given qualities (relevant when switching from Priority/Sum-to-Ten to Karma)
-                    for (int i = await _objCharacter.Qualities.GetCountAsync(token).ConfigureAwait(false) - 1; i >= 0; --i)
-                    {
-                        if (i >= await _objCharacter.Qualities.GetCountAsync(token).ConfigureAwait(false))
-                            continue;
-                        Quality objQuality = await _objCharacter.Qualities.GetValueAtAsync(i, token).ConfigureAwait(false);
-                        if (await objQuality.GetOriginSourceAsync(token).ConfigureAwait(false) == QualitySource.Heritage)
-                            await objQuality.DeleteQualityAsync(token: token).ConfigureAwait(false);
-                    }
-
-                    // If this is a Shapeshifter, a Metavariant must be selected. Default to Human if None is selected.
-                    if (strSelectedMetatypeCategory == "Shapeshifter" && strSelectedMetavariant.IsEmptyGuid())
-                        strSelectedMetavariant
-                            = objXmlMetatype
-                                  .SelectSingleNodeAndCacheExpressionAsNavigator(
-                                      "metavariants/metavariant[name = \"Human\"]/id", _objGenericToken)
-                              ?.Value
-                              ?? Utils.GuidEmptyString;
-                    if (_objCharacter.MetatypeGuid.ToString("D", GlobalSettings.InvariantCultureInfo) !=
-                        strSelectedMetatype
-                        || _objCharacter.MetavariantGuid.ToString("D", GlobalSettings.InvariantCultureInfo) !=
-                        strSelectedMetavariant)
-                    {
-                        // Remove qualities that require the old metatype
-                        List<Quality> lstQualitiesToCheck = new List<Quality>(await _objCharacter.Qualities.GetCountAsync(token).ConfigureAwait(false));
-                        await _objCharacter.Qualities.ForEachAsync(async (objQuality, t) =>
-                        {
-                            QualitySource eOriginSource = await objQuality.GetOriginSourceAsync(t).ConfigureAwait(false);
-                            if (eOriginSource == QualitySource.Improvement
-                                || eOriginSource == QualitySource.QualityLevelImprovement
-                                || eOriginSource == QualitySource.Metatype
-                                || eOriginSource == QualitySource.MetatypeRemovable
-                                || eOriginSource == QualitySource.MetatypeRemovedAtChargen)
-                                return;
-                            XPathNavigator xmlBaseNode
-                                = await objQuality.GetNodeXPathAsync(token: t).ConfigureAwait(false);
-                            XPathNavigator xmlRestrictionNode
-                                = xmlBaseNode?.SelectSingleNodeAndCacheExpression("required", t);
-                            if (xmlRestrictionNode != null &&
-                                (xmlRestrictionNode.SelectSingleNodeAndCacheExpression(".//metatype", t) != null
-                                 || xmlRestrictionNode.SelectSingleNodeAndCacheExpression(".//metavariant", t) != null))
-                            {
-                                lstQualitiesToCheck.Add(objQuality);
-                            }
-                            else
-                            {
-                                xmlRestrictionNode
-                                    = xmlBaseNode?.SelectSingleNodeAndCacheExpression("forbidden", t);
-                                if (xmlRestrictionNode != null &&
-                                    (xmlRestrictionNode.SelectSingleNodeAndCacheExpression(".//metatype", t) != null
-                                     || xmlRestrictionNode.SelectSingleNodeAndCacheExpression(".//metavariant", t) != null))
-                                {
-                                    lstQualitiesToCheck.Add(objQuality);
-                                }
-                            }
-                        }, token).ConfigureAwait(false);
-
-                        int intForce = await nudForce.DoThreadSafeFuncAsync(x => x.Visible ? x.ValueAsInt : 0, token).ConfigureAwait(false);
-                        await _objCharacter.CreateAsync(strSelectedMetatypeCategory, strSelectedMetatype,
-                            strSelectedMetavariant,
-                            objXmlMetatype, intForce, _xmlQualityDocumentQualitiesNode,
-                            await _xmlCritterPowerDocumentPowersNode
-                                .GetValueAsync(_objGenericToken)
-                                .ConfigureAwait(false), _xmlSkillsDocumentKnowledgeSkillsNode,
-                            await chkPossessionBased.DoThreadSafeFuncAsync(x => x.Checked, token).ConfigureAwait(false)
-                                ? await cboPossessionMethod.DoThreadSafeFuncAsync(x => x.SelectedValue?.ToString(),
-                                    token).ConfigureAwait(false)
-                                : string.Empty, token).ConfigureAwait(false);
-                        foreach (Quality objQuality in lstQualitiesToCheck)
-                        {
-                            XPathNavigator objLoopNode
-                                = await objQuality.GetNodeXPathAsync(token: token).ConfigureAwait(false);
-                            // Set strIgnoreQuality to quality's name to make sure limit counts are not an issue
-                            if (objLoopNode != null && !await objLoopNode.RequirementsMetAsync(_objCharacter, strIgnoreQuality: await objQuality.GetNameAsync(token).ConfigureAwait(false), token: token).ConfigureAwait(false))
-                                await objQuality.DeleteQualityAsync(token: token).ConfigureAwait(false);
-                        }
-                    }
-
-                    // Flip all attribute, skill, and skill group points to karma levels (relevant when switching from Priority/Sum-to-Ten to Karma)
-                    await (await _objCharacter.AttributeSection.GetAttributesAsync(token).ConfigureAwait(false)).ForEachWithSideEffectsAsync(async (objAttrib, t) =>
-                    {
-                        // This ordering makes sure data bindings to numeric up-downs with maxima don't get broken
-                        int intBase = await objAttrib.GetBaseAsync(t).ConfigureAwait(false);
-                        await objAttrib.SetBaseAsync(0, t).ConfigureAwait(false);
-                        await objAttrib.ModifyKarmaAsync(intBase, t).ConfigureAwait(false);
-                    }, token).ConfigureAwait(false);
-
-                    await (await _objCharacter.SkillsSection.GetSkillsAsync(token).ConfigureAwait(false)).ForEachWithSideEffectsAsync(async (objSkill, t) =>
-                    {
-                        // This ordering makes sure data bindings to numeric up-downs with maxima don't get broken
-                        int intBase = await objSkill.GetBasePointsAsync(t).ConfigureAwait(false);
-                        await objSkill.SetBasePointsAsync(0, t).ConfigureAwait(false);
-                        await objSkill.ModifyKarmaPointsAsync(intBase, t).ConfigureAwait(false);
-                    }, token).ConfigureAwait(false);
-
-                    await (await _objCharacter.SkillsSection.GetSkillGroupsAsync(token).ConfigureAwait(false)).ForEachWithSideEffectsAsync(async (objGroup, t) =>
-                    {
-                        // This ordering makes sure data bindings to numeric up-downs with maxima don't get broken
-                        int intBase = await objGroup.GetBasePointsAsync(t).ConfigureAwait(false);
-                        await objGroup.SetBasePointsAsync(0, t).ConfigureAwait(false);
-                        await objGroup.ModifyKarmaPointsAsync(intBase, t).ConfigureAwait(false);
-                    }, token).ConfigureAwait(false);
-                }
-                finally
-                {
-                    await objLocker.DisposeAsync().ConfigureAwait(false);
-                }
-
                 await this.DoThreadSafeAsync(x =>
                 {
                     x.DialogResult = DialogResult.OK;
@@ -543,6 +423,153 @@ namespace Chummer
                     await LanguageManager.GetStringAsync("MessageTitle_Metatype_SelectMetatype", token: token).ConfigureAwait(false),
                     MessageBoxButtons.OK, MessageBoxIcon.Information, token: token).ConfigureAwait(false);
             }
+        }
+
+        /// <summary>
+        /// Apply a metatype selection to the character. This is what OK does once the dialog's controls have been read;
+        /// the agent tools call it directly.
+        /// </summary>
+        /// <param name="strSelectedMetatype">Metatype id or name.</param>
+        /// <param name="strSelectedMetavariant">Metavariant id or name; null, empty or the empty GUID for none.</param>
+        /// <param name="strSelectedMetatypeCategory">Metatype category; the metatype's own category when empty.</param>
+        /// <param name="intForce">Force or level, for metatypes that have one.</param>
+        /// <param name="strPossessionMethod">Possession method for possession-based spirits, otherwise empty.</param>
+        /// <param name="token">Cancellation token to listen to.</param>
+        /// <returns>Null on success, otherwise why nothing was applied.</returns>
+        internal async Task<string> ApplyMetatypeSelectionAsync(string strSelectedMetatype, string strSelectedMetavariant,
+                                                                string strSelectedMetatypeCategory, int intForce,
+                                                                string strPossessionMethod, CancellationToken token = default)
+        {
+            token.ThrowIfCancellationRequested();
+            XmlNode objXmlMetatype = string.IsNullOrEmpty(strSelectedMetatype)
+                ? null
+                : _xmlMetatypeDocumentMetatypesNode.TryGetNodeByNameOrId("metatype", strSelectedMetatype);
+            if (objXmlMetatype == null)
+                return await LanguageManager.GetStringAsync("Message_Metatype_SelectMetatype", token: token).ConfigureAwait(false);
+            // The dialog's list holds ids; callers may pass names
+            strSelectedMetatype = objXmlMetatype["id"]?.InnerTextViaPool(token) ?? strSelectedMetatype;
+            if (string.IsNullOrEmpty(strSelectedMetavariant)
+                || string.Equals(strSelectedMetavariant, "None", StringComparison.OrdinalIgnoreCase))
+                strSelectedMetavariant = Utils.GuidEmptyString;
+            else if (!strSelectedMetavariant.IsEmptyGuid())
+            {
+                XmlNode objXmlMetavariant = objXmlMetatype.TryGetNodeByNameOrId("metavariants/metavariant", strSelectedMetavariant);
+                if (objXmlMetavariant == null)
+                    return await LanguageManager.GetStringAsync("Message_Metatype_SelectMetatype", token: token).ConfigureAwait(false);
+                strSelectedMetavariant = objXmlMetavariant["id"]?.InnerTextViaPool(token) ?? strSelectedMetavariant;
+            }
+
+            if (string.IsNullOrEmpty(strSelectedMetatypeCategory))
+                strSelectedMetatypeCategory = objXmlMetatype["category"]?.InnerTextViaPool(token) ?? string.Empty;
+            IAsyncDisposable objLocker = await _objCharacter.LockObject.EnterWriteLockAsync(token).ConfigureAwait(false);
+            try
+            {
+                token.ThrowIfCancellationRequested();
+                // Remove all priority-given qualities (relevant when switching from Priority/Sum-to-Ten to Karma)
+                for (int i = await _objCharacter.Qualities.GetCountAsync(token).ConfigureAwait(false) - 1; i >= 0; --i)
+                {
+                    if (i >= await _objCharacter.Qualities.GetCountAsync(token).ConfigureAwait(false))
+                        continue;
+                    Quality objQuality = await _objCharacter.Qualities.GetValueAtAsync(i, token).ConfigureAwait(false);
+                    if (await objQuality.GetOriginSourceAsync(token).ConfigureAwait(false) == QualitySource.Heritage)
+                        await objQuality.DeleteQualityAsync(token: token).ConfigureAwait(false);
+                }
+
+                // If this is a Shapeshifter, a Metavariant must be selected. Default to Human if None is selected.
+                if (strSelectedMetatypeCategory == "Shapeshifter" && strSelectedMetavariant.IsEmptyGuid())
+                    strSelectedMetavariant
+                        = objXmlMetatype
+                              .SelectSingleNodeAndCacheExpressionAsNavigator(
+                                  "metavariants/metavariant[name = \"Human\"]/id", _objGenericToken)
+                          ?.Value
+                          ?? Utils.GuidEmptyString;
+                if (_objCharacter.MetatypeGuid.ToString("D", GlobalSettings.InvariantCultureInfo) !=
+                    strSelectedMetatype
+                    || _objCharacter.MetavariantGuid.ToString("D", GlobalSettings.InvariantCultureInfo) !=
+                    strSelectedMetavariant)
+                {
+                    // Remove qualities that require the old metatype
+                    List<Quality> lstQualitiesToCheck = new List<Quality>(await _objCharacter.Qualities.GetCountAsync(token).ConfigureAwait(false));
+                    await _objCharacter.Qualities.ForEachAsync(async (objQuality, t) =>
+                    {
+                        QualitySource eOriginSource = await objQuality.GetOriginSourceAsync(t).ConfigureAwait(false);
+                        if (eOriginSource == QualitySource.Improvement
+                            || eOriginSource == QualitySource.QualityLevelImprovement
+                            || eOriginSource == QualitySource.Metatype
+                            || eOriginSource == QualitySource.MetatypeRemovable
+                            || eOriginSource == QualitySource.MetatypeRemovedAtChargen)
+                            return;
+                        XPathNavigator xmlBaseNode
+                            = await objQuality.GetNodeXPathAsync(token: t).ConfigureAwait(false);
+                        XPathNavigator xmlRestrictionNode
+                            = xmlBaseNode?.SelectSingleNodeAndCacheExpression("required", t);
+                        if (xmlRestrictionNode != null &&
+                            (xmlRestrictionNode.SelectSingleNodeAndCacheExpression(".//metatype", t) != null
+                             || xmlRestrictionNode.SelectSingleNodeAndCacheExpression(".//metavariant", t) != null))
+                        {
+                            lstQualitiesToCheck.Add(objQuality);
+                        }
+                        else
+                        {
+                            xmlRestrictionNode
+                                = xmlBaseNode?.SelectSingleNodeAndCacheExpression("forbidden", t);
+                            if (xmlRestrictionNode != null &&
+                                (xmlRestrictionNode.SelectSingleNodeAndCacheExpression(".//metatype", t) != null
+                                 || xmlRestrictionNode.SelectSingleNodeAndCacheExpression(".//metavariant", t) != null))
+                            {
+                                lstQualitiesToCheck.Add(objQuality);
+                            }
+                        }
+                    }, token).ConfigureAwait(false);
+
+                    await _objCharacter.CreateAsync(strSelectedMetatypeCategory, strSelectedMetatype,
+                        strSelectedMetavariant,
+                        objXmlMetatype, intForce, _xmlQualityDocumentQualitiesNode,
+                        await _xmlCritterPowerDocumentPowersNode
+                            .GetValueAsync(_objGenericToken)
+                            .ConfigureAwait(false), _xmlSkillsDocumentKnowledgeSkillsNode,
+                        strPossessionMethod ?? string.Empty, token).ConfigureAwait(false);
+                    foreach (Quality objQuality in lstQualitiesToCheck)
+                    {
+                        XPathNavigator objLoopNode
+                            = await objQuality.GetNodeXPathAsync(token: token).ConfigureAwait(false);
+                        // Set strIgnoreQuality to quality's name to make sure limit counts are not an issue
+                        if (objLoopNode != null && !await objLoopNode.RequirementsMetAsync(_objCharacter, strIgnoreQuality: await objQuality.GetNameAsync(token).ConfigureAwait(false), token: token).ConfigureAwait(false))
+                            await objQuality.DeleteQualityAsync(token: token).ConfigureAwait(false);
+                    }
+                }
+
+                // Flip all attribute, skill, and skill group points to karma levels (relevant when switching from Priority/Sum-to-Ten to Karma)
+                await (await _objCharacter.AttributeSection.GetAttributesAsync(token).ConfigureAwait(false)).ForEachWithSideEffectsAsync(async (objAttrib, t) =>
+                {
+                    // This ordering makes sure data bindings to numeric up-downs with maxima don't get broken
+                    int intBase = await objAttrib.GetBaseAsync(t).ConfigureAwait(false);
+                    await objAttrib.SetBaseAsync(0, t).ConfigureAwait(false);
+                    await objAttrib.ModifyKarmaAsync(intBase, t).ConfigureAwait(false);
+                }, token).ConfigureAwait(false);
+
+                await (await _objCharacter.SkillsSection.GetSkillsAsync(token).ConfigureAwait(false)).ForEachWithSideEffectsAsync(async (objSkill, t) =>
+                {
+                    // This ordering makes sure data bindings to numeric up-downs with maxima don't get broken
+                    int intBase = await objSkill.GetBasePointsAsync(t).ConfigureAwait(false);
+                    await objSkill.SetBasePointsAsync(0, t).ConfigureAwait(false);
+                    await objSkill.ModifyKarmaPointsAsync(intBase, t).ConfigureAwait(false);
+                }, token).ConfigureAwait(false);
+
+                await (await _objCharacter.SkillsSection.GetSkillGroupsAsync(token).ConfigureAwait(false)).ForEachWithSideEffectsAsync(async (objGroup, t) =>
+                {
+                    // This ordering makes sure data bindings to numeric up-downs with maxima don't get broken
+                    int intBase = await objGroup.GetBasePointsAsync(t).ConfigureAwait(false);
+                    await objGroup.SetBasePointsAsync(0, t).ConfigureAwait(false);
+                    await objGroup.ModifyKarmaPointsAsync(intBase, t).ConfigureAwait(false);
+                }, token).ConfigureAwait(false);
+            }
+            finally
+            {
+                await objLocker.DisposeAsync().ConfigureAwait(false);
+            }
+
+            return null;
         }
 
         private async Task RefreshSelectedMetavariant(CancellationToken token = default)

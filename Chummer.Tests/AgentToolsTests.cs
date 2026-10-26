@@ -22,6 +22,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Windows.Forms;
 using Chummer.Agent;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Newtonsoft.Json.Linq;
@@ -102,44 +103,35 @@ namespace Chummer.Tests
             Assert.AreEqual(McpServer.DefaultPort, McpServer.GetPortFromCommandLine(new[] { "/mcpport:notaport" }));
         }
 
-        [TestMethod]
-        public void ToolsAgainstOpenCharacter()
+        /// <summary>
+        /// Show a hidden main window as <see cref="Program.MainForm"/> while a scenario runs, then close it and every editor it opened.
+        /// </summary>
+        private void RunWithMainForm(Func<ChummerMainForm, CancellationToken, Task> funcScenario)
         {
             CancellationToken token = TestContext.CancellationToken;
-            FileInfo objFile = new FileInfo(Path.Combine(AppDomain.CurrentDomain.SetupInformation.ApplicationBase ?? string.Empty,
-                                                         "TestFiles", "Skink.chum5"));
-            Assert.IsTrue(objFile.Exists, objFile.FullName);
             ChummerMainForm frmOldMainForm = Program.MainForm;
             ChummerMainForm frmTestForm = null;
-            CharacterShared frmCharacterForm = null;
-            Character objCharacter = new Character { FileName = objFile.FullName };
             try
             {
-                Assert.IsTrue(objCharacter.Load(token: token));
                 Utils.IsUnitTestForUI = true;
                 frmTestForm = Utils.RunOnMainThread(() => new ChummerMainForm(true, true) { ShowInTaskbar = false }, token: token);
                 Program.MainForm = frmTestForm;
                 frmTestForm.DoThreadSafe(x => x.Show(), token);
                 while (!frmTestForm.IsFinishedLoading)
                     Utils.SafeSleep(token);
-                frmCharacterForm = frmTestForm.DoThreadSafeFunc(() => new CharacterCreate(objCharacter), token);
-                frmCharacterForm.DoThreadSafe(x =>
-                {
-                    x.MdiParent = frmTestForm;
-                    x.ShowInTaskbar = false;
-                    x.Show();
-                }, token);
-                while (!frmCharacterForm.IsFinishedInitializing)
-                    Utils.SafeSleep(token);
-
-                Utils.SafelyRunSynchronously(() => RunToolScenarioAsync(token), token);
+                ChummerMainForm frmScenarioForm = frmTestForm;
+                Utils.SafelyRunSynchronously(() => funcScenario(frmScenarioForm, token), token);
             }
             finally
             {
                 try
                 {
-                    frmCharacterForm?.DoThreadSafe(x => x.Close(), token);
-                    frmTestForm?.DoThreadSafe(x => x.Close(), token);
+                    if (frmTestForm != null)
+                    {
+                        foreach (Form frmChild in frmTestForm.DoThreadSafeFunc(x => x.MdiChildren, token))
+                            frmChild.DoThreadSafe(x => x.Close(), token);
+                        frmTestForm.DoThreadSafe(x => x.Close(), token);
+                    }
                 }
                 catch (Exception e) when (e is InvalidOperationException || e is ApplicationException)
                 {
@@ -149,6 +141,168 @@ namespace Chummer.Tests
                 Program.MainForm = frmOldMainForm;
                 Utils.IsUnitTestForUI = false;
             }
+        }
+
+        [TestMethod]
+        public void ToolsAgainstOpenCharacter()
+        {
+            CancellationToken token = TestContext.CancellationToken;
+            FileInfo objFile = new FileInfo(Path.Combine(AppDomain.CurrentDomain.SetupInformation.ApplicationBase ?? string.Empty,
+                                                         "TestFiles", "Skink.chum5"));
+            Assert.IsTrue(objFile.Exists, objFile.FullName);
+            Character objCharacter = new Character { FileName = objFile.FullName };
+            Assert.IsTrue(objCharacter.Load(token: token));
+            RunWithMainForm(async (frmMain, t) =>
+            {
+                CharacterShared frmCharacterForm = await frmMain.DoThreadSafeFuncAsync(() => new CharacterCreate(objCharacter), t).ConfigureAwait(false);
+                await frmCharacterForm.DoThreadSafeAsync(x =>
+                {
+                    x.MdiParent = frmMain;
+                    x.ShowInTaskbar = false;
+                    x.Show();
+                }, t).ConfigureAwait(false);
+                while (!frmCharacterForm.IsFinishedInitializing)
+                    await Task.Delay(50, t).ConfigureAwait(false);
+                await RunToolScenarioAsync(t).ConfigureAwait(false);
+            });
+        }
+
+        [TestMethod]
+        public void CreateCharacterAndGear()
+        {
+            string strSaveFile = Path.Combine(Path.GetTempPath(), "AgentToolsTest_" + Guid.NewGuid().ToString("N") + ".chum5");
+            try
+            {
+                RunWithMainForm((frmMain, t) => RunCreationScenarioAsync(frmMain, strSaveFile, t));
+            }
+            finally
+            {
+                if (File.Exists(strSaveFile))
+                    File.Delete(strSaveFile);
+            }
+        }
+
+        private static async Task RunCreationScenarioAsync(ChummerMainForm frmMain, string strSaveFile, CancellationToken token)
+        {
+            // The Heritage rows used to embed every metatype in full (~130 KB); they must now be compact
+            (bool blnIsError, string strText) = await CallToolAsync("get_priority_table", new JObject { ["category"] = "Heritage" }, token).ConfigureAwait(false);
+            Assert.IsFalse(blnIsError, strText);
+            Assert.IsTrue(strText.Length < 20000, "Heritage table is " + strText.Length.ToString() + " characters");
+            StringAssert.Contains(strText, "Human");
+            JObject objTalents = (JObject)await CallToolOkAsync("get_priority_table", new JObject { ["category"] = "Talent" }, token).ConfigureAwait(false);
+            StringAssert.Contains(objTalents.ToString(), "freeSkills");
+
+            JArray objSettings = (JArray)await CallToolOkAsync("list_build_settings", null, token).ConfigureAwait(false);
+            JToken objPrioritySettings = objSettings.FirstOrDefault(x => x.Value<bool>("isDefault") && x.Value<string>("buildMethod") == "Priority")
+                                         ?? objSettings.First(x => x.Value<string>("buildMethod") == "Priority");
+            string strSettings = objPrioritySettings.Value<string>("key");
+
+            // Choices the new-character dialog would never offer are refused, and say what is allowed
+            JObject objFace = new JObject
+            {
+                ["settings"] = strSettings,
+                ["metatype"] = "Human",
+                ["priorities"] = new JObject { ["heritage"] = "D", ["attributes"] = "B", ["talent"] = "E", ["skills"] = "A", ["resources"] = "C" },
+                ["talent"] = "Mundane",
+                ["name"] = "Agent Test Face"
+            };
+            JObject objBad = (JObject)objFace.DeepClone();
+            objBad["priorities"]["attributes"] = "A";
+            (blnIsError, strText) = await CallToolAsync("create_character", objBad, token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+            StringAssert.Contains(strText, "exactly once");
+            objBad = (JObject)objFace.DeepClone();
+            objBad["metatype"] = "Troll";
+            objBad["priorities"] = new JObject { ["heritage"] = "E", ["attributes"] = "B", ["talent"] = "D", ["skills"] = "A", ["resources"] = "C" };
+            objBad["talent"] = null;
+            (blnIsError, strText) = await CallToolAsync("create_character", objBad, token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+            StringAssert.Contains(strText, "Options: Human");
+            objBad = (JObject)objFace.DeepClone();
+            objBad["priorities"] = new JObject { ["heritage"] = "D", ["attributes"] = "C", ["talent"] = "A", ["skills"] = "B", ["resources"] = "E" };
+            objBad["talent"] = "Magician";
+            (blnIsError, strText) = await CallToolAsync("create_character", objBad, token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+            StringAssert.Contains(strText, "Spellcasting");
+            Assert.AreEqual(0, await frmMain.OpenCharacterEditorForms.GetCountAsync(token).ConfigureAwait(false), "A refused character must not be opened");
+
+            // A mundane human face
+            JObject objCreated = (JObject)await CallToolOkAsync("create_character", objFace, token).ConfigureAwait(false);
+            Assert.IsNull(objCreated.Value<string>("warning"), objCreated.ToString());
+            Assert.AreEqual(1, await frmMain.OpenCharacterEditorForms.GetCountAsync(token).ConfigureAwait(false));
+            Assert.IsInstanceOfType(await frmMain.OpenCharacterEditorForms.GetValueAtAsync(0, token).ConfigureAwait(false), typeof(CharacterCreate));
+            JObject objSummary = (JObject)await CallToolOkAsync("get_character_summary", null, token).ConfigureAwait(false);
+            Assert.AreEqual("D", objSummary["priorities"].Value<string>("metatype"), objSummary["priorities"].ToString());
+            Assert.AreEqual("A", objSummary["priorities"].Value<string>("skills"));
+            Assert.AreEqual(140000m, objSummary["points"]["nuyen"].Value<decimal>("starting"));
+            Assert.AreEqual(objSummary["points"]["skillPoints"].Value<int>("total"), objSummary["points"]["skillPoints"].Value<int>("remaining"));
+
+            // Swapping two priorities keeps the rest
+            await CallToolOkAsync("set_priorities", new JObject { ["priorities"] = new JObject { ["attributes"] = "C", ["resources"] = "B" } }, token)
+                .ConfigureAwait(false);
+            objSummary = (JObject)await CallToolOkAsync("get_character_summary", null, token).ConfigureAwait(false);
+            Assert.AreEqual(275000m, objSummary["points"]["nuyen"].Value<decimal>("starting"));
+            Assert.AreEqual("A", objSummary["priorities"].Value<string>("skills"));
+            Assert.AreEqual("Human", objSummary.Value<string>("metatype"));
+
+            // Gear: every add costs nuyen, cyberware costs essence, and items over the availability limit are refused
+            decimal decNuyen = objSummary["points"]["nuyen"].Value<decimal>("remaining");
+            JObject objResult = (JObject)await CallToolOkAsync("add_gear", new JObject { ["id"] = "Meta Link" }, token).ConfigureAwait(false);
+            Assert.IsTrue(objResult.Value<decimal>("nuyenRemaining") < decNuyen, objResult.ToString());
+            // A fake SIN asks for the name on it; forced_value answers so no dialog appears
+            await CallToolOkAsync("add_gear", new JObject { ["id"] = "Fake SIN", ["rating"] = 4, ["forced_value"] = "Jane Doe" }, token).ConfigureAwait(false);
+            (blnIsError, strText) = await CallToolAsync("add_gear", new JObject { ["id"] = "Fake SIN", ["rating"] = 5 }, token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+            StringAssert.Contains(strText, "availability");
+            await CallToolOkAsync("add_weapon", new JObject { ["id"] = "Ares Predator V" }, token).ConfigureAwait(false);
+            await CallToolOkAsync("add_armor", new JObject { ["id"] = "Armor Jacket" }, token).ConfigureAwait(false);
+            objResult = (JObject)await CallToolOkAsync("add_cyberware", new JObject { ["id"] = "Datajack", ["grade"] = "Alphaware" }, token).ConfigureAwait(false);
+            Assert.IsTrue(objResult.Value<decimal>("essence") < 6m, objResult.ToString());
+            (blnIsError, strText) = await CallToolAsync("add_cyberware", new JObject { ["id"] = "Wired Reflexes", ["rating"] = 3 }, token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+            StringAssert.Contains(strText, "availability");
+            await CallToolOkAsync("add_cyberware", new JObject { ["id"] = "Orthoskin", ["kind"] = "bioware", ["rating"] = 1 }, token).ConfigureAwait(false);
+            JObject objVehicles = (JObject)await CallToolOkAsync("search_catalog", new JObject { ["kind"] = "vehicle", ["limit"] = 1 }, token).ConfigureAwait(false);
+            await CallToolOkAsync("add_vehicle", new JObject { ["id"] = objVehicles["items"][0].Value<string>("id") }, token).ConfigureAwait(false);
+            await CallToolOkAsync("add_lifestyle", new JObject { ["id"] = "Low", ["months"] = 2 }, token).ConfigureAwait(false);
+
+            objSummary = (JObject)await CallToolOkAsync("get_character_summary", null, token).ConfigureAwait(false);
+            foreach (string strList in new[] { "gear", "weapons", "armor", "cyberware", "vehicles", "lifestyles" })
+                Assert.IsTrue(((JArray)objSummary[strList]).Count > 0, strList + " is empty: " + objSummary[strList]);
+            Assert.IsTrue(objSummary["points"]["nuyen"].Value<decimal>("remaining") < decNuyen);
+
+            // Everything bought can be removed again, refunding it
+            foreach (string strList in new[] { "weapons", "armor", "cyberware", "vehicles", "lifestyles", "gear" })
+            {
+                foreach (JToken objItem in (JArray)objSummary[strList])
+                {
+                    (blnIsError, strText) = await CallToolAsync("remove_item", new JObject { ["id"] = objItem.Value<string>("id") }, token).ConfigureAwait(false);
+                    // Weapons that came with other gear go when their parent goes
+                    if (blnIsError)
+                        StringAssert.Contains(strText, "comes with", strText);
+                }
+            }
+
+            objSummary = (JObject)await CallToolOkAsync("get_character_summary", null, token).ConfigureAwait(false);
+            Assert.AreEqual(decNuyen, objSummary["points"]["nuyen"].Value<decimal>("remaining"), objSummary["points"].ToString());
+            Assert.AreEqual(6m, objSummary.Value<decimal>("essence"));
+
+            // Leftover points are reported even while there are errors (here: karma overspent on Body)
+            JToken objBody = ((JArray)objSummary["attributes"]).First(x => x.Value<string>("name") == "BOD");
+            objResult = (JObject)await CallToolOkAsync("set_attribute", new JObject { ["name"] = "BOD", ["karma"] = objBody.Value<int>("maxKarma") }, token)
+                .ConfigureAwait(false);
+            Assert.IsNotNull(objResult.Value<string>("warning"), objResult.ToString());
+            JObject objValidation = (JObject)await CallToolOkAsync("validate_character", null, token).ConfigureAwait(false);
+            Assert.IsFalse(objValidation.Value<bool>("valid"), objValidation.ToString());
+            Assert.IsTrue(((JArray)objValidation["errors"]).Count > 0, objValidation.ToString());
+            Assert.IsTrue(((JArray)objValidation["warnings"]).Count > 0, objValidation.ToString());
+            await CallToolOkAsync("set_attribute", new JObject { ["name"] = "BOD", ["karma"] = 0 }, token).ConfigureAwait(false);
+
+            JObject objSaved = (JObject)await CallToolOkAsync("save_character", new JObject { ["path"] = strSaveFile }, token).ConfigureAwait(false);
+            Assert.AreEqual(strSaveFile, objSaved.Value<string>("file"), objSaved.ToString());
+            Assert.IsTrue(File.Exists(strSaveFile));
+            (blnIsError, strText) = await CallToolAsync("save_character", new JObject { ["path"] = strSaveFile }, token).ConfigureAwait(false);
+            Assert.IsFalse(blnIsError, "Saving again to the character's own file must not need overwrite: " + strText);
         }
 
         private static async Task RunToolScenarioAsync(CancellationToken token)

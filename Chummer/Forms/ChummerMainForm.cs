@@ -3386,8 +3386,6 @@ namespace Chummer
                                     return;
                             }
                         }
-
-                        await Program.OpenCharacters.AddAsync(objCharacter, _objGenericToken).ConfigureAwait(false);
                     }
                     finally
                     {
@@ -3397,38 +3395,7 @@ namespace Chummer
                     objCursorWait = await CursorWait.NewAsync(this, token: _objGenericToken).ConfigureAwait(false);
                     try
                     {
-                        await this.DoThreadSafeAsync(x =>
-                        {
-                            CharacterCreate frmNewCharacter = new CharacterCreate(objCharacter)
-                            {
-                                MdiParent = x
-                            };
-                            bool blnMaximizePreShow = x.MdiChildren.Length <= 1 && (x.MdiChildren.Length == 0 || ReferenceEquals(MdiChildren[0], frmNewCharacter));
-                            Stack<Form> stkToMaximize = null;
-                            if (blnMaximizePreShow)
-                                frmNewCharacter.WindowState = FormWindowState.Maximized;
-                            else
-                            {
-                                // There is an issue in WinForms MDI Containers where showing a new form when other forms are maximized can cause a crash,
-                                // so let's make sure we un-maximize all maximized forms before showing this newly added one
-                                stkToMaximize = new Stack<Form>(x.MdiChildren.Length);
-                                stkToMaximize.Push(frmNewCharacter);
-                                foreach (Form frmLoop in x.MdiChildren)
-                                {
-                                    if (frmLoop.WindowState == FormWindowState.Maximized && !ReferenceEquals(frmLoop, frmNewCharacter))
-                                    {
-                                        frmLoop.WindowState = FormWindowState.Normal;
-                                        stkToMaximize.Push(frmLoop);
-                                    }
-                                }
-                            }
-                            frmNewCharacter.Show();
-                            if (stkToMaximize?.Count > 0)
-                            {
-                                while (stkToMaximize.Count > 0)
-                                    stkToMaximize.Pop().WindowState = FormWindowState.Maximized;
-                            }
-                        }, token: _objGenericToken).ConfigureAwait(false);
+                        await OpenNewCharacterEditorAsync(objCharacter, _objGenericToken).ConfigureAwait(false);
                     }
                     finally
                     {
@@ -3444,6 +3411,47 @@ namespace Chummer
             {
                 //swallow this
             }
+        }
+
+        /// <summary>
+        /// Open a character that has just been set up by the new-character dialogs (or the agent tools) in a new create-mode editor tab.
+        /// </summary>
+        internal async Task<CharacterCreate> OpenNewCharacterEditorAsync(Character objCharacter, CancellationToken token = default)
+        {
+            await Program.OpenCharacters.AddAsync(objCharacter, token).ConfigureAwait(false);
+            return await this.DoThreadSafeFuncAsync(x =>
+            {
+                CharacterCreate frmNewCharacter = new CharacterCreate(objCharacter)
+                {
+                    MdiParent = x
+                };
+                bool blnMaximizePreShow = x.MdiChildren.Length <= 1 && (x.MdiChildren.Length == 0 || ReferenceEquals(x.MdiChildren[0], frmNewCharacter));
+                Stack<Form> stkToMaximize = null;
+                if (blnMaximizePreShow)
+                    frmNewCharacter.WindowState = FormWindowState.Maximized;
+                else
+                {
+                    // There is an issue in WinForms MDI Containers where showing a new form when other forms are maximized can cause a crash,
+                    // so let's make sure we un-maximize all maximized forms before showing this newly added one
+                    stkToMaximize = new Stack<Form>(x.MdiChildren.Length);
+                    stkToMaximize.Push(frmNewCharacter);
+                    foreach (Form frmLoop in x.MdiChildren)
+                    {
+                        if (frmLoop.WindowState == FormWindowState.Maximized && !ReferenceEquals(frmLoop, frmNewCharacter))
+                        {
+                            frmLoop.WindowState = FormWindowState.Normal;
+                            stkToMaximize.Push(frmLoop);
+                        }
+                    }
+                }
+                frmNewCharacter.Show();
+                if (stkToMaximize?.Count > 0)
+                {
+                    while (stkToMaximize.Count > 0)
+                        stkToMaximize.Pop().WindowState = FormWindowState.Maximized;
+                }
+                return frmNewCharacter;
+            }, token: token).ConfigureAwait(false);
         }
 
         /// <summary>

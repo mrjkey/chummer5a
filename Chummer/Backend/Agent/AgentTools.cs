@@ -45,8 +45,10 @@ namespace Chummer.Agent
             "Chummer is a Shadowrun 5th Edition character builder. These tools read and edit the characters the user has open in Chummer's editor; "
             + "the user sees every change live and can also edit by hand, so re-read state (get_character_summary) instead of assuming it. "
             + "Chummer enforces the rules: use search_catalog with legal_only=true to find options the character can actually take, "
-            + "and validate_character before calling a character finished. Priorities, metatype and build method are chosen by the user in Chummer's "
-            + "new-character dialog; use get_priority_table and list_metatypes to advise on them.";
+            + "and validate_character before calling a character finished. To start a character, pick settings (list_build_settings), plan with "
+            + "get_priority_table, then create_character; set_priorities changes them later. Spend points with set_attribute/set_skill/add_quality "
+            + "and friends, buy gear with add_weapon/add_armor/add_gear/add_cyberware/add_vehicle/add_lifestyle, and save_character when the user wants it saved. "
+            + "Edits only work while the character is in creation mode.";
 
         private const string CharacterArgDescription =
             "Which open character to use (matches name, alias or file name). Defaults to the character in the active editor tab.";
@@ -71,7 +73,11 @@ namespace Chummer.Agent
                 ExportCharacterAsync);
             foreach (AgentTool objTool in CreateCatalogTools())
                 yield return objTool;
+            foreach (AgentTool objTool in CreateCreationTools())
+                yield return objTool;
             foreach (AgentTool objTool in CreateEditTools())
+                yield return objTool;
+            foreach (AgentTool objTool in CreateGearTools())
                 yield return objTool;
         }
 

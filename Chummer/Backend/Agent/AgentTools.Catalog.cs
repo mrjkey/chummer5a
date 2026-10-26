@@ -95,9 +95,12 @@ namespace Chummer.Agent
                                  ("character", "string", CharacterArgDescription)),
                 GetCatalogItemAsync);
             yield return new AgentTool("get_priority_table",
-                "The priority table (A-E) for the character's settings: what each priority gives for Heritage (metatypes and special attribute points), "
-                + "Talent (magic/resonance options), Attributes, Skills and Resources. Works before a character exists, using the default settings.",
+                "The priority table (A-E) for the character's settings, limited to the enabled books: what each priority gives for Heritage "
+                + "(metatypes with special attribute points and karma cost), Talent (magic/resonance options and the free skills they grant), "
+                + "Attributes, Skills and Resources. Works before a character exists, using the default settings (or `settings`).",
                 AgentTool.Schema(("category", "string", "Only this category: Heritage, Talent, Attributes, Skills or Resources (optional)."),
+                                 ("metatype", "string", "Only this metatype in the Heritage rows (optional)."),
+                                 ("settings", "string", SettingsArgDescription),
                                  ("character", "string", CharacterArgDescription)),
                 GetPriorityTableAsync);
             yield return new AgentTool("list_metatypes",
@@ -132,7 +135,8 @@ namespace Chummer.Agent
         /// <summary>
         /// Root of a data file as the character sees it (their custom data), or as a new character with the default settings would.
         /// </summary>
-        private static async Task<(XPathNavigator Root, CharacterSettings Settings)> LoadDataAsync(Character objCharacter, string strFile, CancellationToken token)
+        private static async Task<(XPathNavigator Root, CharacterSettings Settings)> LoadDataAsync(Character objCharacter, string strFile, CancellationToken token,
+                                                                                                    CharacterSettings objSettings = null)
         {
             if (objCharacter != null)
             {
@@ -140,9 +144,13 @@ namespace Chummer.Agent
                 return (objRoot.SelectSingleNode("/chummer"), await objCharacter.GetSettingsAsync(token).ConfigureAwait(false));
             }
 
-            IReadOnlyDictionary<string, CharacterSettings> dicSettings = await SettingsManager.GetLoadedCharacterSettingsAsync(token).ConfigureAwait(false);
-            if (!dicSettings.TryGetValue(GlobalSettings.DefaultCharacterSetting, out CharacterSettings objSettings))
-                objSettings = dicSettings.Values.FirstOrDefault();
+            if (objSettings == null)
+            {
+                IReadOnlyDictionary<string, CharacterSettings> dicSettings = await SettingsManager.GetLoadedCharacterSettingsAsync(token).ConfigureAwait(false);
+                if (!dicSettings.TryGetValue(GlobalSettings.DefaultCharacterSetting, out objSettings))
+                    objSettings = dicSettings.Values.FirstOrDefault();
+            }
+
             IReadOnlyList<string> lstCustomData = objSettings != null
                 ? await objSettings.GetEnabledCustomDataDirectoryPathsAsync(token).ConfigureAwait(false)
                 : null;
@@ -276,12 +284,16 @@ namespace Chummer.Agent
         private static async Task<object> GetPriorityTableAsync(JObject objArgs, CancellationToken token)
         {
             Character objCharacter = await TryGetCharacterAsync(objArgs, token).ConfigureAwait(false);
-            (XPathNavigator objRoot, CharacterSettings objSettings) = await LoadDataAsync(objCharacter, "priorities.xml", token).ConfigureAwait(false);
+            CharacterSettings objWantedSettings = objCharacter == null ? await FindSettingsAsync(objArgs.Value<string>("settings"), token).ConfigureAwait(false) : null;
+            (XPathNavigator objRoot, CharacterSettings objSettings) = await LoadDataAsync(objCharacter, "priorities.xml", token, objWantedSettings).ConfigureAwait(false);
+            (XPathNavigator objMetatypesRoot, CharacterSettings _) = await LoadDataAsync(objCharacter, "metatypes.xml", token, objWantedSettings).ConfigureAwait(false);
             string strPriorityTable = objSettings != null ? await objSettings.GetPriorityTableAsync(token).ConfigureAwait(false) : "Standard";
+            string strBookXPath = objSettings != null ? await objSettings.BookXPathAsync(token: token).ConfigureAwait(false) : string.Empty;
             string strFilter = "(not(prioritytable) or prioritytable = " + strPriorityTable.CleanXPath() + ")";
             string strCategory = objArgs.Value<string>("category");
             if (!string.IsNullOrWhiteSpace(strCategory))
                 strFilter += " and category = " + strCategory.Trim().CleanXPath();
+            string strMetatype = objArgs.Value<string>("metatype")?.Trim();
             Dictionary<string, List<JToken>> dicByCategory = new Dictionary<string, List<JToken>>();
             foreach (XPathNavigator objPriority in objRoot.Select("priorities/priority[" + strFilter + "]"))
             {
@@ -289,10 +301,37 @@ namespace Chummer.Agent
                 string strLoopCategory = objPriority.SelectSingleNode("category")?.Value ?? "Other";
                 if (!dicByCategory.TryGetValue(strLoopCategory, out List<JToken> lstEntries))
                     dicByCategory[strLoopCategory] = lstEntries = new List<JToken>();
-                JObject objEntry = NavigatorToJson(objPriority);
-                objEntry.Remove("id");
-                objEntry.Remove("category");
-                objEntry.Remove("prioritytable");
+                JObject objEntry = new JObject { ["priority"] = objPriority.SelectSingleNode("value")?.Value };
+                switch (strLoopCategory)
+                {
+                    case "Heritage":
+                        objEntry["metatypes"] = DescribeHeritageRow(objPriority, objMetatypesRoot, strBookXPath, strMetatype);
+                        break;
+                    case "Talent":
+                        objEntry["talents"] = DescribeTalentRow(objPriority);
+                        break;
+                    default:
+                        foreach (XPathNavigator objField in objPriority.SelectChildren(XPathNodeType.Element))
+                        {
+                            switch (objField.Name)
+                            {
+                                case "id":
+                                case "name":
+                                case "value":
+                                case "category":
+                                case "prioritytable":
+                                case "gameplayoption":
+                                    continue;
+                            }
+
+                            objEntry[objField.Name] = objField.HasChildren && objField.SelectChildren(XPathNodeType.Element).Count > 0
+                                ? (JToken)NavigatorToJson(objField)
+                                : objField.Value;
+                        }
+
+                        break;
+                }
+
                 lstEntries.Add(objEntry);
             }
 
@@ -302,6 +341,105 @@ namespace Chummer.Agent
                 settings = objSettings != null ? await objSettings.GetNameAsync(token).ConfigureAwait(false) : null,
                 categories = dicByCategory
             };
+        }
+
+        /// <summary>
+        /// The metatypes a Heritage priority allows (only those in the enabled books), with special attribute points and karma cost.
+        /// </summary>
+        private static JArray DescribeHeritageRow(XPathNavigator objPriority, XPathNavigator objMetatypesRoot, string strBookXPath, string strOnlyMetatype)
+        {
+            JArray objReturn = new JArray();
+            foreach (XPathNavigator objMetatype in objPriority.Select("metatypes/metatype"))
+            {
+                string strName = objMetatype.SelectSingleNode("name")?.Value;
+                if (string.IsNullOrEmpty(strName)
+                    || (!string.IsNullOrEmpty(strOnlyMetatype) && !string.Equals(strName, strOnlyMetatype, StringComparison.OrdinalIgnoreCase)))
+                    continue;
+                XPathNavigator objData = objMetatypesRoot.TryGetNodeByNameOrId("metatypes/metatype", strName, strBookXPath);
+                if (objData == null)
+                    continue;
+                JObject objEntry = new JObject
+                {
+                    ["name"] = strName,
+                    ["category"] = objData.SelectSingleNode("category")?.Value,
+                    ["specialPoints"] = objMetatype.SelectSingleNode("value")?.ValueAsInt ?? 0,
+                    ["karma"] = objMetatype.SelectSingleNode("karma")?.ValueAsInt ?? 0
+                };
+                JObject objMetavariants = new JObject();
+                foreach (XPathNavigator objMetavariant in objMetatype.Select("metavariants/metavariant"))
+                {
+                    string strMetavariant = objMetavariant.SelectSingleNode("name")?.Value;
+                    if (string.IsNullOrEmpty(strMetavariant)
+                        || objData.TryGetNodeByNameOrId("metavariants/metavariant", strMetavariant, strBookXPath) == null)
+                        continue;
+                    objMetavariants[strMetavariant] = new JObject
+                    {
+                        ["specialPoints"] = objMetavariant.SelectSingleNode("value")?.ValueAsInt ?? 0,
+                        ["karma"] = objMetavariant.SelectSingleNode("karma")?.ValueAsInt ?? 0
+                    };
+                }
+
+                if (objMetavariants.Count > 0)
+                    objEntry["metavariants"] = objMetavariants;
+                objReturn.Add(objEntry);
+            }
+
+            return objReturn;
+        }
+
+        /// <summary>
+        /// The talents a Talent priority offers, with what each grants and which metatypes may (not) take it.
+        /// </summary>
+        private static JArray DescribeTalentRow(XPathNavigator objPriority)
+        {
+            JArray objReturn = new JArray();
+            foreach (XPathNavigator objTalent in objPriority.Select("talents/talent"))
+            {
+                JObject objEntry = new JObject
+                {
+                    ["value"] = objTalent.SelectSingleNode("value")?.Value,
+                    ["name"] = objTalent.SelectSingleNode("name")?.Value
+                };
+                foreach (string strField in new[] { "magic", "resonance", "depth", "spells", "cfp", "specialattribpoints" })
+                {
+                    XPathNavigator objField = objTalent.SelectSingleNode(strField);
+                    if (objField != null)
+                        objEntry[strField] = objField.Value;
+                }
+
+                List<string> lstQualities = objTalent.Select("qualities/quality").Cast<XPathNavigator>().Select(x => x.Value).ToList();
+                if (lstQualities.Count > 0)
+                    objEntry["qualities"] = new JArray(lstQualities);
+                XPathNavigator objCount = objTalent.SelectSingleNode("skillqty") ?? objTalent.SelectSingleNode("skillgroupqty");
+                if (objCount != null)
+                {
+                    bool blnGroups = objTalent.SelectSingleNode("skillgroupqty") != null;
+                    JObject objFreeSkills = new JObject
+                    {
+                        ["count"] = objCount.Value,
+                        ["rating"] = (objTalent.SelectSingleNode("skillval") ?? objTalent.SelectSingleNode("skillgroupval"))?.Value,
+                        ["type"] = (objTalent.SelectSingleNode("skilltype") ?? objTalent.SelectSingleNode("skillgrouptype"))?.Value ?? "active",
+                        ["skillGroups"] = blnGroups
+                    };
+                    List<string> lstChoices = objTalent.Select("skillchoices/skill | skillgroupchoices/skillgroup").Cast<XPathNavigator>()
+                                                       .Select(x => x.Value).ToList();
+                    if (lstChoices.Count > 0)
+                        objFreeSkills["choices"] = new JArray(lstChoices);
+                    objEntry["freeSkills"] = objFreeSkills;
+                }
+
+                foreach (string strCondition in new[] { "required", "forbidden" })
+                {
+                    List<string> lstConditions = objTalent.Select(strCondition + "/oneof/*").Cast<XPathNavigator>()
+                                                          .Select(x => x.Name + ": " + x.Value).ToList();
+                    if (lstConditions.Count > 0)
+                        objEntry[strCondition + "OneOf"] = new JArray(lstConditions);
+                }
+
+                objReturn.Add(objEntry);
+            }
+
+            return objReturn;
         }
 
         private static async Task<object> ListMetatypesAsync(JObject objArgs, CancellationToken token)

@@ -12,7 +12,7 @@ This folder is a packaged release of Chummer5a, the Shadowrun 5th Edition charac
 
 ## Working with Chummer
 
-- The `chummer` tools only exist while Chummer is running, and they only see characters that are open in an editor tab.
+- The `chummer` tools only exist while Chummer is running. They can create a new character (`create_character`, which opens it in Chummer), edit characters that are open in an editor tab during creation (priorities, attributes, skills, qualities, magic, contacts, gear, cyberware, vehicles, lifestyles), and save them (`save_character`; new characters go to `Chummer\saves`).
 - If the tools are missing or fail to connect:
   1. Ask the user to start `Chummer5a.exe`, or offer to start it yourself:
      - from a Windows shell: `start "" Chummer5a.exe`
