@@ -10,6 +10,7 @@ Setup-ClaudeCode.cmd   registers the MCP server (user scope) and installs the sk
 CLAUDE.md              tells Claude what the folder is   <- package/CLAUDE.release.md
 .mcp.json              <- repo .mcp.json
 .claude/skills/sr5-build-advisor/  <- repo skill
+Examples/              example characters (.chum5, .pdf, .html, .md)  <- characters/
 Chummer/               the Release build of Chummer (Chummer/bin/Release)
 ```
 
@@ -45,6 +46,7 @@ scripts/win-release.sh 5.226.0-mcp.1
 The script does the following:
 
 - It deletes `Chummer/bin/Release` and rebuilds it from scratch, so nothing from local test runs (settings, characters, logs) ends up in the zip.
+- It stamps the version into the build, so Chummer's title bar and the MCP server info show `5.226.0-mcp.1`. Saves keep the plain `AssemblyVersion`.
 - It builds the launcher.
 - It lays out the zip as shown above.
 - It writes `dist/Chummer5a-MCP-5.226.0-mcp.1.zip`. The `dist/` folder is gitignored.
@@ -85,4 +87,5 @@ Saved as `docs/release-notes.md`. Edit the "What's new" section for each release
 ## Notes
 
 - `.github/workflows/nightly-build.yml` comes from upstream. It publishes `Nightly-v*` pre-releases using `dotnet build`, which fails on this project's binary resources. GitHub turns scheduled workflows off in forks, but **Run workflow** can still start it by hand. Disable it under **Actions** if you don't want it run by accident. `main.yml` (a Discord notification on release) needs a secret that the fork doesn't have, so it fails without doing any harm. Disable it too if the failures bother you.
-- Chummer's built-in updater still points at upstream releases. The user guide tells people not to use it.
+- This build hides Chummer's updater (Tools → Check for Updates, and the automatic update options) and the Help menu's bug-report and issues links, all of which point at the official project, and it never sends Application Insights telemetry. See the constructors of `ChummerMainForm` and `EditGlobalSettings`, and `Program.Main`.
+- Issues are switched off by default on GitHub forks. The fork's README and the release docs send bug reports to `mrjkey/chummer5a/issues`, so turn them on under **Settings → General → Features → Issues**.

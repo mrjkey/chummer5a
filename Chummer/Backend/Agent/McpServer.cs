@@ -240,7 +240,7 @@ namespace Chummer.Agent
                         ["serverInfo"] = new JObject
                         {
                             ["name"] = "chummer",
-                            ["version"] = Utils.CurrentChummerVersion.ToString(3)
+                            ["version"] = Utils.CurrentChummerVersionLabel
                         },
                         ["instructions"] = AgentTools.ServerInstructions
                     });

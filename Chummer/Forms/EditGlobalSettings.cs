@@ -76,6 +76,11 @@ namespace Chummer
             // Remove this line if cmdUploadPastebin_Click has some functionality if DEBUG is not enabled or if tabPage3 gets some other control that can be used if DEBUG is not enabled
             tabOptions.TabPages.Remove(tabGitHubIssues);
 #endif
+            // The MCP build has no updater (see ChummerMainForm's constructor).
+            chkAutomaticUpdate.Visible = false;
+            chkPreferNightlyBuilds.Visible = false;
+            // Nor any Application Insights telemetry (see Program.Main).
+            tlpLoggingOptions.Visible = false;
             tabOptions.MouseWheel += CommonFunctions.ShiftTabsOnMouseScroll;
             this.UpdateLightDarkMode(token: token);
             this.TranslateWinForm(token: token);

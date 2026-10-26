@@ -8,6 +8,15 @@
 [![License](https://img.shields.io/github/license/chummer5a/chummer5a)](https://www.gnu.org/licenses/gpl-3.0.html)
 [![Donations](https://img.shields.io/badge/buy%20me%20a%20coffee-donate-yellow.svg)](https://ko-fi.com/Z8Z7IP4E)
 
+> **This is a fork of Chummer5a with an AI-assistant (MCP) server built in.**
+> While this version of Chummer is running, [Claude Code](https://code.claude.com/docs) can create characters, edit the ones you have open, check them, save them and print them, while Chummer enforces the rules as usual.
+>
+> - **Download:** the zip on the [latest release](https://github.com/mrjkey/chummer5a/releases/latest). Its `README.md` has the quick start, and `CLAUDE-SETUP.md` the full Claude Code setup (Windows and WSL): also [here](package/CLAUDE-SETUP.md).
+> - **Example characters** built with it: [`characters/`](characters).
+> - **Bugs in this version** go to [this fork's issues](https://github.com/mrjkey/chummer5a/issues), not to the official project. Building from source: [`CLAUDE.md`](CLAUDE.md) and [`docs/releasing.md`](docs/releasing.md).
+>
+> The rest of this page is the official Chummer5a README.
+
 ## Basic Overview
 
 Chummer is a character creation and management application for the tabletop RPG [Shadowrun, Fifth Edition](https://www.shadowruntabletop.com/products-page/getting-started/shadowrun-fifth-edition) running on Windows. Not only can you create your character quickly and easily, but you can also use Chummer during your character's shadowrunning career, to accurately track your Karma, Nuyen, ammo, and everything else all in one place. Chummer also includes support for a number of optional rules and house rules and even includes support for critters and is useful for players and Game Masters alike! It also supports a number of languages: supports multiple languages: English (US), French, German, Japanese, Portuguese (Brazil) and Chinese (Simplified) files are pre-installed, while additional languages can be added and shared through use of our in-house translator tool.

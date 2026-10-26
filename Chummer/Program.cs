@@ -373,6 +373,9 @@ namespace Chummer
                                 GlobalSettings.UseLoggingApplicationInsights = UseAILogging.OnlyLocal;
                             }
 
+                            // The MCP build doesn't send telemetry to the official project's Application Insights.
+                            GlobalSettings.UseLoggingApplicationInsights = UseAILogging.OnlyLocal;
+
                             if (GlobalSettings.UseLoggingApplicationInsights > UseAILogging.OnlyMetric)
                             {
                                 LogManager.Setup()

@@ -105,12 +105,17 @@ namespace Chummer
             mnuForceCrash.Click += mnuForceCrash_Click;
             toolsMenu.DropDownItems.Add(mnuForceCrash);
 #endif
+            // This MCP build is distributed separately from the official releases: the official updater would replace it
+            // with a build that has no MCP server, and bug reports for it don't belong on the official tracker.
+            mnuToolsUpdate.Visible = false;
+            mnuReportBug.Visible = false;
+            mnuHelpDumpshock.Visible = false;
             tabForms.MouseWheel += CommonFunctions.ShiftTabsOnMouseScroll;
             this.UpdateLightDarkMode();
             this.TranslateWinForm();
             this.UpdateParentForToolTipControls();
 
-            _strCurrentVersion = Utils.CurrentChummerVersion.ToString(3);
+            _strCurrentVersion = Utils.CurrentChummerVersionLabel;
 
             _lstOpenCharacterEditorForms.BeforeClearCollectionChangedAsync += OpenCharacterEditorFormsOnBeforeClearCollectionChanged;
             _lstOpenCharacterEditorForms.CollectionChangedAsync += OpenCharacterEditorFormsOnCollectionChanged;
@@ -724,10 +729,7 @@ namespace Chummer
 
                             //this.toolsMenu.DropDownItems.Add("GM Dashboard").Click += this.dashboardToolStripMenuItem_Click;
 
-#if !DEBUG
-                            // If Automatic Updates are enabled, check for updates immediately.
-                            StartAutoUpdateChecker(_objGenericToken);
-#endif
+                            // No update check: the official updater would replace this MCP build (see the constructor).
                             StartCustomDataUpdateChecker(_objGenericToken);
 
                             GlobalSettings.MruChanged += PopulateMruToolstripMenu;

@@ -8,6 +8,7 @@ Chummer is a .NET Framework 4.8 WinForms app (Windows only). The repo lives on t
 - `scripts/win-test.sh [dotnet test args]`: builds and runs `Chummer.Tests` (MSTest), e.g. `scripts/win-test.sh --filter "FullyQualifiedName~AgentToolsTests"`.
 - `scripts/win-run.sh [chummer args]`: launches the built `Chummer5.exe`. Close any running Chummer before rebuilding.
 - `scripts/win-release.sh [version]`: clean Release build packaged as `dist/Chummer5a-MCP-<version>.zip`. The top of the zip has the `ChummerLauncher` exe (`Chummer5a.exe`), the docs and the Claude Code setup files from `package/`. The app goes in `Chummer\`. See `docs/releasing.md`.
+- This build differs from upstream outside the agent code too: the updater, the bug-report/issues menu items and Application Insights telemetry are off (they all point at the official project; see `ChummerMainForm`'s and `EditGlobalSettings`' constructors and `Program.Main`), and `Utils.CurrentChummerVersionLabel` shows the release name that `win-release.sh` stamps into `InformationalVersion`.
 - `scripts/win-env.sh` holds the paths. If the repo is on the WSL filesystem instead, the scripts rsync it to `C:\dev\chummer5a` first (cmd-based build events break on `\\wsl$` paths). Override with `CHUMMER_WIN_DIR`, `CONFIG`, `MSBUILD` or `MSBUILD_SDKS_PATH`. The VS install has no .NET SDK resolver, so the scripts point MSBuild at the newest installed .NET 8 SDK and disable the workload resolver.
 
 ## AI agent integration

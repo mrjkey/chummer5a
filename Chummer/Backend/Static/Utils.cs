@@ -506,6 +506,22 @@ namespace Chummer
 
         public static Version CurrentChummerVersion => s_ObjCurrentChummerVersion.Value;
 
+        private static readonly Lazy<string> s_StrCurrentChummerVersionLabel = new Lazy<string>(() =>
+        {
+            // scripts/win-release.sh stamps the release name (e.g. 5.226.0-mcp.1) into InformationalVersion; the SDK may append "+<commit>"
+            string strReturn = ((System.Reflection.AssemblyInformationalVersionAttribute)Attribute.GetCustomAttribute(typeof(Program).Assembly, typeof(System.Reflection.AssemblyInformationalVersionAttribute)))?.InformationalVersion ?? string.Empty;
+            int intPlusSignIndex = strReturn.IndexOf('+');
+            if (intPlusSignIndex >= 0)
+                strReturn = strReturn.Substring(0, intPlusSignIndex);
+            return strReturn.IndexOf('-') >= 0 ? strReturn : CurrentChummerVersion.ToString(3);
+        });
+
+        /// <summary>
+        /// Version to show to people: the release name if the build was stamped with one, otherwise the three-part <see cref="CurrentChummerVersion"/>.
+        /// Saves keep using <see cref="CurrentChummerVersion"/>.
+        /// </summary>
+        public static string CurrentChummerVersionLabel => s_StrCurrentChummerVersionLabel.Value;
+
         public static bool IsMilestoneVersion => CurrentChummerVersion.Build == 0;
 
         public static int GitUpdateAvailable => CachedGitVersion?.CompareTo(CurrentChummerVersion) ?? 0;

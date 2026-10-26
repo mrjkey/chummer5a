@@ -1,6 +1,13 @@
 # Chummer5a with Claude Code
 
-This is Chummer5a, the Shadowrun 5th Edition character builder, with an MCP server built in. While Chummer is running, [Claude Code](https://code.claude.com/docs) can create characters, edit the ones you have open live (priorities, attributes, skills, qualities, magic, contacts, gear and cyberware), and save them. Chummer still enforces the rules, so karma and point totals always match what the Chummer window shows.
+This is Chummer5a, the Shadowrun 5th Edition character builder, with an MCP server built in. While Chummer is running, [Claude Code](https://code.claude.com/docs) can:
+
+- create characters and open saved ones
+- edit the ones you have open live: priorities, attributes, skills, qualities, magic, contacts, gear and cyberware
+- check them for mistakes and unspent points
+- save them and export a printable PDF character sheet
+
+Chummer still enforces the rules, so karma and point totals always match what the Chummer window shows. Editing works during character creation; once a character is marked as created (career mode), Claude Code can still read it but not change it. New characters use the Shadowrun 5 core rulebook unless you ask for other books.
 
 ## What's in this folder
 
@@ -11,6 +18,7 @@ This is Chummer5a, the Shadowrun 5th Edition character builder, with an MCP serv
 | `CLAUDE-SETUP.md` | Full guide to installing Claude Code and connecting it to Chummer, including WSL and troubleshooting. |
 | `Setup-ClaudeCode.cmd` | One-click setup: connects Claude Code to Chummer from any folder and installs the character-building skill. |
 | `CLAUDE.md`, `.mcp.json`, `.claude\` | Let Claude Code work with Chummer when you start it in this folder. |
+| `Examples\` | Two finished starting characters (a face and an adept gunslinger) with their PDF sheets and build notes. Open the `.chum5` files in Chummer. |
 | `Chummer\` | The Chummer program itself, its data, and your settings and saves. You don't need to open it. |
 
 ## Quick start (Windows)
@@ -39,7 +47,7 @@ Your settings and saved characters live in `Chummer\settings` and `Chummer\saves
 
 If you saved characters somewhere else, there's nothing to copy for them.
 
-Don't use Chummer's built-in updater. It installs the official Chummer build, which doesn't have the MCP server. Get new versions from the [Releases page](https://github.com/mrjkey/chummer5a/releases).
+Chummer's built-in update check is turned off in this version, because it would install the official build, which doesn't have the MCP server. Get new versions from the [Releases page](https://github.com/mrjkey/chummer5a/releases). Report problems with this version on [its issues page](https://github.com/mrjkey/chummer5a/issues), not to the official Chummer project.
 
 ## License and source
 

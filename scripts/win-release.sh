@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build a clean Release of Chummer and its launcher on the Windows host and package them as
 # dist/Chummer5a-MCP-<version>.zip. Usage: scripts/win-release.sh [version]   (default: AssemblyVersion from Chummer.csproj)
-# Zip layout: docs, Claude Code setup and the Chummer5a.exe launcher at the top, the app itself in Chummer\.
+# Zip layout: docs, Claude Code setup, the Chummer5a.exe launcher and Examples\ (from characters/) at the top, the app itself in Chummer\.
 # See docs/releasing.md for publishing the zip as a GitHub release.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -18,13 +18,14 @@ STAGE="$DIST/$NAME"
 
 # Start from an empty output folder so settings, logs or characters from local test runs never end up in the zip
 rm -rf "$OUT"
-"$HERE/win-build.sh" -t:Rebuild
+# The version label shows in Chummer's title bar and the MCP server info; saves still record the plain AssemblyVersion
+"$HERE/win-build.sh" -t:Rebuild "-p:InformationalVersion=$VERSION"
 [ -f "$OUT/Chummer5.exe" ] || { echo "Build output not found at $OUT" >&2; exit 1; }
 win_cmd "\"$MSBUILD\" ChummerLauncher\\ChummerLauncher.csproj -restore -t:Rebuild -p:Configuration=Release -nologo -v:minimal"
 [ -f "$LAUNCHER" ] || { echo "Launcher not found at $LAUNCHER" >&2; exit 1; }
 
 rm -rf "$STAGE" "$DIST/$NAME.zip"
-mkdir -p "$STAGE/Chummer" "$STAGE/.claude/skills"
+mkdir -p "$STAGE/Chummer" "$STAGE/.claude/skills" "$STAGE/Examples"
 cp -a "$OUT/." "$STAGE/Chummer/"
 cp "$LAUNCHER" "$STAGE/"
 cp "$REPO/package/README.md" "$REPO/package/CLAUDE-SETUP.md" "$STAGE/"
@@ -33,6 +34,7 @@ cp "$REPO/package/CLAUDE.release.md" "$STAGE/CLAUDE.md"
 cp "$REPO/.mcp.json" "$STAGE/"
 cp -a "$REPO/.claude/skills/sr5-build-advisor" "$STAGE/.claude/skills/"
 sed 's/\r$//; s/$/\r/' "$REPO/package/Setup-ClaudeCode.cmd" > "$STAGE/Setup-ClaudeCode.cmd"
+cp "$REPO"/characters/*.{chum5,pdf,html,md} "$STAGE/Examples/"
 
 python3 -I - "$STAGE" "$DIST/$NAME.zip" <<'EOF'
 import os, sys, zipfile
