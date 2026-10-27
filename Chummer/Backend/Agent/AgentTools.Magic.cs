@@ -37,10 +37,21 @@ namespace Chummer.Agent
         {
             yield return new AgentTool("set_tradition",
                 "Choose the magician's tradition (search_catalog kind='tradition') or the technomancer's stream (kind='stream'), as the editor's "
-                + "tradition list does. It sets the drain attributes and the spirit types the character can summon.",
+                + "tradition list does. It sets the drain attributes and the spirit types the character can summon. The 'Custom' tradition "
+                + "(Street Grimoire) takes its own name, drain attributes and a spirit for each of the five types; a wrong choice lists the options.",
                 AgentTool.Schema(("id!", "string", "Tradition or stream id from search_catalog, or its exact English name."),
+                                 ("name", "string", "Custom tradition only: its name."),
+                                 ("drain", "string", "Custom tradition only: drain attributes, e.g. '{WIL} + {LOG}'."),
+                                 ("spirits", "object", "Custom tradition only: {combat, detection, health, illusion, manipulation}, each a spirit name, "
+                                                       + "e.g. 'Spirit of Fire'."),
                                  ("character", "string", CharacterArgDescription)),
                 SetTraditionAsync);
+            yield return new AgentTool("set_mystic_adept_power_points",
+                "Split a mystic adept's Magic between spellcasting and adept powers, as the magic tab's power point box does: each point bought gives "
+                + "one power point and costs karma. Only for mystic adepts whose settings don't use a second Magic attribute.",
+                AgentTool.Schema(("points!", "integer", "Points of Magic that go to the adept side (power points), from 0 to the character's Magic."),
+                                 ("character", "string", CharacterArgDescription)),
+                SetMysticAdeptPowerPointsAsync);
             yield return new AgentTool("add_mentor_spirit",
                 "Take the Mentor Spirit quality with a mentor (search_catalog kind='mentor') and its bonus choices, with no dialog. "
                 + "Most mentors offer a Magician and an Adept choice; only the ones that fit the character are allowed, and the error lists them.",
@@ -96,8 +107,11 @@ namespace Chummer.Agent
                 AddInitiationAsync);
             yield return new AgentTool("add_art",
                 "Learn a magical art (search_catalog kind='art', e.g. 'Centering', 'Quickening') at an initiation grade, as the editor does. "
-                + "Most metamagics need their art first.",
-                AgentTool.Schema(("id!", "string", "Art id from search_catalog, or its exact English name."),
+                + "Most metamagics need their art first. With `kind` it learns an enchantment (kind='enchantment', Street Grimoire) or an adept's "
+                + "power enhancement (kind='enhancement', Street Grimoire) instead, as the initiation tree's Add Enchantment/Add Enhancement do; an "
+                + "enhancement goes on its power when the character has it.",
+                AgentTool.Schema(("id!", "string", "Art, enchantment or enhancement id from search_catalog, or its exact English name."),
+                                 ("kind", "string", "'art' (default), 'enchantment' or 'enhancement'."),
                                  ("grade", "integer", "Initiation grade to learn it at. Default the highest grade."),
                                  ("character", "string", CharacterArgDescription)),
                 AddArtAsync);
@@ -127,12 +141,55 @@ namespace Chummer.Agent
                                           ?? throw new AgentToolException("No " + (blnStream ? "stream" : "tradition") + " '" + objArgs.Value<string>("id")
                                                                           + "' in the enabled books. Use search_catalog kind='" + (blnStream ? "stream" : "tradition") + "'.");
             string strId = xmlTradition.SelectSingleNodeAndCacheExpression("id", token)?.Value;
-            if (string.Equals(strId, Tradition.CustomMagicalTraditionGuidString, StringComparison.OrdinalIgnoreCase))
-                throw new AgentToolException("A custom tradition needs its spirits chosen by hand; ask the user to set it up in Chummer's editor.");
+            bool blnCustom = string.Equals(strId, Tradition.CustomMagicalTraditionGuidString, StringComparison.OrdinalIgnoreCase);
+            string strCustomName = objArgs.Value<string>("name")?.Trim();
+            string strDrain = objArgs.Value<string>("drain")?.Trim();
+            JObject objSpirits = objArgs["spirits"] as JObject;
+            string[] astrSpiritKinds = { "combat", "detection", "health", "illusion", "manipulation" };
+            string[] astrSpirits = new string[5];
+            if (!blnCustom)
+            {
+                if (!string.IsNullOrEmpty(strCustomName) || !string.IsNullOrEmpty(strDrain) || objSpirits != null)
+                    throw new AgentToolException("`name`, `drain` and `spirits` are only for the Custom tradition.");
+            }
+            else
+            {
+                // The choices the tradition panel's drain and spirit boxes offer for a custom tradition
+                XPathNavigator xmlTraditionsRoot = (await objCharacter.LoadDataXPathAsync("traditions.xml", token: token).ConfigureAwait(false))
+                    .SelectSingleNodeAndCacheExpression("/chummer", token);
+                List<string> lstDrains = CharacterCreate.GetDrainAttributeChoices(xmlTraditionsRoot, token).Select(x => x.Value?.ToString())
+                                                        .Where(x => !string.IsNullOrEmpty(x)).ToList();
+                List<string> lstSpirits = (await frmCreate.GetTraditionSpiritChoicesAsync(xmlTraditionsRoot, token).ConfigureAwait(false))
+                                          .Select(x => x.Value?.ToString()).Where(x => !string.IsNullOrEmpty(x)).ToList();
+                if (string.IsNullOrEmpty(strCustomName))
+                    throw new AgentToolException("A custom tradition needs a `name`.");
+                strDrain = lstDrains.Find(x => string.Equals(x.Replace(" ", string.Empty), (strDrain ?? string.Empty).Replace(" ", string.Empty),
+                                                             StringComparison.OrdinalIgnoreCase))
+                           ?? throw new AgentToolException("A custom tradition needs `drain`, one of: " + string.Join(", ", lstDrains) + ".");
+                for (int i = 0; i < 5; ++i)
+                {
+                    string strWanted = objSpirits?.Value<string>(astrSpiritKinds[i])?.Trim();
+                    astrSpirits[i] = lstSpirits.Find(x => string.Equals(x, strWanted, StringComparison.OrdinalIgnoreCase))
+                                     ?? throw new AgentToolException("A custom tradition needs `spirits." + astrSpiritKinds[i] + "`, one of: "
+                                                                     + string.Join(", ", lstSpirits) + ".");
+                }
+            }
+
             await frmCreate.SetTraditionAsync(strId, token).ConfigureAwait(false);
             Tradition objTradition = await objCharacter.GetMagicTraditionAsync(token).ConfigureAwait(false);
             if (!string.Equals(await objTradition.GetSourceIDStringAsync(token).ConfigureAwait(false), strId, StringComparison.OrdinalIgnoreCase))
                 throw new AgentToolException("Chummer did not take that " + (blnStream ? "stream" : "tradition") + ".");
+            if (blnCustom)
+            {
+                // What the custom tradition's name, drain and spirit boxes set
+                await objTradition.SetNameAsync(strCustomName, token).ConfigureAwait(false);
+                await objTradition.SetDrainExpressionAsync(strDrain, token).ConfigureAwait(false);
+                await objTradition.SetSpiritCombatAsync(astrSpirits[0], token).ConfigureAwait(false);
+                await objTradition.SetSpiritDetectionAsync(astrSpirits[1], token).ConfigureAwait(false);
+                await objTradition.SetSpiritHealthAsync(astrSpirits[2], token).ConfigureAwait(false);
+                await objTradition.SetSpiritIllusionAsync(astrSpirits[3], token).ConfigureAwait(false);
+                await objTradition.SetSpiritManipulationAsync(astrSpirits[4], token).ConfigureAwait(false);
+            }
             using (new FetchSafelyFromSafeObjectPool<List<ListItem>>(Utils.ListItemListPool, out List<ListItem> lstTypes))
             {
                 await Spirit.FillSpiritTypeChoicesAsync(objCharacter, objTradition, blnStream ? SpiritType.Sprite : SpiritType.Spirit, lstTypes, token)
@@ -507,6 +564,44 @@ namespace Chummer.Agent
             if (!await objCharacter.GetMAGEnabledAsync(token).ConfigureAwait(false))
                 throw new AgentToolException("Only awakened characters learn magical arts.");
             InitiationGrade objGrade = await GetInitiationGradeAsync(objCharacter, objArgs, false, token).ConfigureAwait(false);
+            switch (objArgs.Value<string>("kind")?.Trim().ToLowerInvariant())
+            {
+                case null:
+                case "":
+                case "art":
+                    break;
+                case "enchantment":
+                {
+                    XmlNode xmlEnchantment = await GetDataNodeAsync(objCharacter, "spells.xml", "/chummer/spells/spell", RequiredString(objArgs, "id"), token)
+                        .ConfigureAwait(false);
+                    if (xmlEnchantment["category"]?.InnerText != "Enchantments")
+                        throw new AgentToolException(xmlEnchantment["name"]?.InnerText + " isn't an enchantment. search_catalog(kind='enchantment') lists them.");
+                    await EnsureBookEnabledAsync(xmlEnchantment, objCharacter, token).ConfigureAwait(false);
+                    await EnsureRequirementsMetAsync(xmlEnchantment, objCharacter, token).ConfigureAwait(false);
+                    Spell objSpell = await frmCreate.AddEnchantmentFromNodeAsync(objGrade, xmlEnchantment, token).ConfigureAwait(false)
+                                     ?? throw new AgentToolException("The enchantment was not added.");
+                    return await FinishEditAsync(frmCreate, "Learned the enchantment " + await objSpell.GetCurrentDisplayNameAsync(token).ConfigureAwait(false)
+                                                            + " at grade " + objGrade.Grade.ToString(GlobalSettings.InvariantCultureInfo) + " (id " + objSpell.InternalId + ").",
+                                                 token).ConfigureAwait(false);
+                }
+                case "enhancement":
+                {
+                    if (!await objCharacter.GetAdeptEnabledAsync(token).ConfigureAwait(false))
+                        throw new AgentToolException("Only adepts learn power enhancements.");
+                    XmlNode xmlEnhancement = await GetDataNodeAsync(objCharacter, "powers.xml", "/chummer/enhancements/enhancement", RequiredString(objArgs, "id"), token)
+                        .ConfigureAwait(false);
+                    await EnsureBookEnabledAsync(xmlEnhancement, objCharacter, token).ConfigureAwait(false);
+                    await EnsureRequirementsMetAsync(xmlEnhancement, objCharacter, token).ConfigureAwait(false);
+                    Enhancement objEnhancement = await frmCreate.AddEnhancementFromNodeAsync(objGrade, xmlEnhancement, token).ConfigureAwait(false)
+                                                 ?? throw new AgentToolException("The enhancement was not added.");
+                    return await FinishEditAsync(frmCreate, "Learned the enhancement " + await objEnhancement.GetCurrentDisplayNameAsync(token).ConfigureAwait(false)
+                                                            + " at grade " + objGrade.Grade.ToString(GlobalSettings.InvariantCultureInfo) + " (id " + objEnhancement.InternalId + ").",
+                                                 token).ConfigureAwait(false);
+                }
+                default:
+                    throw new AgentToolException("`kind` must be 'art', 'enchantment' or 'enhancement'.");
+            }
+
             XmlNode xmlArt = await GetDataNodeAsync(objCharacter, "metamagic.xml", "/chummer/arts/art", RequiredString(objArgs, "id"), token).ConfigureAwait(false);
             string strArt = xmlArt["name"]?.InnerText;
             if (await objCharacter.Arts.AnyAsync(x => x.Name == strArt, token).ConfigureAwait(false))
@@ -548,6 +643,26 @@ namespace Chummer.Agent
             return await FinishEditAsync(frmCreate, "Learned " + await objMetamagic.GetCurrentDisplayNameAsync(token).ConfigureAwait(false)
                                                     + " at grade " + intGrade.ToString(GlobalSettings.InvariantCultureInfo) + " (id " + objMetamagic.InternalId + ").",
                                          token).ConfigureAwait(false);
+        }
+
+        private static async Task<object> SetMysticAdeptPowerPointsAsync(JObject objArgs, CancellationToken token)
+        {
+            CharacterCreate frmCreate = await GetCreateFormAsync(objArgs, token).ConfigureAwait(false);
+            Character objCharacter = frmCreate.CharacterObject;
+            // The box is only shown when this is true
+            if (!await objCharacter.GetUseMysticAdeptPPsAsync(token).ConfigureAwait(false))
+                throw new AgentToolException(await objCharacter.GetIsMysticAdeptAsync(token).ConfigureAwait(false)
+                                                 ? "This character's settings give mystic adepts a second Magic attribute instead; raise it with set_attribute."
+                                                 : "Only mystic adepts split their Magic between spells and powers.");
+            int intPoints = OptionalInt(objArgs, "points") ?? throw new AgentToolException("`points` is required.");
+            int intMagic = await (await objCharacter.GetAttributeAsync("MAG", token: token).ConfigureAwait(false)).GetTotalValueAsync(token).ConfigureAwait(false);
+            if (intPoints < 0 || intPoints > intMagic)
+                throw new AgentToolException("`points` must be from 0 to the character's Magic, " + intMagic.ToString(GlobalSettings.InvariantCultureInfo) + ".");
+            await objCharacter.SetMysticAdeptPowerPointsAsync(intPoints, token).ConfigureAwait(false);
+            return await FinishEditAsync(frmCreate, intPoints.ToString(GlobalSettings.InvariantCultureInfo) + " of " + intMagic.ToString(GlobalSettings.InvariantCultureInfo)
+                                                    + " Magic now goes to adept powers ("
+                                                    + (await objCharacter.GetPowerPointsTotalAsync(token).ConfigureAwait(false)).ToString(GlobalSettings.InvariantCultureInfo)
+                                                    + " power points).", token).ConfigureAwait(false);
         }
     }
 }

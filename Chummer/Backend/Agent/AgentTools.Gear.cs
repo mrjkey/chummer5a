@@ -136,10 +136,80 @@ namespace Chummer.Agent
                                  ("visibility", "string", "e.g. 'External', 'Internal', 'Concealed'. Default the first the size allows."),
                                  ("flexibility", "string", "e.g. 'Fixed', 'Flexible', 'Turret'. Default the first the size allows."),
                                  ("control", "string", "e.g. 'Remote', 'Manual', 'Armored Manual'. Default the first the size allows."),
+                                 ("mods", "array", "Weapon mount add-ons (search_catalog kind='weaponmountmod', Rigger 5.0), by id or name, e.g. 'Pop-Out Weapon Mount "
+                                                   + "Add-on'. Only add-ons the vehicle takes are allowed."),
                                  ("free", "boolean", FreeDescription),
                                  ("black_market", "boolean", BlackMarketDescription),
                                  ("character", "string", CharacterArgDescription)),
                 AddWeaponMountAsync);
+            yield return new AgentTool("edit_weapon_mount",
+                "Change a weapon mount the character built, as the vehicle tab's Edit Weapon Mount does: its size, visibility, flexibility and "
+                + "control, and its add-ons. Only the fields passed change; options the new size doesn't allow fall back to the first it does. "
+                + "A mount that comes with the vehicle only changes its add-ons.",
+                AgentTool.Schema(("id!", "string", "Weapon mount id from list_items."),
+                                 ("size", "string", "New size, by name or id."),
+                                 ("visibility", "string", "New visibility."),
+                                 ("flexibility", "string", "New flexibility."),
+                                 ("control", "string", "New control."),
+                                 ("add_mods", "array", "Add-ons to fit, by id or name (search_catalog kind='weaponmountmod')."),
+                                 ("remove_mods", "array", "Add-ons to take off, by id (from list_items) or name."),
+                                 ("character", "string", CharacterArgDescription)),
+                EditWeaponMountAsync);
+            yield return new AgentTool("add_drug",
+                "Buy a premade drug (search_catalog kind='drug'), as the Drugs tab's Add Drug does, or put a dose into ware that holds drugs (e.g. a "
+                + "drug reservoir), as the cyberware's Add Drug menu item does. Checks books, requirements and availability.",
+                AgentTool.Schema(("id!", "string", "Drug id from search_catalog, or its exact English name."),
+                                 ("grade", "string", "Drug grade, e.g. 'Standard' (default), 'Street Cooked', 'Pharmaceutical', 'Designer'."),
+                                 ("quantity", "integer", "Doses. Default 1."),
+                                 ("parent", "string", "Id of cyberware or bioware that holds drugs, from list_items, to put the dose into."),
+                                 ("free", "boolean", FreeDescription),
+                                 ("black_market", "boolean", BlackMarketDescription),
+                                 ("character", "string", CharacterArgDescription)),
+                AddDrugAsync);
+            yield return new AgentTool("add_cyberware_suite",
+                "Install a whole cyberware or bioware suite (search_catalog kind='cyberwaresuite' or 'biowaresuite') at its grade, as Special > Add "
+                + "Cyberware/Bioware Suite does. Suites come from custom data, such as ones saved with create_cyberware_suite.",
+                AgentTool.Schema(("id!", "string", "Suite id from search_catalog, or its exact name."),
+                                 ("kind", "string", "'cyberware' (default) or 'bioware'."),
+                                 ("character", "string", CharacterArgDescription)),
+                AddCyberwareSuiteAsync);
+            yield return new AgentTool("create_cyberware_suite",
+                "Save all of the character's cyberware (or bioware) as a named suite in a custom data file, as Special > Create Cyberware/Bioware "
+                + "Suite does. All of it must share one grade. Chummer may need a restart before the new suite shows in search_catalog.",
+                AgentTool.Schema(("name!", "string", "The suite's name."),
+                                 ("kind", "string", "'cyberware' (default) or 'bioware'."),
+                                 ("file_name", "string", "Data file to add it to, e.g. 'custom_cyberware.xml' (the default). It must start with 'custom_' and end "
+                                                         + "with '_cyberware.xml' or '_bioware.xml'."),
+                                 ("character", "string", CharacterArgDescription)),
+                CreateCyberwareSuiteAsync);
+            yield return new AgentTool("add_packs_kit",
+                "Add a PACKS kit (search_catalog kind='packs'): the qualities, martial arts, spells, complex forms, programs, starting nuyen, armor, "
+                + "weapons, gear, cyberware, lifestyles and vehicles it holds, as Special > Add PACKS Kit does.",
+                AgentTool.Schema(("id!", "string", "Kit name from search_catalog."),
+                                 ("category", "string", "The kit's category, when kits in different categories share a name."),
+                                 ("martial_art", "string", "For kits that let the character pick a martial art: its id or name."),
+                                 ("character", "string", CharacterArgDescription)),
+                AddPACKSKitAsync);
+            yield return new AgentTool("create_packs_kit",
+                "Save parts of the character as a custom PACKS kit, as Special > Create PACKS Kit does. The kit goes in the PACKS folder under the "
+                + "'Custom' category, where add_packs_kit can find it.",
+                AgentTool.Schema(("name!", "string", "The kit's name."),
+                                 ("parts", "array", "Which parts to save. Default all: " + string.Join(", ", CreatePACKSKit.KitParts) + "."),
+                                 ("file_name", "string", "Kit file, default 'custom_packs.xml'."),
+                                 ("character", "string", CharacterArgDescription)),
+                CreatePACKSKitAsync);
+            yield return new AgentTool("add_natural_weapon",
+                "Make a natural weapon (claws, a bite, horns...), as the weapons tab's Create Natural Weapon dialog does. It costs nothing; the quality "
+                + "or power that grants it is added separately.",
+                AgentTool.Schema(("name!", "string", "The weapon's name, e.g. 'Claws'."),
+                                 ("skill", "string", "Combat skill it uses. Default 'Unarmed Combat'."),
+                                 ("damage", "string", "Base damage: 'STR/2' (default), 'STR', or a number from 1 to 20."),
+                                 ("damage_bonus", "integer", "Added to the base damage. Default 0."),
+                                 ("damage_type", "string", "'P' (physical, default) or 'S' (stun)."),
+                                 ("ap", "integer", "Armor penetration. Default 0."),
+                                 ("reach", "integer", "Reach. Default 0."),
+                                 ("character", "string", CharacterArgDescription)),
+                AddNaturalWeaponAsync);
             yield return new AgentTool("add_lifestyle",
                 "Add a lifestyle, as the Lifestyles tab's Add Lifestyle (or Add Advanced Lifestyle) dialog does: a base lifestyle from "
                 + "search_catalog(kind='lifestyle'), paid for some months, with optional roommates, cost percentage, trust fund and lifestyle qualities. "
@@ -1317,6 +1387,16 @@ namespace Chummer.Agent
                 await objMount.CreateAsync(xmlSize, token).ConfigureAwait(false);
                 objMount.DiscountCost = blnBlackMarket;
                 await CreateWeaponMount.SetWeaponMountOptionsAsync(objCharacter, objMount, xmlControl, xmlFlexibility, xmlVisibility, token).ConfigureAwait(false);
+                if (objArgs["mods"] is JArray objMods)
+                {
+                    foreach (JToken objModId in objMods)
+                    {
+                        XmlNode xmlMod = await GetWeaponMountModNodeAsync(objCharacter, objVehicle, objModId.ToString(), token).ConfigureAwait(false);
+                        await objMount.Mods.AddAsync(await CreateWeaponMount.CreateMountModAsync(objCharacter, objVehicle, xmlMod, 0, false, blnFree, token)
+                                                                            .ConfigureAwait(false), token).ConfigureAwait(false);
+                    }
+                }
+
                 if (frmCharacter is CharacterCareer frmCareer)
                 {
                     string strRefusal = await CreateWeaponMount.CheckCareerPurchaseAsync(objCharacter, objVehicle, objMount,
@@ -1344,6 +1424,108 @@ namespace Chummer.Agent
 
             return await FinishAnyEditAsync(frmCharacter, "Built " + await objMount.GetCurrentDisplayNameAsync(token).ConfigureAwait(false)
                                                     + " on " + objVehicle.Name + " (id " + objMount.InternalId + ").", token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// A weapon mount add-on the Select Vehicle Mod dialog lists for this vehicle's mounts: in the enabled books, fitting the vehicle, within availability.
+        /// </summary>
+        private static async Task<XmlNode> GetWeaponMountModNodeAsync(Character objCharacter, Vehicle objVehicle, string strId, CancellationToken token)
+        {
+            XmlNode xmlMod = await GetDataNodeAsync(objCharacter, "vehicles.xml", "/chummer/weaponmountmods/mod", strId.Trim(), token).ConfigureAwait(false);
+            if (await objCharacter.GetIgnoreRulesAsync(token).ConfigureAwait(false))
+                return xmlMod;
+            string strName = xmlMod["name"]?.InnerText;
+            await EnsureBookEnabledAsync(xmlMod, objCharacter, token).ConfigureAwait(false);
+            if (xmlMod["optionaldrone"] != null
+                && !await (await objCharacter.GetSettingsAsync(token).ConfigureAwait(false)).GetDroneModsAsync(token).ConfigureAwait(false))
+                throw new AgentToolException(strName + " needs the optional drone modification rules, which this character's settings don't use.");
+            if (!await objVehicle.CheckModRequirementsAsync(xmlMod.CreateNavigator(), token).ConfigureAwait(false))
+                throw new AgentToolException(strName + " doesn't fit " + objVehicle.Name + ".");
+            if (!await SelectionShared.CheckAvailRestrictionAsync(xmlMod, objCharacter, 1, 0, token).ConfigureAwait(false))
+                throw new AgentToolException(strName + " is above the availability limit at character creation.");
+            return xmlMod;
+        }
+
+        private static async Task<object> EditWeaponMountAsync(JObject objArgs, CancellationToken token)
+        {
+            CharacterCreate frmCreate = await GetCreateFormAsync(objArgs, token).ConfigureAwait(false);
+            Character objCharacter = frmCreate.CharacterObject;
+            OwnedItem objOwned = await FindItemAsync(objCharacter, RequiredString(objArgs, "id"), token).ConfigureAwait(false);
+            if (!(objOwned.Item is WeaponMount objMount))
+                throw new AgentToolException(await GetItemNameAsync(objOwned.Item, token).ConfigureAwait(false) + " isn't a weapon mount.");
+            Vehicle objVehicle = objMount.Parent;
+            List<string> lstChanged = new List<string>();
+            string strSize = objArgs.Value<string>("size")?.Trim();
+            string[] astrOptions = { objArgs.Value<string>("visibility"), objArgs.Value<string>("flexibility"), objArgs.Value<string>("control") };
+            if (!string.IsNullOrEmpty(strSize) || astrOptions.Any(x => !string.IsNullOrWhiteSpace(x)))
+            {
+                // As in the dialog, a mount that came with the vehicle keeps its size and options
+                if (objMount.IncludedInVehicle)
+                    throw new AgentToolException(objMount.Name + " comes with " + objVehicle.Name + "; only its add-ons can change.");
+                XmlDocument xmlDoc = await objCharacter.LoadDataAsync("vehicles.xml", token: token).ConfigureAwait(false);
+                XmlNode xmlSize = PickWeaponMountChoice(xmlDoc, await CreateWeaponMount.GetAllowedSizesAsync(objCharacter, objVehicle, token).ConfigureAwait(false),
+                                                        string.IsNullOrEmpty(strSize) ? objMount.SourceIDString : strSize, "size", objVehicle.Name);
+                (List<ListItem> lstVisibility, List<ListItem> lstFlexibility, List<ListItem> lstControl)
+                    = await CreateWeaponMount.GetAllowedOptionsAsync(objCharacter, objVehicle, xmlSize["id"]?.InnerText, token).ConfigureAwait(false);
+                string strSizeName = xmlSize["name"]?.InnerText;
+                XmlNode[] axmlOptions = new XmlNode[3];
+                string[] astrCategories = { "Visibility", "Flexibility", "Control" };
+                List<ListItem>[] alstChoices = { lstVisibility, lstFlexibility, lstControl };
+                for (int i = 0; i < 3; ++i)
+                {
+                    string strWanted = astrOptions[i];
+                    if (string.IsNullOrWhiteSpace(strWanted))
+                    {
+                        // Keep the current choice when the size still allows it
+                        string strCurrent = objMount.WeaponMountOptions.FirstOrDefault(x => x.Category == astrCategories[i])?.SourceIDString;
+                        if (!string.IsNullOrEmpty(strCurrent) && alstChoices[i].Exists(x => string.Equals(x.Value.ToString(), strCurrent, StringComparison.OrdinalIgnoreCase)))
+                            strWanted = strCurrent;
+                    }
+                    else
+                        lstChanged.Add(astrCategories[i].ToLowerInvariant());
+
+                    axmlOptions[i] = PickWeaponMountChoice(xmlDoc, alstChoices[i], strWanted, astrCategories[i].ToLowerInvariant(), strSizeName);
+                }
+
+                if (!string.Equals(xmlSize["id"]?.InnerText, objMount.SourceIDString, StringComparison.OrdinalIgnoreCase))
+                {
+                    await objMount.CreateAsync(xmlSize, token).ConfigureAwait(false);
+                    lstChanged.Add("size");
+                }
+
+                await CreateWeaponMount.SetWeaponMountOptionsAsync(objCharacter, objMount, axmlOptions[2], axmlOptions[1], axmlOptions[0], token).ConfigureAwait(false);
+            }
+
+            if (objArgs["remove_mods"] is JArray objRemove)
+            {
+                foreach (JToken objModId in objRemove)
+                {
+                    string strModId = objModId.ToString().Trim();
+                    VehicleMod objMod = await FindOwnedAsync(await objMount.Mods.ToListAsync(token).ConfigureAwait(false), strModId, token).ConfigureAwait(false)
+                                        ?? throw new AgentToolException(objMount.Name + " has no add-on '" + strModId + "'.");
+                    if (objMod.IncludedInVehicle)
+                        throw new AgentToolException(objMod.Name + " comes with the mount and can't be taken off.");
+                    await objMod.RemoveAsync(false, token).ConfigureAwait(false);
+                    await objMount.Mods.RemoveAsync(objMod, token).ConfigureAwait(false);
+                    lstChanged.Add("removed " + objMod.Name);
+                }
+            }
+
+            if (objArgs["add_mods"] is JArray objAdd)
+            {
+                foreach (JToken objModId in objAdd)
+                {
+                    XmlNode xmlMod = await GetWeaponMountModNodeAsync(objCharacter, objVehicle, objModId.ToString(), token).ConfigureAwait(false);
+                    VehicleMod objMod = await CreateWeaponMount.CreateMountModAsync(objCharacter, objVehicle, xmlMod, 0, false, false, token).ConfigureAwait(false);
+                    await objMount.Mods.AddAsync(objMod, token).ConfigureAwait(false);
+                    lstChanged.Add("added " + objMod.Name + " (id " + objMod.InternalId + ")");
+                }
+            }
+
+            if (lstChanged.Count == 0)
+                throw new AgentToolException("Nothing to change; pass size, an option, add_mods or remove_mods.");
+            return await FinishEditAsync(frmCreate, await objMount.GetCurrentDisplayNameAsync(token).ConfigureAwait(false) + ": " + string.Join(", ", lstChanged) + ".",
+                                         token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -1448,6 +1630,277 @@ namespace Chummer.Agent
             }
 
             return null;
+        }
+
+        private static async Task<object> AddDrugAsync(JObject objArgs, CancellationToken token)
+        {
+            CharacterShared frmCharacter = await GetCharacterFormAsync(objArgs, token).ConfigureAwait(false);
+            Character objCharacter = frmCharacter.CharacterObject;
+            bool blnIgnoreRules = await objCharacter.GetIgnoreRulesAsync(token).ConfigureAwait(false);
+            bool blnFree = objArgs.Value<bool?>("free") == true;
+            decimal decMarkup = GetMarkup(objArgs, frmCharacter);
+            int intQuantity = OptionalInt(objArgs, "quantity") ?? 1;
+            if (intQuantity < 1)
+                throw new AgentToolException("`quantity` must be at least 1.");
+
+            // Ware that holds drugs only takes the drug categories it names
+            Cyberware objParent = null;
+            string strParent = objArgs.Value<string>("parent")?.Trim();
+            if (!string.IsNullOrEmpty(strParent))
+            {
+                OwnedItem objParentItem = await FindItemAsync(objCharacter, strParent, token).ConfigureAwait(false);
+                objParent = objParentItem.Item as Cyberware;
+                if (objParent?.AllowDrug == null)
+                    throw new AgentToolException(await GetItemNameAsync(objParentItem.Item, token).ConfigureAwait(false) + " can't hold drugs.");
+                if (frmCharacter is CharacterCareer)
+                    throw new AgentToolException("In career mode, drugs go into ware through the editor (its cyberware's Add Drug menu item).");
+            }
+
+            // The grades the Select Drug dialog offers (they come from Chemical Fortitude; without it drugs have no grade)
+            string strGrade = objArgs.Value<string>("grade")?.Trim();
+            List<Grade> lstGrades = await objCharacter.GetGradesListAsync(Improvement.ImprovementSource.Drug, blnIgnoreRules, token).ConfigureAwait(false);
+            Grade objGrade = null;
+            if (!string.IsNullOrEmpty(strGrade) || lstGrades.Count > 0)
+            {
+                if (string.IsNullOrEmpty(strGrade))
+                    strGrade = lstGrades.Exists(x => x.Name == "Standard") ? "Standard" : lstGrades[0].Name;
+                foreach (Grade objLoopGrade in lstGrades)
+                {
+                    if (string.Equals(objLoopGrade.Name, strGrade, StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(await objLoopGrade.GetCurrentDisplayNameAsync(token).ConfigureAwait(false), strGrade, StringComparison.OrdinalIgnoreCase))
+                    {
+                        objGrade = objLoopGrade;
+                        break;
+                    }
+                }
+
+                if (objGrade == null)
+                    throw new AgentToolException("'" + strGrade + "' is not an available drug grade."
+                                                 + (lstGrades.Count > 0 ? " Options: " + string.Join(", ", lstGrades.Select(x => x.Name)) + "." : string.Empty));
+            }
+
+            XmlNode objXmlDrug = await GetBuyableNodeAsync(objCharacter, "drugs.xml", "/chummer/drugs/drug", RequiredString(objArgs, "id"), 1, objGrade?.Avail ?? 0, token)
+                .ConfigureAwait(false);
+            string strName = objXmlDrug["name"]?.InnerText;
+            if (objParent != null && !blnIgnoreRules)
+            {
+                string strCategories = CharacterShared.GetAllowedDrugCategories(objParent, token);
+                if (!string.IsNullOrEmpty(strCategories)
+                    && !strCategories.Split(',').Contains(objXmlDrug["category"]?.InnerText ?? string.Empty))
+                    throw new AgentToolException(objParent.Name + " only holds " + strCategories.Replace(",", ", ") + ".");
+            }
+
+            Drug objDrug = await Drug.CreateFromCatalogAsync(objCharacter, objXmlDrug["id"]?.InnerText ?? strName, objGrade, token: token).ConfigureAwait(false)
+                           ?? throw new AgentToolException(strName + " could not be created.");
+            objDrug.DiscountCost = objArgs.Value<bool?>("black_market") == true;
+            objDrug.Quantity = intQuantity;
+            if (objParent != null)
+            {
+                try
+                {
+                    await CharacterShared.AttachDrugToCyberwareAsync(objParent, objDrug, token).ConfigureAwait(false);
+                }
+                catch
+                {
+                    await objDrug.DisposeAsync().ConfigureAwait(false);
+                    throw;
+                }
+            }
+            else
+            {
+                // Check the price here so the career editor's "not enough nuyen" message box never opens
+                if (frmCharacter is CharacterCareer && !blnFree
+                    && await frmCharacter.GetCareerDrugPurchaseCostAsync(objDrug, decMarkup, token).ConfigureAwait(false)
+                    > await objCharacter.GetNuyenAsync(token).ConfigureAwait(false))
+                {
+                    await objDrug.DisposeAsync().ConfigureAwait(false);
+                    throw new AgentToolException("The character can't afford " + strName + ".");
+                }
+
+                if (!await frmCharacter.AddDrugToCharacterAsync(objDrug, decMarkup, blnFree, token).ConfigureAwait(false))
+                    throw new AgentToolException("The character can't afford " + strName + ".");
+            }
+
+            return await FinishAnyEditAsync(frmCharacter, "Added " + intQuantity.ToString(GlobalSettings.InvariantCultureInfo) + " dose(s) of "
+                                                          + await objDrug.GetCurrentDisplayNameAsync(token).ConfigureAwait(false)
+                                                          + (objParent != null ? " to " + objParent.Name : string.Empty) + " (id " + objDrug.InternalId + ").",
+                                            token).ConfigureAwait(false);
+        }
+
+        private static Improvement.ImprovementSource GetWareSource(JObject objArgs)
+        {
+            switch (objArgs.Value<string>("kind")?.Trim().ToLowerInvariant())
+            {
+                case null:
+                case "":
+                case "cyberware":
+                    return Improvement.ImprovementSource.Cyberware;
+                case "bioware":
+                    return Improvement.ImprovementSource.Bioware;
+                default:
+                    throw new AgentToolException("`kind` must be 'cyberware' or 'bioware'.");
+            }
+        }
+
+        private static async Task<object> AddCyberwareSuiteAsync(JObject objArgs, CancellationToken token)
+        {
+            CharacterCreate frmCreate = await GetCreateFormAsync(objArgs, token).ConfigureAwait(false);
+            Character objCharacter = frmCreate.CharacterObject;
+            Improvement.ImprovementSource eSource = GetWareSource(objArgs);
+            string strType = eSource == Improvement.ImprovementSource.Cyberware ? "cyberware" : "bioware";
+            // Reload the file, as the Add Suite menu item does, so suites saved since Chummer started are found
+            XmlDocument objXmlDocument = await objCharacter.LoadDataAsync(strType + ".xml", string.Empty, true, token).ConfigureAwait(false);
+            string strId = RequiredString(objArgs, "id");
+            XmlNode xmlSuite = objXmlDocument.TryGetNodeByNameOrId("/chummer/suites/suite", strId)
+                               ?? throw new AgentToolException("There is no " + strType + " suite '" + strId + "'. Use search_catalog(kind='" + strType + "suite').");
+            if (!await objCharacter.GetIgnoreRulesAsync(token).ConfigureAwait(false)
+                && !await SelectCyberwareSuite.IsSuiteAllowedAsync(objCharacter, xmlSuite, eSource, token).ConfigureAwait(false))
+                throw new AgentToolException("The character can't take " + xmlSuite["name"]?.InnerText + " (its grade, " + xmlSuite["grade"]?.InnerText
+                                             + ", isn't available to them).");
+            List<Cyberware> lstAdded = await frmCreate.AddCyberwareSuiteFromNodeAsync(xmlSuite, eSource, token).ConfigureAwait(false);
+            List<string> lstNames = new List<string>(lstAdded.Count);
+            foreach (Cyberware objCyberware in lstAdded)
+                lstNames.Add(await objCyberware.GetCurrentDisplayNameAsync(token).ConfigureAwait(false) + " (id " + objCyberware.InternalId + ")");
+            return await FinishEditAsync(frmCreate, "Installed the " + xmlSuite["name"]?.InnerText + " suite: " + string.Join(", ", lstNames) + ".", token)
+                .ConfigureAwait(false);
+        }
+
+        private static async Task<object> CreateCyberwareSuiteAsync(JObject objArgs, CancellationToken token)
+        {
+            CharacterShared frmCharacter = await GetCharacterFormAsync(objArgs, token).ConfigureAwait(false);
+            Character objCharacter = frmCharacter.CharacterObject;
+            Improvement.ImprovementSource eSource = GetWareSource(objArgs);
+            string strName = RequiredString(objArgs, "name");
+            string strFileName = objArgs.Value<string>("file_name")?.Trim();
+            if (string.IsNullOrEmpty(strFileName))
+                strFileName = "custom_" + (eSource == Improvement.ImprovementSource.Cyberware ? "cyberware" : "bioware") + ".xml";
+            (string strError, string _) = await CreateCyberwareSuite.CheckCanCreateSuiteAsync(objCharacter, eSource, token).ConfigureAwait(false);
+            if (string.IsNullOrEmpty(strError))
+                (strError, _) = await CreateCyberwareSuite.WriteSuiteAsync(objCharacter, eSource, strName, strFileName, token).ConfigureAwait(false);
+            if (!string.IsNullOrEmpty(strError))
+                throw new AgentToolException(strError);
+            return new { result = "Saved the suite '" + strName + "' to " + System.IO.Path.Combine(Utils.GetDataFolderPath, strFileName.CleanForFileName()) + "." };
+        }
+
+        private static async Task<object> AddPACKSKitAsync(JObject objArgs, CancellationToken token)
+        {
+            CharacterCreate frmCreate = await GetCreateFormAsync(objArgs, token).ConfigureAwait(false);
+            Character objCharacter = frmCreate.CharacterObject;
+            string strId = RequiredString(objArgs, "id");
+            string strCategory = objArgs.Value<string>("category")?.Trim();
+            XmlDocument objXmlDocument = await objCharacter.LoadDataAsync("packs.xml", token: token).ConfigureAwait(false);
+            // The Select PACKS Kit dialog lists every kit that isn't hidden; kit names only repeat across categories
+            string strFilter = "not(hide)" + (string.IsNullOrEmpty(strCategory) ? string.Empty : " and category = " + strCategory.CleanXPath());
+            List<XmlNode> lstKits = new List<XmlNode>();
+            using (XmlNodeList xmlKits = objXmlDocument.SelectNodes("/chummer/packs/pack[" + strFilter + " and (id = " + strId.CleanXPath() + " or name = "
+                                                                   + strId.CleanXPath() + ")]"))
+            {
+                if (xmlKits != null)
+                    lstKits.AddRange(xmlKits.Cast<XmlNode>());
+            }
+
+            if (lstKits.Count == 0)
+                throw new AgentToolException("There is no PACKS kit '" + strId + "'" + (string.IsNullOrEmpty(strCategory) ? string.Empty : " in " + strCategory)
+                                             + ". Use search_catalog(kind='packs').");
+            if (lstKits.Count > 1)
+                throw new AgentToolException("Kits in several categories are named '" + strId + "'; pass `category`. Options: "
+                                             + string.Join(", ", lstKits.Select(x => x["category"]?.InnerText)) + ".");
+            XmlNode xmlKit = lstKits[0];
+
+            // A kit that lets the character pick a martial art needs the pick before anything is added
+            string strMartialArt = objArgs.Value<string>("martial_art")?.Trim();
+            XmlElement xmlSelectMartialArt = xmlKit["selectmartialart"];
+            if (xmlSelectMartialArt != null && string.IsNullOrEmpty(strMartialArt))
+            {
+                strMartialArt = xmlSelectMartialArt.Attributes["select"]?.InnerText;
+                if (string.IsNullOrEmpty(strMartialArt))
+                    throw new AgentToolException(xmlKit["name"]?.InnerText + " lets the character pick a martial art; pass `martial_art` (search_catalog kind='martialart').");
+            }
+
+            if (!string.IsNullOrEmpty(strMartialArt))
+            {
+                XmlNode xmlMartialArt = await GetDataNodeAsync(objCharacter, "martialarts.xml", "/chummer/martialarts/martialart", strMartialArt, token).ConfigureAwait(false);
+                await EnsureBookEnabledAsync(xmlMartialArt, objCharacter, token).ConfigureAwait(false);
+                await EnsureRequirementsMetAsync(xmlMartialArt, objCharacter, token).ConfigureAwait(false);
+                strMartialArt = xmlMartialArt["id"]?.InnerText ?? strMartialArt;
+            }
+
+            await frmCreate.AddPACKSKitFromNodeAsync(xmlKit, (x, t) => Task.FromResult(strMartialArt ?? string.Empty), token).ConfigureAwait(false);
+            return await FinishEditAsync(frmCreate, "Added the " + xmlKit["name"]?.InnerText + " kit. Use list_items to see what it added.", token).ConfigureAwait(false);
+        }
+
+        private static async Task<object> CreatePACKSKitAsync(JObject objArgs, CancellationToken token)
+        {
+            CharacterShared frmCharacter = await GetCharacterFormAsync(objArgs, token).ConfigureAwait(false);
+            string strName = RequiredString(objArgs, "name");
+            string strFileName = objArgs.Value<string>("file_name")?.Trim();
+            if (string.IsNullOrEmpty(strFileName))
+                strFileName = "custom_packs.xml";
+            HashSet<string> setParts = new HashSet<string>(CreatePACKSKit.KitParts);
+            if (objArgs["parts"] is JArray objParts)
+            {
+                setParts.Clear();
+                foreach (JToken objPart in objParts)
+                {
+                    string strPart = objPart.ToString().Trim().ToLowerInvariant();
+                    if (!CreatePACKSKit.KitParts.Contains(strPart))
+                        throw new AgentToolException("Unknown part '" + strPart + "'. Options: " + string.Join(", ", CreatePACKSKit.KitParts) + ".");
+                    setParts.Add(strPart);
+                }
+            }
+
+            (string strError, string _) = await CreatePACKSKit.WriteKitAsync(frmCharacter.CharacterObject, strName, strFileName, setParts, token).ConfigureAwait(false);
+            if (!string.IsNullOrEmpty(strError))
+                throw new AgentToolException(strError);
+            return new { result = "Saved the PACKS kit '" + strName + "' (category Custom) with: " + string.Join(", ", CreatePACKSKit.KitParts.Where(setParts.Contains)) + "." };
+        }
+
+        private static async Task<object> AddNaturalWeaponAsync(JObject objArgs, CancellationToken token)
+        {
+            CharacterShared frmCharacter = await GetCharacterFormAsync(objArgs, token).ConfigureAwait(false);
+            Character objCharacter = frmCharacter.CharacterObject;
+            string strName = RequiredString(objArgs, "name");
+            // The skills the dialog lists: the combat active skills
+            string strSkill = objArgs.Value<string>("skill")?.Trim();
+            if (string.IsNullOrEmpty(strSkill))
+                strSkill = "Unarmed Combat";
+            List<string> lstSkills = (await objCharacter.LoadDataXPathAsync("skills.xml", token: token).ConfigureAwait(false))
+                                     .Select("/chummer/skills/skill[category = \"Combat Active\"]/name").Cast<XPathNavigator>().Select(x => x.Value).ToList();
+            string strFoundSkill = lstSkills.Find(x => string.Equals(x, strSkill, StringComparison.OrdinalIgnoreCase))
+                                   ?? throw new AgentToolException("'" + strSkill + "' isn't a combat skill. Options: " + string.Join(", ", lstSkills) + ".");
+            string strDamage = objArgs.Value<string>("damage")?.Trim().ToUpperInvariant().Replace(" ", string.Empty);
+            string strDVBase;
+            switch (strDamage)
+            {
+                case null:
+                case "":
+                case "STR/2":
+                case "(STR/2)":
+                    strDVBase = "({STR}/2)";
+                    break;
+                case "STR":
+                case "(STR)":
+                    strDVBase = "({STR})";
+                    break;
+                default:
+                    if (!int.TryParse(strDamage, out int intBase) || intBase < 1 || intBase > 20)
+                        throw new AgentToolException("`damage` must be 'STR/2', 'STR' or a number from 1 to 20.");
+                    strDVBase = intBase.ToString(GlobalSettings.InvariantCultureInfo);
+                    break;
+            }
+
+            string strDVType = objArgs.Value<string>("damage_type")?.Trim().ToUpperInvariant();
+            if (string.IsNullOrEmpty(strDVType))
+                strDVType = "P";
+            else if (strDVType != "P" && strDVType != "S")
+                throw new AgentToolException("`damage_type` must be 'P' or 'S'.");
+            Weapon objWeapon = await CreateNaturalWeapon.CreateWeaponAsync(objCharacter, strName, strFoundSkill, strDVBase, OptionalInt(objArgs, "damage_bonus") ?? 0,
+                                                                           strDVType, OptionalInt(objArgs, "ap") ?? 0, OptionalInt(objArgs, "reach") ?? 0, token)
+                                                         .ConfigureAwait(false)
+                               ?? throw new AgentToolException("The data has no Natural Weapon power to base the weapon on.");
+            await objCharacter.Weapons.AddAsync(objWeapon, token).ConfigureAwait(false);
+            return await FinishAnyEditAsync(frmCharacter, "Made the natural weapon " + objWeapon.Name + ", " + objWeapon.Damage + " (id " + objWeapon.InternalId + ").", token)
+                .ConfigureAwait(false);
         }
     }
 }

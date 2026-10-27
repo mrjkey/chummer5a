@@ -141,9 +141,11 @@ namespace Chummer.Agent
                                  ("character", "string", CharacterArgDescription)),
                 AddPowerAsync);
             yield return new AgentTool("set_power_rating",
-                "Change the rating of an adept power the character has.",
+                "Change the rating of an adept power the character has, and/or its Adept Way discount (the powers grid's Adept Way checkbox, which "
+                + "needs the Adept Way or Magician's Way discount).",
                 AgentTool.Schema(("id!", "string", "Power id from get_character_summary, or its displayed name."),
-                                 ("rating!", "integer", "New rating."),
+                                 ("rating", "integer", "New rating."),
+                                 ("adept_way", "boolean", "Take the Adept Way discount on this power."),
                                  ("character", "string", CharacterArgDescription)),
                 SetPowerRatingAsync);
             yield return new AgentTool("set_karma_for_nuyen",
@@ -961,9 +963,24 @@ namespace Chummer.Agent
             string strId = RequiredString(objArgs, "id");
             Power objPower = await FindOwnedAsync(await (await objCharacter.GetPowersAsync(token).ConfigureAwait(false)).ToListAsync(token).ConfigureAwait(false), strId, token).ConfigureAwait(false)
                              ?? throw new AgentToolException("The character has no power '" + strId + "'.");
-            int intRating = OptionalInt(objArgs, "rating") ?? throw new AgentToolException("`rating` is required.");
-            string strNote = await ApplyPowerRatingAsync(objPower, intRating, token).ConfigureAwait(false);
-            return await FinishEditAsync(frmCreate, await objPower.GetCurrentDisplayNameAsync(token).ConfigureAwait(false) + " is now rating "
+            int? intRating = OptionalInt(objArgs, "rating");
+            bool? blnAdeptWay = objArgs.Value<bool?>("adept_way");
+            if (intRating == null && blnAdeptWay == null)
+                throw new AgentToolException("Pass `rating` and/or `adept_way`.");
+            string strNote = string.Empty;
+            if (blnAdeptWay.HasValue)
+            {
+                // The grid only enables the checkbox when the discount applies to this power
+                if (blnAdeptWay.Value && !await objPower.GetAdeptWayDiscountEnabledAsync(token).ConfigureAwait(false))
+                    throw new AgentToolException(objPower.Name + " can't take the Adept Way discount (it needs the Adept Way or Magician's Way "
+                                                 + "discount, and a power that has one).");
+                await objPower.SetDiscountedAdeptWayAsync(blnAdeptWay.Value, token).ConfigureAwait(false);
+                strNote = blnAdeptWay.Value ? " It takes the Adept Way discount." : " It no longer takes the Adept Way discount.";
+            }
+
+            if (intRating.HasValue)
+                strNote = await ApplyPowerRatingAsync(objPower, intRating.Value, token).ConfigureAwait(false) + strNote;
+            return await FinishEditAsync(frmCreate, await objPower.GetCurrentDisplayNameAsync(token).ConfigureAwait(false) + " is rating "
                                                     + (await objPower.GetRatingAsync(token).ConfigureAwait(false)).ToString(GlobalSettings.InvariantCultureInfo) + "." + strNote,
                                          token).ConfigureAwait(false);
         }

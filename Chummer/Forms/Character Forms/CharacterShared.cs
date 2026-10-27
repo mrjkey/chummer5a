@@ -1464,24 +1464,7 @@ namespace Chummer
             if (objCyberware == null)
                 throw new ArgumentNullException(nameof(objCyberware));
 
-            string strCategories = string.Empty;
-            using (new FetchSafelyFromObjectPool<StringBuilder>(Utils.StringBuilderPool, out StringBuilder sbdCategories))
-            {
-                using (XmlNodeList xmlDrugCategoryList = objCyberware.AllowDrug?.SelectNodes("drugcategory"))
-                {
-                    if (xmlDrugCategoryList != null)
-                    {
-                        foreach (XmlNode objXmlCategory in xmlDrugCategoryList)
-                            sbdCategories.Append(objXmlCategory.InnerTextViaPool(token), ',');
-                    }
-                }
-
-                if (sbdCategories.Length > 0)
-                {
-                    --sbdCategories.Length;
-                    strCategories = sbdCategories.ToString();
-                }
-            }
+            string strCategories = GetAllowedDrugCategories(objCyberware, token);
 
             IAsyncDisposable objLocker = await CharacterObject.LockObject.EnterUpgradeableReadLockAsync(token).ConfigureAwait(false);
             try
@@ -1555,8 +1538,7 @@ namespace Chummer
                             objExpense.Undo = objUndo;
                         }
 
-                        await objCyberware.DrugChildren.AddAsync(objDrug, token).ConfigureAwait(false);
-                        await objDrug.GenerateImprovement(token).ConfigureAwait(false);
+                        await AttachDrugToCyberwareAsync(objCyberware, objDrug, token).ConfigureAwait(false);
                     }
                     catch
                     {
@@ -1571,6 +1553,37 @@ namespace Chummer
             {
                 await objLocker.DisposeAsync().ConfigureAwait(false);
             }
+        }
+
+        /// <summary>
+        /// The drug categories a piece of ware holds (its allowdrug node), comma-separated as SelectDrug takes them. Empty if it holds any drug.
+        /// </summary>
+        internal static string GetAllowedDrugCategories(Cyberware objCyberware, CancellationToken token = default)
+        {
+            using (new FetchSafelyFromObjectPool<StringBuilder>(Utils.StringBuilderPool, out StringBuilder sbdCategories))
+            {
+                using (XmlNodeList xmlDrugCategoryList = objCyberware.AllowDrug?.SelectNodes("drugcategory"))
+                {
+                    if (xmlDrugCategoryList != null)
+                    {
+                        foreach (XmlNode objXmlCategory in xmlDrugCategoryList)
+                            sbdCategories.Append(objXmlCategory.InnerTextViaPool(token), ',');
+                    }
+                }
+
+                if (sbdCategories.Length > 0)
+                    --sbdCategories.Length;
+                return sbdCategories.ToString();
+            }
+        }
+
+        /// <summary>
+        /// Nest a drug dose in a piece of ware (a drug reservoir and the like), with its own disabled improvement group.
+        /// </summary>
+        internal static async Task AttachDrugToCyberwareAsync(Cyberware objCyberware, Drug objDrug, CancellationToken token = default)
+        {
+            await objCyberware.DrugChildren.AddAsync(objDrug, token).ConfigureAwait(false);
+            await objDrug.GenerateImprovement(token).ConfigureAwait(false);
         }
 
         private async void AutosaveRequestTimerOnElapsed(object _, ElapsedEventArgs e)
@@ -6248,7 +6261,7 @@ namespace Chummer
         /// <param name="blnFreeCost">Whether the purchase is free (no nuyen deducted).</param>
         /// <param name="token">Cancellation token to listen to.</param>
         /// <returns>False when career mode cannot afford the drug; otherwise true.</returns>
-        protected async Task<bool> AddDrugToCharacterAsync(Drug objDrug, decimal decMarkup = 0, bool blnFreeCost = false,
+        protected internal async Task<bool> AddDrugToCharacterAsync(Drug objDrug, decimal decMarkup = 0, bool blnFreeCost = false,
             CancellationToken token = default)
         {
             token.ThrowIfCancellationRequested();
@@ -6303,7 +6316,7 @@ namespace Chummer
         /// <param name="decMarkup">Street markup percentage.</param>
         /// <param name="token">Cancellation token to listen to.</param>
         /// <returns>The nuyen to deduct.</returns>
-        protected async Task<decimal> GetCareerDrugPurchaseCostAsync(Drug objDrug, decimal decMarkup,
+        protected internal async Task<decimal> GetCareerDrugPurchaseCostAsync(Drug objDrug, decimal decMarkup,
             CancellationToken token = default)
         {
             token.ThrowIfCancellationRequested();
@@ -10723,7 +10736,7 @@ namespace Chummer
         /// <summary>
         /// Adds the selected Object and child items to the clipboard as appropriate.
         /// </summary>
-        protected async Task CopyObject(object selectedObject, CancellationToken token = default)
+        protected internal async Task CopyObject(object selectedObject, CancellationToken token = default)
         {
             token.ThrowIfCancellationRequested();
             CursorWait objCursorWait = await CursorWait.NewAsync(this, token: token).ConfigureAwait(false);

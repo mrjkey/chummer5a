@@ -33,6 +33,7 @@ Chummer is a .NET Framework 4.8 WinForms app (Windows only). The repo lives on t
   | Backend | `MartialArt.PurchaseFromNodeAsync`, `Spirit.FillSpiritTypeChoicesAsync`, `SelectMartialArtTechnique.FillAllowedTechniques` |
 
   The agent constructs the metatype dialogs without showing them, and calls these cores on them.
+- `CREATION-GAPS.md` is the checklist of creation-mode editor features the tools don't cover yet; tick items off there as tools are added.
 - `.mcp.json` registers the server with Claude Code. `.claude/skills/sr5-build-advisor` is the conversational build workflow.
 - Chummer must be running (and built with the agent code) for the `chummer` MCP tools to connect. WSL uses mirrored networking, so `localhost` reaches Windows.
 - When adding a tool, put the rules logic in the same code path the GUI uses rather than re-implementing it, and add coverage to `Chummer.Tests/AgentToolsTests.cs`. `ToolsAgainstOpenCharacter` opens a real `CharacterCreate` form on `TestFiles/Skink.chum5`; `CreateCharacterAndGear` and `MagicSkillsAndMods` create characters through the tools (use the `Full House` settings for anything outside the core book). Items that ask a question when added (e.g. a Fake SIN's name) need `forced_value` in tests, because the hidden test window can't show dialogs.

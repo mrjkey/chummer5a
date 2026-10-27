@@ -46,6 +46,22 @@ namespace Chummer.Agent
             /// </summary>
             public string CategoryPath { get; set; } = "categories/category";
 
+            /// <summary>
+            /// An XPath condition that picks these items out of a shared list (e.g. enchantments among the spells).
+            /// </summary>
+            public string Filter { get; set; } = string.Empty;
+
+            /// <summary>
+            /// Whether the items name their book. Those that don't (PACKS kits, suites) are only filtered by `hide`, as their dialogs do.
+            /// </summary>
+            public bool HasSource { get; set; } = true;
+
+            /// <summary>
+            /// Whether legal_only checks the item's requirements against the character. Weapon mount parts are checked against a vehicle
+            /// by add_weapon_mount instead.
+            /// </summary>
+            public bool CharacterRequirements { get; set; } = true;
+
             public CatalogKind(string strFile, string strItemPath, bool blnHasAvailability, params string[] astrSummaryFields)
             {
                 File = strFile;
@@ -82,7 +98,18 @@ namespace Chummer.Agent
             ["critterpower"] = new CatalogKind("critterpowers.xml", "powers/power", false, "karma", "type", "action", "range", "duration"),
             ["program"] = new CatalogKind("programs.xml", "programs/program", true, "avail", "cost"),
             ["skill"] = new CatalogKind("skills.xml", "skills/skill", false, "attribute", "skillgroup", "default", "exotic"),
-            ["knowledgeskill"] = new CatalogKind("skills.xml", "knowledgeskills/skill", false, "attribute")
+            ["knowledgeskill"] = new CatalogKind("skills.xml", "knowledgeskills/skill", false, "attribute"),
+            ["drug"] = new CatalogKind("drugs.xml", "drugs/drug", true, "rating", "threshold", "addictiontype", "vectors", "avail", "cost"),
+            ["cyberwaresuite"] = new CatalogKind("cyberware.xml", "suites/suite", false, "grade") { HasSource = false },
+            ["biowaresuite"] = new CatalogKind("bioware.xml", "suites/suite", false, "grade") { HasSource = false },
+            ["packs"] = new CatalogKind("packs.xml", "packs/pack", false, "nuyenbp") { HasSource = false },
+            ["weaponmount"] = new CatalogKind("vehicles.xml", "weaponmounts/weaponmount", true, "slots", "avail", "cost")
+                { CategoryPath = "weaponmountcategories/category", CharacterRequirements = false },
+            ["weaponmountmod"] = new CatalogKind("vehicles.xml", "weaponmountmods/mod", true, "slots", "rating", "avail", "cost")
+                { CategoryPath = "weaponmountcategories/category", CharacterRequirements = false },
+            ["enhancement"] = new CatalogKind("powers.xml", "enhancements/enhancement", false, "power"),
+            ["enchantment"] = new CatalogKind("spells.xml", "spells/spell", false, "type", "range", "duration", "dv") { Filter = "category = 'Enchantments'" },
+            ["lifemodule"] = new CatalogKind("lifemodules.xml", "modules/module", false, "stage", "karma") { CategoryPath = "stages/stage" }
         };
 
         private static IEnumerable<AgentTool> CreateCatalogTools()
@@ -180,12 +207,17 @@ namespace Chummer.Agent
             (XPathNavigator objRoot, CharacterSettings objSettings) = await LoadDataAsync(objCharacter, objKind.File, token).ConfigureAwait(false);
 
             List<string> lstFilters = new List<string>();
-            if (objSettings != null)
+            if (!objKind.HasSource)
+                lstFilters.Add("not(hide)");
+            else if (objSettings != null)
             {
                 string strBookFilter = await objSettings.BookXPathAsync(token: token).ConfigureAwait(false);
                 if (!string.IsNullOrEmpty(strBookFilter))
                     lstFilters.Add(strBookFilter);
             }
+
+            if (!string.IsNullOrEmpty(objKind.Filter))
+                lstFilters.Add(objKind.Filter);
 
             if (!string.IsNullOrWhiteSpace(strCategory))
                 lstFilters.Add("category = " + strCategory.CleanXPath());
@@ -222,7 +254,7 @@ namespace Chummer.Agent
                         }
                     }
 
-                    if (!await objItem.RequirementsMetAsync(objCharacter, token: token).ConfigureAwait(false)
+                    if (objKind.CharacterRequirements && !await objItem.RequirementsMetAsync(objCharacter, token: token).ConfigureAwait(false)
                         || (objKind.HasAvailability
                             && !await objItem.CheckAvailRestrictionAsync(objCharacter, token: token).ConfigureAwait(false)))
                     {
@@ -284,7 +316,8 @@ namespace Chummer.Agent
             JObject objReturn = new JObject { ["data"] = NavigatorToJson(objItem) };
             if (objCharacter != null)
             {
-                objReturn["characterQualifies"] = await objItem.RequirementsMetAsync(objCharacter, token: token).ConfigureAwait(false);
+                if (objKind.CharacterRequirements)
+                    objReturn["characterQualifies"] = await objItem.RequirementsMetAsync(objCharacter, token: token).ConfigureAwait(false);
                 if (objKind.HasAvailability)
                     objReturn["availabilityAllowed"] = await objItem.CheckAvailRestrictionAsync(objCharacter, token: token).ConfigureAwait(false);
             }

@@ -4220,342 +4220,355 @@ namespace Chummer
                     }, GenericToken).ConfigureAwait(false);
                 }
 
-                IAsyncDisposable objLocker = await GlobalSettings.EnterClipboardReadLockAsync(GenericToken).ConfigureAwait(false);
-                try
-                {
-                    GenericToken.ThrowIfCancellationRequested();
-                    switch (await GlobalSettings.GetClipboardContentTypeAsync(GenericToken).ConfigureAwait(false))
-                    {
-                        case ClipboardContentType.Armor:
-                        {
-                            // Paste Armor.
-                            XmlNode objXmlNode = (await GlobalSettings.GetClipboardAsync(GenericToken).ConfigureAwait(false)).SelectSingleNode("/character/armor");
-                            if (objXmlNode != null)
-                            {
-                                Armor objArmor = new Armor(CharacterObject);
-                                try
-                                {
-                                    await objArmor.LoadAsync(objXmlNode, true, GenericToken).ConfigureAwait(false);
-                                    await CharacterObject.Armor.AddAsync(objArmor, GenericToken).ConfigureAwait(false);
-
-                                    await AddChildVehicles(objArmor.InternalId).ConfigureAwait(false);
-                                    await AddChildWeapons(objArmor.InternalId).ConfigureAwait(false);
-                                }
-                                catch
-                                {
-                                    await objArmor.DeleteArmorAsync(token: CancellationToken.None).ConfigureAwait(false);
-                                    throw;
-                                }
-                            }
-
-                            break;
-                        }
-                        case ClipboardContentType.ArmorMod:
-                        {
-                            if (!(objSelectedObject is Armor selectedArmor &&
-                                  await selectedArmor.AllowPasteXml(GenericToken).ConfigureAwait(false)))
-                                break;
-                            // Paste Armor.
-                            XmlNode objXmlNode = (await GlobalSettings.GetClipboardAsync(GenericToken).ConfigureAwait(false)).SelectSingleNode("/character/armormod");
-                            if (objXmlNode != null)
-                            {
-                                ArmorMod objArmorMod = new ArmorMod(CharacterObject, selectedArmor);
-                                try
-                                {
-                                    await objArmorMod.LoadAsync(objXmlNode, true, GenericToken).ConfigureAwait(false);
-                                    await selectedArmor.ArmorMods.AddAsync(objArmorMod, GenericToken).ConfigureAwait(false);
-
-                                    await AddChildVehicles(objArmorMod.InternalId).ConfigureAwait(false);
-                                    await AddChildWeapons(objArmorMod.InternalId).ConfigureAwait(false);
-                                }
-                                catch
-                                {
-                                    await objArmorMod.DeleteArmorModAsync(token: CancellationToken.None).ConfigureAwait(false);
-                                    throw;
-                                }
-                            }
-
-                            break;
-                        }
-                        case ClipboardContentType.Cyberware:
-                        {
-                            // Paste Cyberware.
-                            XmlNode objXmlNode = (await GlobalSettings.GetClipboardAsync(GenericToken).ConfigureAwait(false)).SelectSingleNode("/character/cyberware");
-                            if (objXmlNode != null)
-                            {
-                                Cyberware objCyberware = new Cyberware(CharacterObject);
-                                try
-                                {
-                                    await objCyberware.LoadAsync(objXmlNode, true, GenericToken).ConfigureAwait(false);
-                                    if (objSelectedObject is Cyberware objCyberwareParent)
-                                    {
-                                        if (!await objCyberwareParent.AllowPasteObject(objCyberware, GenericToken)
-                                                .ConfigureAwait(false))
-                                        {
-                                            await objCyberware.DeleteCyberwareAsync(token: GenericToken)
-                                                .ConfigureAwait(false);
-                                            return;
-                                        }
-
-                                        await objCyberware.SetGradeAsync(await objCyberwareParent.GetGradeAsync(GenericToken).ConfigureAwait(false),
-                                            token: GenericToken).ConfigureAwait(false);
-                                        await (await objCyberwareParent.GetChildrenAsync(GenericToken).ConfigureAwait(false)).AddAsync(objCyberware, GenericToken)
-                                            .ConfigureAwait(false);
-                                    }
-                                    else
-                                    {
-                                        if (!string.IsNullOrEmpty(await objCyberware.GetLimbSlotAsync(GenericToken)
-                                                .ConfigureAwait(false)) &&
-                                            !await objCyberware.GetValidLimbSlotAsync(
-                                                await objCyberware.GetNodeXPathAsync(GlobalSettings.Language, GenericToken)
-                                                    .ConfigureAwait(false), GenericToken).ConfigureAwait(false))
-                                        {
-                                            await objCyberware.DeleteCyberwareAsync(token: GenericToken)
-                                                .ConfigureAwait(false);
-                                            return;
-                                        }
-
-                                        await CharacterObject.Cyberware.AddAsync(objCyberware, GenericToken)
-                                            .ConfigureAwait(false);
-                                    }
-
-                                    await AddChildVehicles(objCyberware.InternalId).ConfigureAwait(false);
-                                    await AddChildWeapons(objCyberware.InternalId).ConfigureAwait(false);
-                                }
-                                catch
-                                {
-                                    await objCyberware.DeleteCyberwareAsync(token: CancellationToken.None).ConfigureAwait(false);
-                                    throw;
-                                }
-                            }
-
-                            break;
-                        }
-                        case ClipboardContentType.Gear:
-                        {
-                            // Paste Gear.
-                            XmlNode objXmlNode = (await GlobalSettings.GetClipboardAsync(GenericToken).ConfigureAwait(false)).SelectSingleNode("/character/gear");
-                            if (objXmlNode == null)
-                                break;
-                            Gear objGear = new Gear(CharacterObject);
-                            await objGear.LoadAsync(objXmlNode, true, GenericToken).ConfigureAwait(false);
-                            if (objSelectedObject is ICanPaste selected &&
-                                await selected.AllowPasteXml(GenericToken).ConfigureAwait(false) &&
-                                objSelectedObject is IHasGear gear)
-                            {
-                                await gear.GearChildren.AddAsync(objGear, GenericToken).ConfigureAwait(false);
-                                if (gear is ICanEquip selectedEquip && !selectedEquip.Equipped)
-                                    await objGear.ChangeEquippedStatusAsync(false, token: GenericToken)
-                                        .ConfigureAwait(false);
-                            }
-                            else
-                            {
-                                await CharacterObject.Gear.AddAsync(objGear, GenericToken).ConfigureAwait(false);
-                            }
-
-                            await AddChildVehicles(objGear.InternalId).ConfigureAwait(false);
-                            await AddChildWeapons(objGear.InternalId).ConfigureAwait(false);
-                            break;
-                        }
-                        case ClipboardContentType.Lifestyle:
-                        {
-                            // Lifestyle Tab.
-                            if (await tabStreetGearTabs
-                                    .DoThreadSafeFuncAsync(x => x.SelectedTab != tabLifestyle, GenericToken)
-                                    .ConfigureAwait(false))
-                                break;
-
-                            // Paste Lifestyle.
-                            XmlNode objXmlNode = (await GlobalSettings.GetClipboardAsync(GenericToken).ConfigureAwait(false)).SelectSingleNode("/character/lifestyle");
-                            if (objXmlNode == null)
-                                break;
-
-                            Lifestyle objLifestyle = new Lifestyle(CharacterObject);
-                            try
-                            {
-                                await objLifestyle.LoadAsync(objXmlNode, true, GenericToken).ConfigureAwait(false);
-                                // Reset the number of months back to 1 since 0 isn't valid in Create Mode.
-                                await objLifestyle.SetIncrementsAsync(1, GenericToken).ConfigureAwait(false);
-                                await (await CharacterObject.GetLifestylesAsync(GenericToken).ConfigureAwait(false)).AddAsync(objLifestyle, GenericToken).ConfigureAwait(false);
-                            }
-                            catch
-                            {
-                                await objLifestyle.RemoveAsync(false, CancellationToken.None).ConfigureAwait(false);
-                                throw;
-                            }
-                            break;
-                        }
-                        case ClipboardContentType.Vehicle:
-                        {
-                            // Paste Vehicle.
-                            XmlNode objXmlNode = (await GlobalSettings.GetClipboardAsync(GenericToken).ConfigureAwait(false)).SelectSingleNode("/character/vehicle");
-                            Vehicle objVehicle = new Vehicle(CharacterObject);
-                            try
-                            {
-                                await objVehicle.LoadAsync(objXmlNode, true, GenericToken).ConfigureAwait(false);
-                                await (await CharacterObject.GetVehiclesAsync(GenericToken).ConfigureAwait(false)).AddAsync(objVehicle, GenericToken).ConfigureAwait(false);
-                            }
-                            catch
-                            {
-                                await objVehicle.DeleteVehicleAsync(CancellationToken.None).ConfigureAwait(false);
-                                throw;
-                            }
-                            break;
-                        }
-                        case ClipboardContentType.Weapon:
-                        {
-                            // Paste Weapon.
-                            XmlNode objXmlNode = (await GlobalSettings.GetClipboardAsync(GenericToken).ConfigureAwait(false)).SelectSingleNode("/character/weapon");
-                            if (objXmlNode != null)
-                            {
-                                Weapon objWeapon = null;
-                                try
-                                {
-                                    switch (objSelectedObject)
-                                    {
-                                        case Weapon objWeaponParent when !await objWeaponParent.AllowPasteXml(GenericToken)
-                                            .ConfigureAwait(false):
-                                            return;
-
-                                        case Weapon objWeaponParent:
-                                            objWeapon = new Weapon(CharacterObject);
-                                            await objWeapon.LoadAsync(objXmlNode, true, GenericToken).ConfigureAwait(false);
-                                            await objWeaponParent.Children.AddAsync(objWeapon, GenericToken)
-                                                .ConfigureAwait(false);
-                                            break;
-
-                                        case WeaponMount objWeaponMount
-                                            when !await objWeaponMount.AllowPasteXml(GenericToken).ConfigureAwait(false):
-                                            return;
-
-                                        case WeaponMount objWeaponMount:
-                                            objWeapon = new Weapon(CharacterObject);
-                                            await objWeapon.LoadAsync(objXmlNode, true, GenericToken).ConfigureAwait(false);
-                                            await objWeaponMount.Weapons.AddAsync(objWeapon, GenericToken)
-                                                .ConfigureAwait(false);
-                                            break;
-
-                                        case VehicleMod objMod
-                                            when !await objMod.AllowPasteXml(GenericToken).ConfigureAwait(false):
-                                            return;
-
-                                        case VehicleMod objMod:
-                                            objWeapon = new Weapon(CharacterObject);
-                                            await objWeapon.LoadAsync(objXmlNode, true, GenericToken).ConfigureAwait(false);
-                                            await objMod.Weapons.AddAsync(objWeapon, GenericToken).ConfigureAwait(false);
-                                            break;
-
-                                        default:
-                                            objWeapon = new Weapon(CharacterObject);
-                                            await objWeapon.LoadAsync(objXmlNode, true, GenericToken).ConfigureAwait(false);
-                                            await CharacterObject.Weapons.AddAsync(objWeapon, GenericToken)
-                                                .ConfigureAwait(false);
-                                            break;
-                                    }
-
-                                    await AddChildVehicles(objWeapon.InternalId).ConfigureAwait(false);
-                                    await AddChildWeapons(objWeapon.InternalId).ConfigureAwait(false);
-                                }
-                                catch
-                                {
-                                    if (objWeapon != null)
-                                        await objWeapon.DeleteWeaponAsync(token: CancellationToken.None).ConfigureAwait(false);
-                                    throw;
-                                }
-                            }
-
-                            break;
-                        }
-                        case ClipboardContentType.WeaponAccessory:
-                        {
-                            if (!(objSelectedObject is Weapon selectedWeapon &&
-                                  await selectedWeapon.AllowPasteXml(GenericToken).ConfigureAwait(false)))
-                                break;
-                            // Paste Armor.
-                            XmlNode objXmlNode = (await GlobalSettings.GetClipboardAsync(GenericToken).ConfigureAwait(false)).SelectSingleNode("/character/accessory");
-                            if (objXmlNode != null)
-                            {
-                                WeaponAccessory objMod = new WeaponAccessory(CharacterObject);
-                                try
-                                {
-                                    await objMod.LoadAsync(objXmlNode, true, GenericToken).ConfigureAwait(false);
-                                    await selectedWeapon.WeaponAccessories.AddAsync(objMod, GenericToken)
-                                        .ConfigureAwait(false);
-
-                                    await AddChildVehicles(objMod.InternalId).ConfigureAwait(false);
-                                    await AddChildWeapons(objMod.InternalId).ConfigureAwait(false);
-                                }
-                                catch
-                                {
-                                    await objMod.DeleteWeaponAccessoryAsync(token: CancellationToken.None).ConfigureAwait(false);
-                                    throw;
-                                }
-                            }
-
-                            break;
-                        }
-                        default:
-                            Utils.BreakIfDebug();
-                            break;
-                    }
-
-                    async Task AddChildWeapons(string parentId)
-                    {
-                        GenericToken.ThrowIfCancellationRequested();
-                        XmlNodeList objXmlNodeList = (await GlobalSettings.GetClipboardAsync(GenericToken).ConfigureAwait(false)).SelectNodes("/character/weapons/weapon");
-                        if (!(objXmlNodeList?.Count > 0))
-                            return;
-                        foreach (XmlNode objLoopNode in objXmlNodeList)
-                        {
-                            Weapon objWeapon = new Weapon(CharacterObject);
-                            try
-                            {
-                                await objWeapon.LoadAsync(objLoopNode, true, GenericToken).ConfigureAwait(false);
-                                await CharacterObject.Weapons.AddAsync(objWeapon, GenericToken).ConfigureAwait(false);
-                                objWeapon.ParentID = parentId;
-                            }
-                            catch
-                            {
-                                await objWeapon.DeleteWeaponAsync(token: CancellationToken.None).ConfigureAwait(false);
-                                throw;
-                            }
-                        }
-                    }
-
-                    async Task AddChildVehicles(string parentId)
-                    {
-                        GenericToken.ThrowIfCancellationRequested();
-                        // Add any Vehicles that come with the Cyberware.
-                        XmlNodeList objXmlNodeList =
-                            (await GlobalSettings.GetClipboardAsync(GenericToken).ConfigureAwait(false)).SelectNodes("/character/vehicles/vehicle");
-                        if (!(objXmlNodeList?.Count > 0))
-                            return;
-                        foreach (XmlNode objLoopNode in objXmlNodeList)
-                        {
-                            Vehicle objVehicle = new Vehicle(CharacterObject);
-                            try
-                            {
-                                await objVehicle.LoadAsync(objLoopNode, true, GenericToken).ConfigureAwait(false);
-                                await (await CharacterObject.GetVehiclesAsync(GenericToken).ConfigureAwait(false)).AddAsync(objVehicle, GenericToken).ConfigureAwait(false);
-                                objVehicle.ParentID = parentId;
-                            }
-                            catch
-                            {
-                                await objVehicle.DeleteVehicleAsync(CancellationToken.None).ConfigureAwait(false);
-                                throw;
-                            }
-                        }
-                    }
-                }
-                finally
-                {
-                    await objLocker.DisposeAsync().ConfigureAwait(false);
-                }
+                await PasteClipboardAsync(objSelectedObject, GenericToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
                 //swallow this
             }
+        }
+
+        /// <summary>
+        /// Paste what Edit > Copy put on the clipboard into the character, as Edit > Paste does: armor, cyberware, gear, lifestyles, vehicles and
+        /// weapons go on the character, and armor mods, plugins, gear, accessories and weapons into <paramref name="objSelectedObject"/> when it takes them.
+        /// </summary>
+        /// <param name="objSelectedObject">The item selected in the tab the clipboard's content belongs to, or null.</param>
+        /// <returns>False when the clipboard is empty or its content doesn't go there.</returns>
+        internal async Task<bool> PasteClipboardAsync(object objSelectedObject, CancellationToken token = default)
+        {
+            IAsyncDisposable objLocker = await GlobalSettings.EnterClipboardReadLockAsync(token).ConfigureAwait(false);
+            try
+            {
+                token.ThrowIfCancellationRequested();
+                switch (await GlobalSettings.GetClipboardContentTypeAsync(token).ConfigureAwait(false))
+                {
+                    case ClipboardContentType.Armor:
+                    {
+                        // Paste Armor.
+                        XmlNode objXmlNode = (await GlobalSettings.GetClipboardAsync(token).ConfigureAwait(false)).SelectSingleNode("/character/armor");
+                        if (objXmlNode != null)
+                        {
+                            Armor objArmor = new Armor(CharacterObject);
+                            try
+                            {
+                                await objArmor.LoadAsync(objXmlNode, true, token).ConfigureAwait(false);
+                                await CharacterObject.Armor.AddAsync(objArmor, token).ConfigureAwait(false);
+
+                                await AddChildVehicles(objArmor.InternalId).ConfigureAwait(false);
+                                await AddChildWeapons(objArmor.InternalId).ConfigureAwait(false);
+                            }
+                            catch
+                            {
+                                await objArmor.DeleteArmorAsync(token: CancellationToken.None).ConfigureAwait(false);
+                                throw;
+                            }
+                        }
+
+                        break;
+                    }
+                    case ClipboardContentType.ArmorMod:
+                    {
+                        if (!(objSelectedObject is Armor selectedArmor &&
+                              await selectedArmor.AllowPasteXml(token).ConfigureAwait(false)))
+                            return false;
+                        // Paste Armor.
+                        XmlNode objXmlNode = (await GlobalSettings.GetClipboardAsync(token).ConfigureAwait(false)).SelectSingleNode("/character/armormod");
+                        if (objXmlNode != null)
+                        {
+                            ArmorMod objArmorMod = new ArmorMod(CharacterObject, selectedArmor);
+                            try
+                            {
+                                await objArmorMod.LoadAsync(objXmlNode, true, token).ConfigureAwait(false);
+                                await selectedArmor.ArmorMods.AddAsync(objArmorMod, token).ConfigureAwait(false);
+
+                                await AddChildVehicles(objArmorMod.InternalId).ConfigureAwait(false);
+                                await AddChildWeapons(objArmorMod.InternalId).ConfigureAwait(false);
+                            }
+                            catch
+                            {
+                                await objArmorMod.DeleteArmorModAsync(token: CancellationToken.None).ConfigureAwait(false);
+                                throw;
+                            }
+                        }
+
+                        break;
+                    }
+                    case ClipboardContentType.Cyberware:
+                    {
+                        // Paste Cyberware.
+                        XmlNode objXmlNode = (await GlobalSettings.GetClipboardAsync(token).ConfigureAwait(false)).SelectSingleNode("/character/cyberware");
+                        if (objXmlNode != null)
+                        {
+                            Cyberware objCyberware = new Cyberware(CharacterObject);
+                            try
+                            {
+                                await objCyberware.LoadAsync(objXmlNode, true, token).ConfigureAwait(false);
+                                if (objSelectedObject is Cyberware objCyberwareParent)
+                                {
+                                    if (!await objCyberwareParent.AllowPasteObject(objCyberware, token)
+                                            .ConfigureAwait(false))
+                                    {
+                                        await objCyberware.DeleteCyberwareAsync(token: token)
+                                            .ConfigureAwait(false);
+                                        return false;
+                                    }
+
+                                    await objCyberware.SetGradeAsync(await objCyberwareParent.GetGradeAsync(token).ConfigureAwait(false),
+                                        token: token).ConfigureAwait(false);
+                                    await (await objCyberwareParent.GetChildrenAsync(token).ConfigureAwait(false)).AddAsync(objCyberware, token)
+                                        .ConfigureAwait(false);
+                                }
+                                else
+                                {
+                                    if (!string.IsNullOrEmpty(await objCyberware.GetLimbSlotAsync(token)
+                                            .ConfigureAwait(false)) &&
+                                        !await objCyberware.GetValidLimbSlotAsync(
+                                            await objCyberware.GetNodeXPathAsync(GlobalSettings.Language, token)
+                                                .ConfigureAwait(false), token).ConfigureAwait(false))
+                                    {
+                                        await objCyberware.DeleteCyberwareAsync(token: token)
+                                            .ConfigureAwait(false);
+                                        return false;
+                                    }
+
+                                    await CharacterObject.Cyberware.AddAsync(objCyberware, token)
+                                        .ConfigureAwait(false);
+                                }
+
+                                await AddChildVehicles(objCyberware.InternalId).ConfigureAwait(false);
+                                await AddChildWeapons(objCyberware.InternalId).ConfigureAwait(false);
+                            }
+                            catch
+                            {
+                                await objCyberware.DeleteCyberwareAsync(token: CancellationToken.None).ConfigureAwait(false);
+                                throw;
+                            }
+                        }
+
+                        break;
+                    }
+                    case ClipboardContentType.Gear:
+                    {
+                        // Paste Gear.
+                        XmlNode objXmlNode = (await GlobalSettings.GetClipboardAsync(token).ConfigureAwait(false)).SelectSingleNode("/character/gear");
+                        if (objXmlNode == null)
+                            break;
+                        Gear objGear = new Gear(CharacterObject);
+                        await objGear.LoadAsync(objXmlNode, true, token).ConfigureAwait(false);
+                        if (objSelectedObject is ICanPaste selected &&
+                            await selected.AllowPasteXml(token).ConfigureAwait(false) &&
+                            objSelectedObject is IHasGear gear)
+                        {
+                            await gear.GearChildren.AddAsync(objGear, token).ConfigureAwait(false);
+                            if (gear is ICanEquip selectedEquip && !selectedEquip.Equipped)
+                                await objGear.ChangeEquippedStatusAsync(false, token: token)
+                                    .ConfigureAwait(false);
+                        }
+                        else
+                        {
+                            await CharacterObject.Gear.AddAsync(objGear, token).ConfigureAwait(false);
+                        }
+
+                        await AddChildVehicles(objGear.InternalId).ConfigureAwait(false);
+                        await AddChildWeapons(objGear.InternalId).ConfigureAwait(false);
+                        break;
+                    }
+                    case ClipboardContentType.Lifestyle:
+                    {
+                        // Lifestyle Tab.
+                        if (await tabStreetGearTabs
+                                .DoThreadSafeFuncAsync(x => x.SelectedTab != tabLifestyle, token)
+                                .ConfigureAwait(false))
+                            break;
+
+                        // Paste Lifestyle.
+                        XmlNode objXmlNode = (await GlobalSettings.GetClipboardAsync(token).ConfigureAwait(false)).SelectSingleNode("/character/lifestyle");
+                        if (objXmlNode == null)
+                            break;
+
+                        Lifestyle objLifestyle = new Lifestyle(CharacterObject);
+                        try
+                        {
+                            await objLifestyle.LoadAsync(objXmlNode, true, token).ConfigureAwait(false);
+                            // Reset the number of months back to 1 since 0 isn't valid in Create Mode.
+                            await objLifestyle.SetIncrementsAsync(1, token).ConfigureAwait(false);
+                            await (await CharacterObject.GetLifestylesAsync(token).ConfigureAwait(false)).AddAsync(objLifestyle, token).ConfigureAwait(false);
+                        }
+                        catch
+                        {
+                            await objLifestyle.RemoveAsync(false, CancellationToken.None).ConfigureAwait(false);
+                            throw;
+                        }
+                        break;
+                    }
+                    case ClipboardContentType.Vehicle:
+                    {
+                        // Paste Vehicle.
+                        XmlNode objXmlNode = (await GlobalSettings.GetClipboardAsync(token).ConfigureAwait(false)).SelectSingleNode("/character/vehicle");
+                        Vehicle objVehicle = new Vehicle(CharacterObject);
+                        try
+                        {
+                            await objVehicle.LoadAsync(objXmlNode, true, token).ConfigureAwait(false);
+                            await (await CharacterObject.GetVehiclesAsync(token).ConfigureAwait(false)).AddAsync(objVehicle, token).ConfigureAwait(false);
+                        }
+                        catch
+                        {
+                            await objVehicle.DeleteVehicleAsync(CancellationToken.None).ConfigureAwait(false);
+                            throw;
+                        }
+                        break;
+                    }
+                    case ClipboardContentType.Weapon:
+                    {
+                        // Paste Weapon.
+                        XmlNode objXmlNode = (await GlobalSettings.GetClipboardAsync(token).ConfigureAwait(false)).SelectSingleNode("/character/weapon");
+                        if (objXmlNode != null)
+                        {
+                            Weapon objWeapon = null;
+                            try
+                            {
+                                switch (objSelectedObject)
+                                {
+                                    case Weapon objWeaponParent when !await objWeaponParent.AllowPasteXml(token)
+                                        .ConfigureAwait(false):
+                                        return false;
+
+                                    case Weapon objWeaponParent:
+                                        objWeapon = new Weapon(CharacterObject);
+                                        await objWeapon.LoadAsync(objXmlNode, true, token).ConfigureAwait(false);
+                                        await objWeaponParent.Children.AddAsync(objWeapon, token)
+                                            .ConfigureAwait(false);
+                                        break;
+
+                                    case WeaponMount objWeaponMount
+                                        when !await objWeaponMount.AllowPasteXml(token).ConfigureAwait(false):
+                                        return false;
+
+                                    case WeaponMount objWeaponMount:
+                                        objWeapon = new Weapon(CharacterObject);
+                                        await objWeapon.LoadAsync(objXmlNode, true, token).ConfigureAwait(false);
+                                        await objWeaponMount.Weapons.AddAsync(objWeapon, token)
+                                            .ConfigureAwait(false);
+                                        break;
+
+                                    case VehicleMod objMod
+                                        when !await objMod.AllowPasteXml(token).ConfigureAwait(false):
+                                        return false;
+
+                                    case VehicleMod objMod:
+                                        objWeapon = new Weapon(CharacterObject);
+                                        await objWeapon.LoadAsync(objXmlNode, true, token).ConfigureAwait(false);
+                                        await objMod.Weapons.AddAsync(objWeapon, token).ConfigureAwait(false);
+                                        break;
+
+                                    default:
+                                        objWeapon = new Weapon(CharacterObject);
+                                        await objWeapon.LoadAsync(objXmlNode, true, token).ConfigureAwait(false);
+                                        await CharacterObject.Weapons.AddAsync(objWeapon, token)
+                                            .ConfigureAwait(false);
+                                        break;
+                                }
+
+                                await AddChildVehicles(objWeapon.InternalId).ConfigureAwait(false);
+                                await AddChildWeapons(objWeapon.InternalId).ConfigureAwait(false);
+                            }
+                            catch
+                            {
+                                if (objWeapon != null)
+                                    await objWeapon.DeleteWeaponAsync(token: CancellationToken.None).ConfigureAwait(false);
+                                throw;
+                            }
+                        }
+
+                        break;
+                    }
+                    case ClipboardContentType.WeaponAccessory:
+                    {
+                        if (!(objSelectedObject is Weapon selectedWeapon &&
+                              await selectedWeapon.AllowPasteXml(token).ConfigureAwait(false)))
+                            return false;
+                        // Paste Armor.
+                        XmlNode objXmlNode = (await GlobalSettings.GetClipboardAsync(token).ConfigureAwait(false)).SelectSingleNode("/character/accessory");
+                        if (objXmlNode != null)
+                        {
+                            WeaponAccessory objMod = new WeaponAccessory(CharacterObject);
+                            try
+                            {
+                                await objMod.LoadAsync(objXmlNode, true, token).ConfigureAwait(false);
+                                await selectedWeapon.WeaponAccessories.AddAsync(objMod, token)
+                                    .ConfigureAwait(false);
+
+                                await AddChildVehicles(objMod.InternalId).ConfigureAwait(false);
+                                await AddChildWeapons(objMod.InternalId).ConfigureAwait(false);
+                            }
+                            catch
+                            {
+                                await objMod.DeleteWeaponAccessoryAsync(token: CancellationToken.None).ConfigureAwait(false);
+                                throw;
+                            }
+                        }
+
+                        break;
+                    }
+                    default:
+                        Utils.BreakIfDebug();
+                        return false;
+                }
+
+                async Task AddChildWeapons(string parentId)
+                {
+                    token.ThrowIfCancellationRequested();
+                    XmlNodeList objXmlNodeList = (await GlobalSettings.GetClipboardAsync(token).ConfigureAwait(false)).SelectNodes("/character/weapons/weapon");
+                    if (!(objXmlNodeList?.Count > 0))
+                        return;
+                    foreach (XmlNode objLoopNode in objXmlNodeList)
+                    {
+                        Weapon objWeapon = new Weapon(CharacterObject);
+                        try
+                        {
+                            await objWeapon.LoadAsync(objLoopNode, true, token).ConfigureAwait(false);
+                            await CharacterObject.Weapons.AddAsync(objWeapon, token).ConfigureAwait(false);
+                            objWeapon.ParentID = parentId;
+                        }
+                        catch
+                        {
+                            await objWeapon.DeleteWeaponAsync(token: CancellationToken.None).ConfigureAwait(false);
+                            throw;
+                        }
+                    }
+                }
+
+                async Task AddChildVehicles(string parentId)
+                {
+                    token.ThrowIfCancellationRequested();
+                    // Add any Vehicles that come with the Cyberware.
+                    XmlNodeList objXmlNodeList =
+                        (await GlobalSettings.GetClipboardAsync(token).ConfigureAwait(false)).SelectNodes("/character/vehicles/vehicle");
+                    if (!(objXmlNodeList?.Count > 0))
+                        return;
+                    foreach (XmlNode objLoopNode in objXmlNodeList)
+                    {
+                        Vehicle objVehicle = new Vehicle(CharacterObject);
+                        try
+                        {
+                            await objVehicle.LoadAsync(objLoopNode, true, token).ConfigureAwait(false);
+                            await (await CharacterObject.GetVehiclesAsync(token).ConfigureAwait(false)).AddAsync(objVehicle, token).ConfigureAwait(false);
+                            objVehicle.ParentID = parentId;
+                        }
+                        catch
+                        {
+                            await objVehicle.DeleteVehicleAsync(CancellationToken.None).ConfigureAwait(false);
+                            throw;
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                await objLocker.DisposeAsync().ConfigureAwait(false);
+            }
+
+            return true;
         }
 
         private async void mnuSpecialConvertToFreeSprite_Click(object sender, EventArgs e)
@@ -11877,31 +11890,6 @@ namespace Chummer
                                             .SelectSingleNodeAndCacheExpression(
                                                 "translate", token)
                                             ?.Value ?? strName));
-                                    string strTemp = xmlTradition
-                                        .SelectSingleNodeAndCacheExpression("spirits/spiritcombat", token)
-                                        ?.Value;
-                                    if (!string.IsNullOrEmpty(strTemp))
-                                        setAlwaysIncludeSpirits.Add(strTemp);
-                                    strTemp = xmlTradition
-                                        .SelectSingleNodeAndCacheExpression("spirits/spiritdetection", token)
-                                        ?.Value;
-                                    if (!string.IsNullOrEmpty(strTemp))
-                                        setAlwaysIncludeSpirits.Add(strTemp);
-                                    strTemp = xmlTradition
-                                        .SelectSingleNodeAndCacheExpression("spirits/spirithealth", token)
-                                        ?.Value;
-                                    if (!string.IsNullOrEmpty(strTemp))
-                                        setAlwaysIncludeSpirits.Add(strTemp);
-                                    strTemp = xmlTradition
-                                        .SelectSingleNodeAndCacheExpression("spirits/spiritillusion", token)
-                                        ?.Value;
-                                    if (!string.IsNullOrEmpty(strTemp))
-                                        setAlwaysIncludeSpirits.Add(strTemp);
-                                    strTemp = xmlTradition
-                                        .SelectSingleNodeAndCacheExpression("spirits/spiritmanipulation", token)
-                                        ?.Value;
-                                    if (!string.IsNullOrEmpty(strTemp))
-                                        setAlwaysIncludeSpirits.Add(strTemp);
                                 }
                             }
                         }
@@ -11943,31 +11931,7 @@ namespace Chummer
                     using (new FetchSafelyFromSafeObjectPool<List<ListItem>>(
                                 Utils.ListItemListPool, out List<ListItem> lstDrainAttributes))
                     {
-                        if (xmlTraditionsBaseChummerNode != null)
-                        {
-                            foreach (XPathNavigator xmlDrain in xmlTraditionsBaseChummerNode
-                                            .SelectAndCacheExpression(
-                                                "drainattributes/drainattribute", token))
-                            {
-                                string strName
-                                    = xmlDrain
-                                        .SelectSingleNodeAndCacheExpression("name", token)
-                                        ?.Value;
-                                if (!string.IsNullOrEmpty(strName)
-                                    && (lstDrainAttributes.Count == 0 || lstDrainAttributes.TrueForAll(x =>
-                                                    x.Value?.ToString() != strName)))
-                                {
-                                    string strTranslatedName = xmlDrain
-                                        .SelectSingleNodeAndCacheExpression(
-                                            "translate",
-                                            token)?.Value ?? strName;
-                                    lstDrainAttributes.Add(new ListItem(strName, strTranslatedName));
-                                }
-                            }
-                        }
-
-                        lstDrainAttributes.Sort(CompareListItems.CompareNames);
-                        lstDrainAttributes.Insert(0, ListItem.Blank);
+                        lstDrainAttributes.AddRange(GetDrainAttributeChoices(xmlTraditionsBaseChummerNode, token));
                         if (!lstDrainAttributes.SequenceEqual(
                                     await cboDrain.DoThreadSafeFuncAsync(
                                         x => x.Items.Cast<ListItem>(), token).ConfigureAwait(false)))
@@ -11984,74 +11948,11 @@ namespace Chummer
                         }
                     }
 
-                    using (new FetchSafelyFromSafeObjectPool<HashSet<string>>(Utils.StringHashSetPool,
-                                out HashSet<string> limit))
                     {
-                        foreach (Improvement improvement in await ImprovementManager
-                                        .GetCachedImprovementListForValueOfAsync(
-                                            CharacterObject,
-                                            Improvement.ImprovementType
-                                                .LimitSpiritCategory, token: token)
-                                        .ConfigureAwait(false))
-                        {
-                            limit.Add(improvement.ImprovedName);
-                        }
-
                         using (new FetchSafelyFromSafeObjectPool<List<ListItem>>(
                                     Utils.ListItemListPool, out List<ListItem> lstSpirit))
                         {
-                            if (xmlTraditionsBaseChummerNode != null)
-                            {
-                                string strSpiritsFilter;
-                                // This part is needed because of weird edge cases like someone having FA enabled but not SG, which means traditions will reference spirits that are from a non-enabled book
-                                if (setAlwaysIncludeSpirits.Count > 0)
-                                {
-                                    using (new FetchSafelyFromObjectPool<StringBuilder>(Utils.StringBuilderPool, out StringBuilder sbdSpiritsFilter))
-                                    {
-                                        sbdSpiritsFilter.Append("spirits/spirit[(",
-                                            await CharacterObjectSettings.BookXPathAsync(token: token).ConfigureAwait(false), ") or (");
-                                        bool blnAddConjunction = false;
-                                        foreach (string strLoopSpirit in setAlwaysIncludeSpirits)
-                                        {
-                                            if (blnAddConjunction)
-                                                sbdSpiritsFilter.Append(" or name = ");
-                                            else
-                                            {
-                                                sbdSpiritsFilter.Append("name = ");
-                                                blnAddConjunction = true;
-                                            }
-                                            sbdSpiritsFilter.Append(strLoopSpirit.CleanXPath());
-                                        }
-                                        sbdSpiritsFilter.Append(")]");
-                                        strSpiritsFilter = sbdSpiritsFilter.ToString();
-                                    }
-                                }
-                                else
-                                    strSpiritsFilter = "spirits/spirit[("
-                                        + await CharacterObjectSettings.BookXPathAsync(token: token).ConfigureAwait(false)
-                                        + ")]";
-
-                                foreach (XPathNavigator xmlSpirit in xmlTraditionsBaseChummerNode
-                                                .Select(strSpiritsFilter))
-                                {
-                                    string strSpiritName
-                                        = xmlSpirit
-                                            .SelectSingleNodeAndCacheExpression("name", token)
-                                            ?.Value;
-                                    if (!string.IsNullOrEmpty(strSpiritName)
-                                        && (limit.Count == 0 || limit.Contains(strSpiritName)))
-                                    {
-                                        lstSpirit.Add(new ListItem(strSpiritName,
-                                            xmlSpirit
-                                                .SelectSingleNodeAndCacheExpression(
-                                                    "translate", token)?.Value
-                                            ?? strSpiritName));
-                                    }
-                                }
-                            }
-
-                            lstSpirit.Sort(CompareListItems.CompareNames);
-                            lstSpirit.Insert(0, ListItem.Blank);
+                            lstSpirit.AddRange(await GetTraditionSpiritChoicesAsync(xmlTraditionsBaseChummerNode, token).ConfigureAwait(false));
                             if (!lstSpirit.SequenceEqual(
                                     await cboSpiritCombat.DoThreadSafeFuncAsync(
                                         x => x.Items.Cast<ListItem>(), token).ConfigureAwait(false)))
@@ -12130,6 +12031,157 @@ namespace Chummer
             {
                 SkipUpdate = false;
             }
+        }
+
+        /// <summary>
+        /// The drain attribute combinations a custom tradition's drain box offers (blank first).
+        /// </summary>
+        internal static List<ListItem> GetDrainAttributeChoices(XPathNavigator xmlTraditionsBaseChummerNode, CancellationToken token = default)
+        {
+            List<ListItem> lstDrainAttributes = new List<ListItem>();
+            if (xmlTraditionsBaseChummerNode != null)
+            {
+                foreach (XPathNavigator xmlDrain in xmlTraditionsBaseChummerNode
+                                .SelectAndCacheExpression(
+                                    "drainattributes/drainattribute", token))
+                {
+                    string strName
+                        = xmlDrain
+                            .SelectSingleNodeAndCacheExpression("name", token)
+                            ?.Value;
+                    if (!string.IsNullOrEmpty(strName)
+                        && (lstDrainAttributes.Count == 0 || lstDrainAttributes.TrueForAll(x =>
+                                        x.Value?.ToString() != strName)))
+                    {
+                        string strTranslatedName = xmlDrain
+                            .SelectSingleNodeAndCacheExpression(
+                                "translate",
+                                token)?.Value ?? strName;
+                        lstDrainAttributes.Add(new ListItem(strName, strTranslatedName));
+                    }
+                }
+            }
+
+            lstDrainAttributes.Sort(CompareListItems.CompareNames);
+            lstDrainAttributes.Insert(0, ListItem.Blank);
+            return lstDrainAttributes;
+        }
+
+        /// <summary>
+        /// The spirits a custom tradition's spirit boxes offer (blank first): those in the enabled books, plus any spirit an enabled tradition uses,
+        /// limited by LimitSpiritCategory improvements.
+        /// </summary>
+        internal async Task<List<ListItem>> GetTraditionSpiritChoicesAsync(XPathNavigator xmlTraditionsBaseChummerNode, CancellationToken token = default)
+        {
+            List<ListItem> lstSpirit = new List<ListItem>();
+            using (new FetchSafelyFromSafeObjectPool<HashSet<string>>(
+                       Utils.StringHashSetPool, out HashSet<string> setAlwaysIncludeSpirits))
+            using (new FetchSafelyFromSafeObjectPool<HashSet<string>>(Utils.StringHashSetPool,
+                       out HashSet<string> limit))
+            {
+                if (xmlTraditionsBaseChummerNode != null)
+                {
+                    foreach (XPathNavigator xmlTradition in xmlTraditionsBaseChummerNode.Select(
+                                 "traditions/tradition["
+                                 + await CharacterObjectSettings.BookXPathAsync(token: token)
+                                                                .ConfigureAwait(false)
+                                 + "]"))
+                    {
+                        if (string.IsNullOrEmpty(xmlTradition.SelectSingleNodeAndCacheExpression("name", token)?.Value))
+                            continue;
+                        string strTemp = xmlTradition
+                            .SelectSingleNodeAndCacheExpression("spirits/spiritcombat", token)
+                            ?.Value;
+                        if (!string.IsNullOrEmpty(strTemp))
+                            setAlwaysIncludeSpirits.Add(strTemp);
+                        strTemp = xmlTradition
+                            .SelectSingleNodeAndCacheExpression("spirits/spiritdetection", token)
+                            ?.Value;
+                        if (!string.IsNullOrEmpty(strTemp))
+                            setAlwaysIncludeSpirits.Add(strTemp);
+                        strTemp = xmlTradition
+                            .SelectSingleNodeAndCacheExpression("spirits/spirithealth", token)
+                            ?.Value;
+                        if (!string.IsNullOrEmpty(strTemp))
+                            setAlwaysIncludeSpirits.Add(strTemp);
+                        strTemp = xmlTradition
+                            .SelectSingleNodeAndCacheExpression("spirits/spiritillusion", token)
+                            ?.Value;
+                        if (!string.IsNullOrEmpty(strTemp))
+                            setAlwaysIncludeSpirits.Add(strTemp);
+                        strTemp = xmlTradition
+                            .SelectSingleNodeAndCacheExpression("spirits/spiritmanipulation", token)
+                            ?.Value;
+                        if (!string.IsNullOrEmpty(strTemp))
+                            setAlwaysIncludeSpirits.Add(strTemp);
+                    }
+                }
+
+                foreach (Improvement improvement in await ImprovementManager
+                                .GetCachedImprovementListForValueOfAsync(
+                                    CharacterObject,
+                                    Improvement.ImprovementType
+                                        .LimitSpiritCategory, token: token)
+                                .ConfigureAwait(false))
+                {
+                    limit.Add(improvement.ImprovedName);
+                }
+
+                if (xmlTraditionsBaseChummerNode != null)
+                {
+                    string strSpiritsFilter;
+                    // This part is needed because of weird edge cases like someone having FA enabled but not SG, which means traditions will reference spirits that are from a non-enabled book
+                    if (setAlwaysIncludeSpirits.Count > 0)
+                    {
+                        using (new FetchSafelyFromObjectPool<StringBuilder>(Utils.StringBuilderPool, out StringBuilder sbdSpiritsFilter))
+                        {
+                            sbdSpiritsFilter.Append("spirits/spirit[(",
+                                await CharacterObjectSettings.BookXPathAsync(token: token).ConfigureAwait(false), ") or (");
+                            bool blnAddConjunction = false;
+                            foreach (string strLoopSpirit in setAlwaysIncludeSpirits)
+                            {
+                                if (blnAddConjunction)
+                                    sbdSpiritsFilter.Append(" or name = ");
+                                else
+                                {
+                                    sbdSpiritsFilter.Append("name = ");
+                                    blnAddConjunction = true;
+                                }
+                                sbdSpiritsFilter.Append(strLoopSpirit.CleanXPath());
+                            }
+                            sbdSpiritsFilter.Append(")]");
+                            strSpiritsFilter = sbdSpiritsFilter.ToString();
+                        }
+                    }
+                    else
+                        strSpiritsFilter = "spirits/spirit[("
+                            + await CharacterObjectSettings.BookXPathAsync(token: token).ConfigureAwait(false)
+                            + ")]";
+
+                    foreach (XPathNavigator xmlSpirit in xmlTraditionsBaseChummerNode
+                                    .Select(strSpiritsFilter))
+                    {
+                        string strSpiritName
+                            = xmlSpirit
+                                .SelectSingleNodeAndCacheExpression("name", token)
+                                ?.Value;
+                        if (!string.IsNullOrEmpty(strSpiritName)
+                            && (limit.Count == 0 || limit.Contains(strSpiritName)))
+                        {
+                            lstSpirit.Add(new ListItem(strSpiritName,
+                                xmlSpirit
+                                    .SelectSingleNodeAndCacheExpression(
+                                        "translate", token)?.Value
+                                ?? strSpiritName));
+                        }
+                    }
+                }
+
+                lstSpirit.Sort(CompareListItems.CompareNames);
+                lstSpirit.Insert(0, ListItem.Blank);
+            }
+
+            return lstSpirit;
         }
 
         private async void cboTradition_SelectedIndexChanged(object sender, EventArgs e)
@@ -21743,6 +21795,32 @@ namespace Chummer
 
             if (objXmlKit == null)
                 return false;
+            await AddPACKSKitFromNodeAsync(objXmlKit, async (strForcedValue, t) =>
+            {
+                using (ThreadSafeForm<SelectMartialArt> frmPickMartialArt = await ThreadSafeForm<SelectMartialArt>
+                           .GetAsync(() => new SelectMartialArt(CharacterObject)
+                           {
+                               ForcedValue = strForcedValue
+                           }, t).ConfigureAwait(false))
+                {
+                    return await frmPickMartialArt.ShowDialogSafeAsync(this, t).ConfigureAwait(false) != DialogResult.Cancel
+                        ? frmPickMartialArt.MyForm.SelectedMartialArt
+                        : string.Empty;
+                }
+            }, token).ConfigureAwait(false);
+            return blnAddAgain;
+        }
+
+        /// <summary>
+        /// Add everything in a PACKS kit to the character.
+        /// </summary>
+        /// <param name="objXmlKit">The kit's node in packs.xml.</param>
+        /// <param name="funcSelectMartialArt">For kits that let the character pick a martial art: given the kit's forced choice (if any), returns the
+        /// martial art's id or name, or an empty string for none.</param>
+        /// <param name="token">Cancellation token to listen to.</param>
+        internal async Task AddPACKSKitFromNodeAsync(XmlNode objXmlKit, Func<string, CancellationToken, Task<string>> funcSelectMartialArt,
+                                                     CancellationToken token = default)
+        {
             const bool blnCreateChildren = true;
             IAsyncDisposable objLocker = await CharacterObject.LockObject.EnterUpgradeableReadLockAsync(token).ConfigureAwait(false);
             try
@@ -21802,35 +21880,27 @@ namespace Chummer
                 if (xmlSelectMartialArt != null)
                 {
                     string strForcedValue = xmlSelectMartialArt.Attributes["select"]?.InnerTextViaPool(token) ?? string.Empty;
-
-                    using (ThreadSafeForm<SelectMartialArt> frmPickMartialArt = await ThreadSafeForm<SelectMartialArt>
-                               .GetAsync(() => new SelectMartialArt(CharacterObject)
-                               {
-                                   ForcedValue = strForcedValue
-                               }, token).ConfigureAwait(false))
+                    string strSelectedMartialArt = await funcSelectMartialArt(strForcedValue, token).ConfigureAwait(false);
+                    if (!string.IsNullOrEmpty(strSelectedMartialArt))
                     {
-                        if (await frmPickMartialArt.ShowDialogSafeAsync(this, token).ConfigureAwait(false)
-                            != DialogResult.Cancel)
+                        // Open the Martial Arts XML file and locate the selected piece.
+                        XmlDocument objXmlMartialArtDocument = await CharacterObject
+                            .LoadDataAsync("martialarts.xml", token: token)
+                            .ConfigureAwait(false);
+
+                        XmlNode objXmlArt = objXmlMartialArtDocument.TryGetNodeByNameOrId(
+                            "/chummer/martialarts/martialart", strSelectedMartialArt);
+
+                        MartialArt objMartialArt = new MartialArt(CharacterObject);
+                        try
                         {
-                            // Open the Martial Arts XML file and locate the selected piece.
-                            XmlDocument objXmlMartialArtDocument = await CharacterObject
-                                .LoadDataAsync("martialarts.xml", token: token)
-                                .ConfigureAwait(false);
-
-                            XmlNode objXmlArt = objXmlMartialArtDocument.TryGetNodeByNameOrId(
-                                "/chummer/martialarts/martialart", frmPickMartialArt.MyForm.SelectedMartialArt);
-
-                            MartialArt objMartialArt = new MartialArt(CharacterObject);
-                            try
-                            {
-                                await objMartialArt.CreateAsync(objXmlArt, token).ConfigureAwait(false);
-                                await CharacterObject.MartialArts.AddAsync(objMartialArt, token).ConfigureAwait(false);
-                            }
-                            catch
-                            {
-                                await objMartialArt.RemoveAsync(false, CancellationToken.None).ConfigureAwait(false);
-                                throw;
-                            }
+                            await objMartialArt.CreateAsync(objXmlArt, token).ConfigureAwait(false);
+                            await CharacterObject.MartialArts.AddAsync(objMartialArt, token).ConfigureAwait(false);
+                        }
+                        catch
+                        {
+                            await objMartialArt.RemoveAsync(false, CancellationToken.None).ConfigureAwait(false);
+                            throw;
                         }
                     }
                 }
@@ -22737,8 +22807,6 @@ namespace Chummer
             {
                 await objLocker.DisposeAsync().ConfigureAwait(false);
             }
-
-            return blnAddAgain;
         }
 
         /// <summary>
@@ -22866,37 +22934,12 @@ namespace Chummer
                                                      CancellationToken token = default)
         {
             // Make sure all of the Cyberware the character has is of the same grade.
-            string strGrade = string.Empty;
-            if (await (await CharacterObject.GetCyberwareAsync(token).ConfigureAwait(false)).AnyAsync(async (objCyberware, t) =>
-                {
-                    if (objCyberware.SourceType != objSource)
-                        return false;
-                    string strLoop = (await objCyberware.GetGradeAsync(t).ConfigureAwait(false)).ToString();
-                    if (string.IsNullOrEmpty(strGrade))
-                        strGrade = strLoop;
-                    else if (strGrade != strLoop)
-                    {
-                        await Program.ShowScrollableMessageBoxAsync(
-                            this,
-                            await LanguageManager.GetStringAsync("Message_CyberwareGradeMismatch", token: t)
-                                .ConfigureAwait(false),
-                            await LanguageManager.GetStringAsync("MessageTitle_CyberwareGradeMismatch", token: t)
-                                .ConfigureAwait(false), MessageBoxButtons.OK, MessageBoxIcon.Error, token: t).ConfigureAwait(false);
-                        return true;
-                    }
-
-                    return false;
-                }, token).ConfigureAwait(false))
-                return;
-
-            // The character has no Cyberware!
-            if (string.IsNullOrEmpty(strGrade))
+            (string strError, string strErrorTitle) = await Chummer.CreateCyberwareSuite.CheckCanCreateSuiteAsync(CharacterObject, objSource, token)
+                                                                                        .ConfigureAwait(false);
+            if (!string.IsNullOrEmpty(strError))
             {
-                await Program.ShowScrollableMessageBoxAsync(
-                    this,
-                    await LanguageManager.GetStringAsync("Message_NoCyberware", token: token).ConfigureAwait(false),
-                    await LanguageManager.GetStringAsync("MessageTitle_NoCyberware", token: token)
-                        .ConfigureAwait(false), MessageBoxButtons.OK, MessageBoxIcon.Exclamation, token: token).ConfigureAwait(false);
+                await Program.ShowScrollableMessageBoxAsync(this, strError, strErrorTitle, MessageBoxButtons.OK, MessageBoxIcon.Exclamation, token: token)
+                             .ConfigureAwait(false);
                 return;
             }
 
@@ -23323,32 +23366,58 @@ namespace Chummer
                         frmPickCyberwareSuite.MyForm.SelectedSuite);
                     if (xmlSuite == null)
                         return;
-                    Grade objGrade
-                        = await Grade
-                            .ConvertToCyberwareGradeAsync(xmlSuite["grade"]?.InnerTextViaPool(token), objSource, CharacterObject,
-                                token).ConfigureAwait(false);
+                    await AddCyberwareSuiteFromNodeAsync(xmlSuite, objSource, token).ConfigureAwait(false);
+                }
+            }
+            finally
+            {
+                await objLocker.DisposeAsync().ConfigureAwait(false);
+            }
+        }
 
-                    string strXPathPrefix = strType + "s/" + strType;
-                    // Run through each of the items in the Suite and add them to the character.
-                    using (XmlNodeList xmlItemList = xmlSuite.SelectNodes(strXPathPrefix))
+        /// <summary>
+        /// Add every piece of a cyberware or bioware suite to the character, at the suite's grade.
+        /// </summary>
+        /// <returns>The top-level ware that was added.</returns>
+        internal async Task<List<Cyberware>> AddCyberwareSuiteFromNodeAsync(XmlNode xmlSuite, Improvement.ImprovementSource objSource,
+                                                                            CancellationToken token = default)
+        {
+            List<Cyberware> lstReturn = new List<Cyberware>();
+            IAsyncDisposable objLocker =
+                await CharacterObject.LockObject.EnterUpgradeableReadLockAsync(token).ConfigureAwait(false);
+            try
+            {
+                token.ThrowIfCancellationRequested();
+                string strType = objSource == Improvement.ImprovementSource.Cyberware ? "cyberware" : "bioware";
+                XmlDocument objXmlDocument = await CharacterObject
+                    .LoadDataAsync(strType + ".xml", token: token)
+                    .ConfigureAwait(false);
+                Grade objGrade
+                    = await Grade
+                        .ConvertToCyberwareGradeAsync(xmlSuite["grade"]?.InnerTextViaPool(token), objSource, CharacterObject,
+                            token).ConfigureAwait(false);
+
+                string strXPathPrefix = strType + "s/" + strType;
+                // Run through each of the items in the Suite and add them to the character.
+                using (XmlNodeList xmlItemList = xmlSuite.SelectNodes(strXPathPrefix))
+                {
+                    if (xmlItemList?.Count > 0)
                     {
-                        if (xmlItemList?.Count > 0)
+                        foreach (XmlNode xmlItem in xmlItemList)
                         {
-                            foreach (XmlNode xmlItem in xmlItemList)
-                            {
-                                string strName = xmlItem["name"]?.InnerTextViaPool(token);
-                                if (string.IsNullOrEmpty(strName))
-                                    continue;
-                                XmlNode objXmlCyberware
-                                    = objXmlDocument.TryGetNodeByNameOrId(
-                                        "/chummer/" + strXPathPrefix, strName);
-                                int.TryParse(xmlItem["rating"]?.InnerTextViaPool(token), NumberStyles.Integer, GlobalSettings.InvariantCultureInfo, out int intRating);
+                            string strName = xmlItem["name"]?.InnerTextViaPool(token);
+                            if (string.IsNullOrEmpty(strName))
+                                continue;
+                            XmlNode objXmlCyberware
+                                = objXmlDocument.TryGetNodeByNameOrId(
+                                    "/chummer/" + strXPathPrefix, strName);
+                            int.TryParse(xmlItem["rating"]?.InnerTextViaPool(token), NumberStyles.Integer, GlobalSettings.InvariantCultureInfo, out int intRating);
 
-                                Cyberware objCyberware
-                                    = await CreateSuiteCyberware(xmlItem, objXmlCyberware, objGrade, intRating,
-                                        objSource, token).ConfigureAwait(false);
-                                await CharacterObject.Cyberware.AddAsync(objCyberware, token).ConfigureAwait(false);
-                            }
+                            Cyberware objCyberware
+                                = await CreateSuiteCyberware(xmlItem, objXmlCyberware, objGrade, intRating,
+                                    objSource, token).ConfigureAwait(false);
+                            await CharacterObject.Cyberware.AddAsync(objCyberware, token).ConfigureAwait(false);
+                            lstReturn.Add(objCyberware);
                         }
                     }
                 }
@@ -23357,6 +23426,8 @@ namespace Chummer
             {
                 await objLocker.DisposeAsync().ConfigureAwait(false);
             }
+
+            return lstReturn;
         }
 
         /// <summary>
@@ -23755,32 +23826,43 @@ namespace Chummer
                         = (await CharacterObject.LoadDataAsync("spells.xml", token: GenericToken).ConfigureAwait(false))
                         .TryGetNodeByNameOrId("/chummer/spells/spell", frmPickArt.MyForm.SelectedItem);
 
-                    Spell objNewSpell = new Spell(CharacterObject);
-
-                    try
-                    {
-                        await objNewSpell.CreateAsync(objXmlArt, string.Empty, false, false, false,
-                            Improvement.ImprovementSource.Initiation, GenericToken).ConfigureAwait(false);
-                        objNewSpell.Grade = objGrade.Grade;
-                        if (objNewSpell.InternalId.IsEmptyGuid())
-                        {
-                            await objNewSpell.RemoveAsync(false, CancellationToken.None).ConfigureAwait(false);
-                            return;
-                        }
-
-                        await CharacterObject.Spells.AddAsync(objNewSpell, GenericToken).ConfigureAwait(false);
-                    }
-                    catch
-                    {
-                        await objNewSpell.RemoveAsync(false, CancellationToken.None).ConfigureAwait(false);
-                        throw;
-                    }
+                    await AddEnchantmentFromNodeAsync(objGrade, objXmlArt, GenericToken).ConfigureAwait(false);
                 }
             }
             catch (OperationCanceledException)
             {
                 //swallow this
             }
+        }
+
+        /// <summary>
+        /// Learn an enchantment (an Enchantments-category spell) at an initiation grade, as the Select Art dialog's OK does in enchantment mode.
+        /// </summary>
+        /// <returns>The new spell, or null if it could not be created.</returns>
+        internal async Task<Spell> AddEnchantmentFromNodeAsync(InitiationGrade objGrade, XmlNode objXmlArt, CancellationToken token = default)
+        {
+            Spell objNewSpell = new Spell(CharacterObject);
+
+            try
+            {
+                await objNewSpell.CreateAsync(objXmlArt, string.Empty, false, false, false,
+                    Improvement.ImprovementSource.Initiation, token).ConfigureAwait(false);
+                objNewSpell.Grade = objGrade.Grade;
+                if (objNewSpell.InternalId.IsEmptyGuid())
+                {
+                    await objNewSpell.RemoveAsync(false, CancellationToken.None).ConfigureAwait(false);
+                    return null;
+                }
+
+                await CharacterObject.Spells.AddAsync(objNewSpell, token).ConfigureAwait(false);
+            }
+            catch
+            {
+                await objNewSpell.RemoveAsync(false, CancellationToken.None).ConfigureAwait(false);
+                throw;
+            }
+
+            return objNewSpell;
         }
 
         private async void tsMetamagicAddRitual_Click(object sender, EventArgs e)
@@ -23872,36 +23954,48 @@ namespace Chummer
                     if (objXmlArt == null)
                         return;
 
-                    Enhancement objEnhancement = new Enhancement(CharacterObject);
-                    await objEnhancement.CreateAsync(objXmlArt, Improvement.ImprovementSource.Initiation, token: GenericToken).ConfigureAwait(false);
-                    objEnhancement.Grade = objGrade.Grade;
-                    if (objEnhancement.InternalId.IsEmptyGuid())
-                        return;
-
-                    // Find the associated Power
-                    string strPower = objXmlArt["power"]?.InnerTextViaPool(GenericToken);
-                    Power objPower = await CharacterObject.Powers
-                                                          .FirstOrDefaultAsync(
-                                                              x => x.Name == strPower
-                                                                   || string.Equals(
-                                                                       x.SourceIDString, strPower,
-                                                                       StringComparison.OrdinalIgnoreCase), GenericToken)
-                                                          .ConfigureAwait(false);
-                    if (objPower != null)
-                    {
-                        await objPower.Enhancements.AddAsync(objEnhancement, GenericToken).ConfigureAwait(false);
-                    }
-                    else
-                    {
-                        // Add it to the character instead
-                        await CharacterObject.Enhancements.AddAsync(objEnhancement, GenericToken).ConfigureAwait(false);
-                    }
+                    await AddEnhancementFromNodeAsync(objGrade, objXmlArt, GenericToken).ConfigureAwait(false);
                 }
             }
             catch (OperationCanceledException)
             {
                 //swallow this
             }
+        }
+
+        /// <summary>
+        /// Learn a power enhancement at an initiation grade, as the Select Art dialog's OK does in enhancement mode. It goes on its power if the
+        /// character has that power, or on the character otherwise.
+        /// </summary>
+        /// <returns>The new enhancement, or null if it could not be created.</returns>
+        internal async Task<Enhancement> AddEnhancementFromNodeAsync(InitiationGrade objGrade, XmlNode objXmlArt, CancellationToken token = default)
+        {
+            Enhancement objEnhancement = new Enhancement(CharacterObject);
+            await objEnhancement.CreateAsync(objXmlArt, Improvement.ImprovementSource.Initiation, token: token).ConfigureAwait(false);
+            objEnhancement.Grade = objGrade.Grade;
+            if (objEnhancement.InternalId.IsEmptyGuid())
+                return null;
+
+            // Find the associated Power
+            string strPower = objXmlArt["power"]?.InnerTextViaPool(token);
+            Power objPower = await CharacterObject.Powers
+                                                  .FirstOrDefaultAsync(
+                                                      x => x.Name == strPower
+                                                           || string.Equals(
+                                                               x.SourceIDString, strPower,
+                                                               StringComparison.OrdinalIgnoreCase), token)
+                                                  .ConfigureAwait(false);
+            if (objPower != null)
+            {
+                await objPower.Enhancements.AddAsync(objEnhancement, token).ConfigureAwait(false);
+            }
+            else
+            {
+                // Add it to the character instead
+                await CharacterObject.Enhancements.AddAsync(objEnhancement, token).ConfigureAwait(false);
+            }
+
+            return objEnhancement;
         }
 
         private void panContacts_Click(object sender, EventArgs e)

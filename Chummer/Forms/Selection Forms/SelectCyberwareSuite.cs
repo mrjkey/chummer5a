@@ -88,8 +88,6 @@ namespace Chummer
             {
                 if (xmlSuiteList?.Count > 0)
                 {
-                    List<Grade> lstGrades = await _objCharacter.GetGradesListAsync(_eSource).ConfigureAwait(false);
-
                     using (new FetchSafelyFromSafeObjectPool<List<ListItem>>(Utils.ListItemListPool,
                                out List<ListItem> lstSuitesToAdd))
                     {
@@ -98,25 +96,8 @@ namespace Chummer
                             string strName = objXmlSuite["name"]?.InnerTextViaPool();
                             if (!string.IsNullOrEmpty(strName))
                             {
-                                string strGrade = objXmlSuite["grade"]?.InnerTextViaPool() ?? string.Empty;
-                                if (!string.IsNullOrEmpty(strGrade))
-                                {
-                                    if (lstGrades.TrueForAll(x => x.Name != strGrade))
-                                        continue;
-                                    // ReSharper disable once SwitchStatementMissingSomeEnumCasesNoDefault
-                                    switch (_eSource)
-                                    {
-                                        case Improvement.ImprovementSource.Bioware when strGrade.ContainsAny((await ImprovementManager
-                                                .GetCachedImprovementListForValueOfAsync(_objCharacter,
-                                                    Improvement.ImprovementType.DisableBiowareGrade).ConfigureAwait(false))
-                                            .Select(x => x.ImprovedName)):
-                                        case Improvement.ImprovementSource.Cyberware when strGrade.ContainsAny((await ImprovementManager
-                                                .GetCachedImprovementListForValueOfAsync(_objCharacter,
-                                                    Improvement.ImprovementType.DisableCyberwareGrade).ConfigureAwait(false))
-                                            .Select(x => x.ImprovedName)):
-                                            continue;
-                                    }
-                                }
+                                if (!await IsSuiteAllowedAsync(_objCharacter, objXmlSuite, _eSource).ConfigureAwait(false))
+                                    continue;
 
                                 lstSuitesToAdd.Add(new ListItem(objXmlSuite["id"]?.InnerTextViaPool() ?? strName, objXmlSuite["translate"]?.InnerTextViaPool() ?? strName));
                             }
@@ -188,6 +169,37 @@ namespace Chummer
         #endregion Control events
 
         #region Properties
+
+        /// <summary>
+        /// Whether the dialog lists a suite: its grade must be one the character can take.
+        /// </summary>
+        public static async Task<bool> IsSuiteAllowedAsync(Character objCharacter, XmlNode objXmlSuite, Improvement.ImprovementSource eSource,
+                                                           CancellationToken token = default)
+        {
+            if (await objCharacter.GetIsAIAsync(token).ConfigureAwait(false))
+                return false;
+            string strGrade = objXmlSuite["grade"]?.InnerTextViaPool(token) ?? string.Empty;
+            if (string.IsNullOrEmpty(strGrade))
+                return true;
+            List<Grade> lstGrades = await objCharacter.GetGradesListAsync(eSource, token: token).ConfigureAwait(false);
+            if (lstGrades.TrueForAll(x => x.Name != strGrade))
+                return false;
+            // ReSharper disable once SwitchStatementMissingSomeEnumCasesNoDefault
+            switch (eSource)
+            {
+                case Improvement.ImprovementSource.Bioware when strGrade.ContainsAny((await ImprovementManager
+                        .GetCachedImprovementListForValueOfAsync(objCharacter,
+                            Improvement.ImprovementType.DisableBiowareGrade, token: token).ConfigureAwait(false))
+                    .Select(x => x.ImprovedName)):
+                case Improvement.ImprovementSource.Cyberware when strGrade.ContainsAny((await ImprovementManager
+                        .GetCachedImprovementListForValueOfAsync(objCharacter,
+                            Improvement.ImprovementType.DisableCyberwareGrade, token: token).ConfigureAwait(false))
+                    .Select(x => x.ImprovedName)):
+                    return false;
+            }
+
+            return true;
+        }
 
         /// <summary>
         /// Name of Suite that was selected in the dialogue.

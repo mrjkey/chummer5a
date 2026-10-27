@@ -93,6 +93,19 @@ namespace Chummer.Agent
                                  ("second!", "string", "'Attack', 'Sleaze', 'Data Processing' or 'Firewall'."),
                                  ("character", "string", CharacterArgDescription)),
                 SwapMatrixAttributesAsync);
+            yield return new AgentTool("copy_item",
+                "Copy armor, an armor mod, cyberware, gear, a lifestyle, a vehicle, a weapon or a weapon accessory with everything in it, as Edit > Copy "
+                + "does. paste_item then adds the copy, to this character or another one in creation.",
+                AgentTool.Schema(("id!", "string", ItemIdDescription),
+                                 ("character", "string", CharacterArgDescription)),
+                CopyItemAsync);
+            yield return new AgentTool("paste_item",
+                "Add a copy of what copy_item copied, as Edit > Paste does. Armor, cyberware, gear, lifestyles, vehicles and weapons go on the character; "
+                + "with `into`, armor mods go into armor, plugins into cyberware, gear into what takes gear, accessories into weapons, and weapons into "
+                + "weapon mounts or other weapons. A copy costs what the original did.",
+                AgentTool.Schema(("into", "string", "Id of the item to paste into, from list_items (optional)."),
+                                 ("character", "string", CharacterArgDescription)),
+                PasteItemAsync);
             yield return new AgentTool("manage_location",
                 "Add, rename or remove a location (a folder for organizing gear, armor, weapons or vehicles), as the editor's Add Location and "
                 + "rename/delete menu items do. Removing one leaves its items unfiled. File items under it with set_item_details(location).",
@@ -1002,5 +1015,64 @@ namespace Chummer.Agent
         }
 
         #endregion
+
+        private static async Task<object> CopyItemAsync(JObject objArgs, CancellationToken token)
+        {
+            CharacterShared frmCharacter = await GetCharacterFormAsync(objArgs, token).ConfigureAwait(false);
+            OwnedItem objOwned = await FindItemAsync(frmCharacter.CharacterObject, RequiredString(objArgs, "id"), token).ConfigureAwait(false);
+            object objItem = objOwned.Item;
+            string strName = await GetItemNameAsync(objItem, token).ConfigureAwait(false);
+            // What Edit > Copy handles
+            if (!(objItem is Armor || objItem is ArmorMod || objItem is Cyberware || objItem is Gear || objItem is Lifestyle || objItem is Vehicle
+                  || objItem is Weapon || objItem is WeaponAccessory))
+                throw new AgentToolException(strName + " can't be copied; only armor, armor mods, cyberware, gear, lifestyles, vehicles, weapons and weapon accessories can.");
+            await frmCharacter.CopyObject(objItem, token).ConfigureAwait(false);
+            return new { result = "Copied " + strName + ". Use paste_item to add the copy." };
+        }
+
+        private static async Task<object> PasteItemAsync(JObject objArgs, CancellationToken token)
+        {
+            CharacterCreate frmCreate = await GetCreateFormAsync(objArgs, token).ConfigureAwait(false);
+            Character objCharacter = frmCreate.CharacterObject;
+            object objInto = null;
+            string strInto = objArgs.Value<string>("into")?.Trim();
+            if (!string.IsNullOrEmpty(strInto))
+            {
+                objInto = (await FindItemAsync(objCharacter, strInto, token).ConfigureAwait(false)).Item;
+                // Edit > Paste uses the item selected in the copied item's own tab, so only these can be targets
+                bool blnFits;
+                switch (await GlobalSettings.GetClipboardContentTypeAsync(token).ConfigureAwait(false))
+                {
+                    case ClipboardContentType.ArmorMod:
+                        blnFits = objInto is Armor;
+                        break;
+                    case ClipboardContentType.Cyberware:
+                        blnFits = objInto is Cyberware;
+                        break;
+                    case ClipboardContentType.Gear:
+                        blnFits = objInto is IHasGear;
+                        break;
+                    case ClipboardContentType.Weapon:
+                        blnFits = objInto is Weapon || objInto is WeaponMount || objInto is VehicleMod;
+                        break;
+                    case ClipboardContentType.WeaponAccessory:
+                        blnFits = objInto is Weapon;
+                        break;
+                    default:
+                        blnFits = false;
+                        break;
+                }
+
+                if (!blnFits)
+                    throw new AgentToolException("What was copied doesn't go into " + await GetItemNameAsync(objInto, token).ConfigureAwait(false) + ".");
+            }
+
+            if (!await frmCreate.PasteClipboardAsync(objInto, token).ConfigureAwait(false))
+                throw new AgentToolException(objInto == null
+                                                 ? "Nothing that goes on the character was copied; copy something with copy_item, or pass `into` for parts that go into another item."
+                                                 : "What was copied doesn't go into " + await GetItemNameAsync(objInto, token).ConfigureAwait(false) + ".");
+            return await FinishEditAsync(frmCreate, "Pasted the copy" + (objInto != null ? " into " + await GetItemNameAsync(objInto, token).ConfigureAwait(false) : string.Empty)
+                                                    + ". Use list_items to see it.", token).ConfigureAwait(false);
+        }
     }
 }

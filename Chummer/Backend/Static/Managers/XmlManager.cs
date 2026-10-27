@@ -1116,6 +1116,16 @@ namespace Chummer
                         }
                     }
 
+                    // Suites saved in-program (Special > Create Cyberware/Bioware Suite) go into custom files in the data folder itself, so always load those
+                    if (strFileName == "cyberware.xml" || strFileName == "bioware.xml")
+                    {
+                        blnHasLiveCustomData |= blnSync
+                            // ReSharper disable once MethodHasAsyncOverload
+                            ? DoProcessCustomDataFiles(xmlScratchpad, xmlReturn, Utils.GetDataFolderPath, strFileName, SearchOption.TopDirectoryOnly, token: token)
+                            : await DoProcessCustomDataFilesAsync(xmlScratchpad, xmlReturn, Utils.GetDataFolderPath, strFileName,
+                                SearchOption.TopDirectoryOnly, token: token).ConfigureAwait(false);
+                    }
+
                     // PACKS always have live custom data via the special packs folder, though entries here don't have GUIDs and so don't need duplicate checking
                     if (strFileName == "packs.xml")
                     {

@@ -761,6 +761,30 @@ namespace Chummer
             }
         }
 
+        /// <summary>
+        /// Create a weapon mount add-on (from /chummer/weaponmountmods) for a vehicle's mount, as the dialog's Add Mod button does.
+        /// The caller adds it to the mount's mods.
+        /// </summary>
+        public static async Task<VehicleMod> CreateMountModAsync(Character objCharacter, Vehicle objVehicle, XmlNode objXmlMod, int intRating, bool blnBlackMarket,
+                                                                 bool blnFree, CancellationToken token = default)
+        {
+            VehicleMod objMod = new VehicleMod(objCharacter);
+            try
+            {
+                objMod.DiscountCost = blnBlackMarket;
+                await objMod.CreateAsync(objXmlMod, intRating, objVehicle, token: token).ConfigureAwait(false);
+                if (blnFree)
+                    objMod.Cost = "0";
+            }
+            catch
+            {
+                await objMod.DeleteVehicleModAsync(token: CancellationToken.None).ConfigureAwait(false);
+                throw;
+            }
+
+            return objMod;
+        }
+
         private async void cmdAddMod_Click(object sender, EventArgs e)
         {
             try
@@ -829,13 +853,11 @@ namespace Chummer
                             XmlDocument objXmlDocument = await _objCharacter.LoadDataAsync("vehicles.xml", token: token).ConfigureAwait(false);
                             XmlNode objXmlMod = objXmlDocument.TryGetNodeByNameOrId("/chummer/weaponmountmods/mod", frmPickVehicleMod.MyForm.SelectedMod);
                             TreeNode objNewNode;
-                            VehicleMod objMod = new VehicleMod(_objCharacter);
+                            VehicleMod objMod = await CreateMountModAsync(_objCharacter, _objVehicle, objXmlMod, frmPickVehicleMod.MyForm.SelectedRating,
+                                                                          frmPickVehicleMod.MyForm.BlackMarketDiscount, frmPickVehicleMod.MyForm.FreeCost, token)
+                                                                          .ConfigureAwait(false);
                             try
                             {
-                                objMod.DiscountCost = frmPickVehicleMod.MyForm.BlackMarketDiscount;
-                                await objMod.CreateAsync(objXmlMod, frmPickVehicleMod.MyForm.SelectedRating, _objVehicle, token: token).ConfigureAwait(false);
-                                if (frmPickVehicleMod.MyForm.FreeCost)
-                                    objMod.Cost = "0";
                                 if (_objMount != null)
                                     await _objMount.Mods.AddAsync(objMod, token).ConfigureAwait(false);
                                 await _lstMods.AddAsync(objMod, token).ConfigureAwait(false);

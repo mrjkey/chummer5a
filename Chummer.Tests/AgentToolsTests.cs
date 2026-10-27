@@ -1108,5 +1108,184 @@ namespace Chummer.Tests
                 await CallToolOkAsync("remove_quality", new JObject { ["id"] = "Photographic Memory" }, token).ConfigureAwait(false);
             }
         }
+
+        [TestMethod]
+        public void GearPackagesAndDrugs()
+        {
+            string strTag = Guid.NewGuid().ToString("N");
+            string strSuiteFile = Path.Combine(Utils.GetDataFolderPath, "custom_agenttest" + strTag + "_cyberware.xml");
+            string strKitFile = Path.Combine(Utils.GetPacksFolderPath, "custom_agenttest" + strTag + "_packs.xml");
+            try
+            {
+                RunWithMainForm((frmMain, t) => RunGearPackagesAndDrugsScenarioAsync(strTag, t));
+            }
+            finally
+            {
+                foreach (string strFile in new[] { strSuiteFile, strKitFile })
+                {
+                    if (File.Exists(strFile))
+                        File.Delete(strFile);
+                }
+            }
+        }
+
+        private static async Task RunGearPackagesAndDrugsScenarioAsync(string strTag, CancellationToken token)
+        {
+            const string strShopper = "Agent Test Shopper";
+            await CallToolOkAsync("create_character", new JObject
+            {
+                ["settings"] = "Full House",
+                ["metatype"] = "Human",
+                ["priorities"] = new JObject { ["heritage"] = "D", ["attributes"] = "B", ["talent"] = "E", ["skills"] = "C", ["resources"] = "A" },
+                ["talent"] = "Mundane",
+                ["name"] = strShopper
+            }, token).ConfigureAwait(false);
+
+            // The new catalog kinds
+            foreach (string strKind in new[] { "drug", "packs", "weaponmount", "weaponmountmod", "enhancement", "enchantment", "lifemodule" })
+            {
+                JObject objSearch = (JObject)await CallOnAsync(strShopper, "search_catalog", new JObject { ["kind"] = strKind, ["legal_only"] = false }, token)
+                    .ConfigureAwait(false);
+                Assert.IsTrue(objSearch.Value<int>("count") > 0, strKind + ": " + objSearch);
+            }
+
+            // Drugs, bought on their own and into a chemical gland
+            decimal decNuyen = ((JObject)await CallOnAsync(strShopper, "get_character_summary", new JObject(), token).ConfigureAwait(false))["points"]["nuyen"]
+                .Value<decimal>("remaining");
+            JObject objResult = (JObject)await CallOnAsync(strShopper, "add_drug", new JObject { ["id"] = "Jazz", ["quantity"] = 2 }, token).ConfigureAwait(false);
+            Assert.IsTrue(objResult.Value<decimal>("nuyenRemaining") < decNuyen, objResult.ToString());
+            (bool blnIsError, string strText) = await TryCallOnAsync(strShopper, "add_drug", new JObject { ["id"] = "Jazz", ["grade"] = "No Such Grade" }, token)
+                .ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+            StringAssert.Contains(strText, "Street Cooked");
+            await CallOnAsync(strShopper, "add_cyberware", new JObject
+            {
+                ["id"] = "Chemical Gland (Internal Release or Gradual Release)", ["kind"] = "bioware", ["forced_value"] = "Internal Release"
+            }, token).ConfigureAwait(false);
+            await CallOnAsync(strShopper, "add_cyberware", new JObject { ["id"] = "Datajack" }, token).ConfigureAwait(false);
+            List<JToken> lstItems = await ListAllItemsAsync(strShopper, token).ConfigureAwait(false);
+            string strGland = lstItems.First(x => x.Value<string>("name").StartsWith("Chemical Gland", StringComparison.Ordinal)).Value<string>("id");
+            string strDatajack = lstItems.First(x => x.Value<string>("name").StartsWith("Datajack", StringComparison.Ordinal)).Value<string>("id");
+            await CallOnAsync(strShopper, "add_drug", new JObject { ["id"] = "Jazz", ["parent"] = strGland }, token).ConfigureAwait(false);
+            (blnIsError, strText) = await TryCallOnAsync(strShopper, "add_drug", new JObject { ["id"] = "Jazz", ["parent"] = strDatajack }, token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+            lstItems = await ListAllItemsAsync(strShopper, token).ConfigureAwait(false);
+            Assert.AreEqual(2, lstItems.Count(x => x.Value<string>("kind") == "drug" && x.Value<string>("name").Contains("Jazz")),
+                            string.Join(", ", lstItems.Select(x => x.Value<string>("name"))));
+
+            // A PACKS kit from the data, then one saved from this character and added to another
+            await CallOnAsync(strShopper, "add_packs_kit", new JObject { ["id"] = "Medic Pack" }, token).ConfigureAwait(false);
+            lstItems = await ListAllItemsAsync(strShopper, token).ConfigureAwait(false);
+            Assert.IsTrue(lstItems.Any(x => x.Value<string>("name").StartsWith("Medkit", StringComparison.Ordinal)), "The Medic Pack added no medkit");
+            (blnIsError, strText) = await TryCallOnAsync(strShopper, "add_packs_kit", new JObject { ["id"] = "No Such Kit" }, token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+            string strKit = "Agent Test Kit " + strTag;
+            await CallOnAsync(strShopper, "create_packs_kit", new JObject
+            {
+                ["name"] = strKit, ["parts"] = new JArray("gear"), ["file_name"] = "custom_agenttest" + strTag + "_packs.xml"
+            }, token).ConfigureAwait(false);
+            (blnIsError, strText) = await TryCallOnAsync(strShopper, "create_packs_kit", new JObject
+            {
+                ["name"] = strKit, ["file_name"] = "custom_agenttest" + strTag + "_packs.xml"
+            }, token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, "A second kit with the same name: " + strText);
+
+            // A cyberware suite saved from this character, installed on another
+            string strSuite = "Agent Test Suite " + strTag;
+            await CallOnAsync(strShopper, "create_cyberware_suite", new JObject { ["name"] = strSuite, ["file_name"] = "custom_agenttest" + strTag + "_cyberware.xml" }, token)
+                .ConfigureAwait(false);
+
+            const string strCopy = "Agent Test Copycat";
+            await CallToolOkAsync("create_character", new JObject
+            {
+                ["settings"] = "Full House",
+                ["metatype"] = "Human",
+                ["priorities"] = new JObject { ["heritage"] = "D", ["attributes"] = "B", ["talent"] = "E", ["skills"] = "C", ["resources"] = "A" },
+                ["talent"] = "Mundane",
+                ["name"] = strCopy
+            }, token).ConfigureAwait(false);
+            await CallOnAsync(strCopy, "add_packs_kit", new JObject { ["id"] = strKit, ["category"] = "Custom" }, token).ConfigureAwait(false);
+            lstItems = await ListAllItemsAsync(strCopy, token).ConfigureAwait(false);
+            Assert.IsTrue(lstItems.Any(x => x.Value<string>("name").StartsWith("Medkit", StringComparison.Ordinal)), "The saved kit added no medkit");
+            objResult = (JObject)await CallOnAsync(strCopy, "add_cyberware_suite", new JObject { ["id"] = strSuite }, token).ConfigureAwait(false);
+            StringAssert.Contains(objResult.Value<string>("result"), "Datajack");
+        }
+
+        [TestMethod]
+        public void MountsNaturalWeaponsAndCopies()
+        {
+            RunWithMainForm((frmMain, t) => RunMountsNaturalWeaponsAndCopiesScenarioAsync(t));
+        }
+
+        private static async Task RunMountsNaturalWeaponsAndCopiesScenarioAsync(CancellationToken token)
+        {
+            const string strRigger = "Agent Test Mechanic";
+            await CallToolOkAsync("create_character", new JObject
+            {
+                ["settings"] = "Full House",
+                ["metatype"] = "Human",
+                ["priorities"] = new JObject { ["heritage"] = "D", ["attributes"] = "B", ["talent"] = "E", ["skills"] = "C", ["resources"] = "A" },
+                ["talent"] = "Mundane",
+                ["name"] = strRigger
+            }, token).ConfigureAwait(false);
+
+            // A weapon mount with an add-on, then changed in place
+            await CallOnAsync(strRigger, "add_vehicle", new JObject { ["id"] = "Ford Americar (Sedan)" }, token).ConfigureAwait(false);
+            string strSize = await PickStandardMountSizeAsync(strRigger, "Ford Americar (Sedan)", token).ConfigureAwait(false);
+            await CallOnAsync(strRigger, "add_weapon_mount", new JObject
+            {
+                ["vehicle"] = "Ford Americar (Sedan)", ["size"] = strSize, ["mods"] = new JArray("Ammo Bin")
+            }, token).ConfigureAwait(false);
+            List<JToken> lstItems = await ListAllItemsAsync(strRigger, token).ConfigureAwait(false);
+            JToken objMount = lstItems.First(x => x.Value<string>("kind") == "weapon mount");
+            Assert.IsTrue(((JArray)objMount["contains"])?.Any(x => x.Value<string>("name").StartsWith("Ammo Bin", StringComparison.Ordinal)) == true, objMount.ToString());
+            string strMount = objMount.Value<string>("id");
+            (bool blnIsError, string strText) = await TryCallOnAsync(strRigger, "edit_weapon_mount", new JObject { ["id"] = strMount, ["flexibility"] = "No Such Option" }, token)
+                .ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+            int intIndex = strText.IndexOf("Options: ", StringComparison.Ordinal);
+            List<string> lstFlexibility = strText.Substring(intIndex + 9).TrimEnd('.').Split(new[] { ", " }, StringSplitOptions.None).ToList();
+            string strFlexibility = lstFlexibility[lstFlexibility.Count - 1];
+            JObject objResult = (JObject)await CallOnAsync(strRigger, "edit_weapon_mount", new JObject
+            {
+                ["id"] = strMount, ["flexibility"] = strFlexibility, ["remove_mods"] = new JArray("Ammo Bin")
+            }, token).ConfigureAwait(false);
+            StringAssert.Contains(objResult.Value<string>("result"), "removed Ammo Bin");
+            lstItems = await ListAllItemsAsync(strRigger, token).ConfigureAwait(false);
+            objMount = lstItems.First(x => x.Value<string>("id") == strMount);
+            Assert.IsFalse(((JArray)objMount["contains"])?.Any(x => x.Value<string>("name").StartsWith("Ammo Bin", StringComparison.Ordinal)) == true, objMount.ToString());
+            await CallOnAsync(strRigger, "edit_weapon_mount", new JObject { ["id"] = strMount, ["add_mods"] = new JArray("Ammo Bin") }, token).ConfigureAwait(false);
+            (blnIsError, strText) = await TryCallOnAsync(strRigger, "edit_weapon_mount", new JObject { ["id"] = strMount }, token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+
+            // Natural weapons
+            objResult = (JObject)await CallOnAsync(strRigger, "add_natural_weapon", new JObject
+            {
+                ["name"] = "Claws", ["damage"] = "STR", ["damage_bonus"] = 1, ["ap"] = -1, ["reach"] = 1
+            }, token).ConfigureAwait(false);
+            StringAssert.Contains(objResult.Value<string>("result"), "({STR})+1P");
+            (blnIsError, strText) = await TryCallOnAsync(strRigger, "add_natural_weapon", new JObject { ["name"] = "Tail", ["skill"] = "Pistols" }, token)
+                .ConfigureAwait(false);
+            Assert.IsFalse(blnIsError, strText);
+            (blnIsError, strText) = await TryCallOnAsync(strRigger, "add_natural_weapon", new JObject { ["name"] = "Horns", ["skill"] = "Cooking" }, token)
+                .ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+
+            // Copy and paste
+            await CallOnAsync(strRigger, "add_weapon", new JObject { ["id"] = "Ares Predator V" }, token).ConfigureAwait(false);
+            await CallOnAsync(strRigger, "add_armor", new JObject { ["id"] = "Armor Jacket" }, token).ConfigureAwait(false);
+            lstItems = await ListAllItemsAsync(strRigger, token).ConfigureAwait(false);
+            string strPredator = lstItems.First(x => x.Value<string>("name").StartsWith("Ares Predator V", StringComparison.Ordinal)).Value<string>("id");
+            string strJacket = lstItems.First(x => x.Value<string>("name").StartsWith("Armor Jacket", StringComparison.Ordinal)).Value<string>("id");
+            await CallOnAsync(strRigger, "copy_item", new JObject { ["id"] = strPredator }, token).ConfigureAwait(false);
+            await CallOnAsync(strRigger, "paste_item", new JObject(), token).ConfigureAwait(false);
+            lstItems = await ListAllItemsAsync(strRigger, token).ConfigureAwait(false);
+            Assert.AreEqual(2, lstItems.Count(x => x.Value<string>("name").StartsWith("Ares Predator V", StringComparison.Ordinal)),
+                            string.Join(", ", lstItems.Select(x => x.Value<string>("name"))));
+            (blnIsError, strText) = await TryCallOnAsync(strRigger, "paste_item", new JObject { ["into"] = strJacket }, token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+            (blnIsError, strText) = await TryCallOnAsync(strRigger, "copy_item", new JObject { ["id"] = "Claws" }, token).ConfigureAwait(false);
+            Assert.IsFalse(blnIsError, strText);
+        }
     }
 }

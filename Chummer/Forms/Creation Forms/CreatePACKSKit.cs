@@ -64,6 +64,56 @@ namespace Chummer
                 return;
             }
 
+            HashSet<string> setParts = new HashSet<string>();
+            foreach ((CheckBox chkPart, string strPart) in new[]
+                     {
+                         (chkAttributes, "attributes"), (chkQualities, "qualities"), (chkStartingNuyen, "startingnuyen"),
+                         (chkActiveSkills, "activeskills"), (chkKnowledgeSkills, "knowledgeskills"), (chkMartialArts, "martialarts"),
+                         (chkSpells, "spells"), (chkComplexForms, "complexforms"), (chkCyberware, "cyberware"), (chkLifestyle, "lifestyle"),
+                         (chkArmor, "armor"), (chkWeapons, "weapons"), (chkGear, "gear"), (chkVehicles, "vehicles")
+                     })
+            {
+                if (await chkPart.DoThreadSafeFuncAsync(x => x.Checked).ConfigureAwait(false))
+                    setParts.Add(strPart);
+            }
+
+            (string strError, string strErrorTitle) = await WriteKitAsync(_objCharacter, strName, strFileName, setParts).ConfigureAwait(false);
+            if (!string.IsNullOrEmpty(strError))
+            {
+                await Program.ShowScrollableMessageBoxAsync(this, strError, strErrorTitle, MessageBoxButtons.OK, MessageBoxIcon.Information).ConfigureAwait(false);
+                return;
+            }
+
+            await Program.ShowScrollableMessageBoxAsync(
+                this,
+                StringExtensions.FastFormat(
+                    await LanguageManager.GetStringAsync("Message_CreatePACKSKit_SuiteCreated")
+                        .ConfigureAwait(false), strName),
+                await LanguageManager.GetStringAsync("MessageTitle_CreatePACKSKit_SuiteCreated").ConfigureAwait(false),
+                MessageBoxButtons.OK, MessageBoxIcon.Information).ConfigureAwait(false);
+            await this.DoThreadSafeAsync(x =>
+            {
+                x.DialogResult = DialogResult.OK;
+                x.Close();
+            }).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// The parts of a character that <see cref="WriteKitAsync"/> can put in a kit, as the dialog's checkboxes name them.
+        /// </summary>
+        public static IReadOnlyList<string> KitParts { get; } = new[]
+        {
+            "attributes", "qualities", "startingnuyen", "activeskills", "knowledgeskills", "martialarts", "spells", "complexforms", "cyberware",
+            "lifestyle", "armor", "weapons", "gear", "vehicles"
+        };
+
+        /// <summary>
+        /// Write the chosen parts of a character to a custom PACKS kit file in the PACKS folder, as the dialog's OK button does.
+        /// </summary>
+        /// <returns>An error message and its title, or empty strings if the kit was written.</returns>
+        public static async Task<(string Error, string Title)> WriteKitAsync(Character objCharacter, string strName, string strFileName, ICollection<string> setParts,
+                                                                             CancellationToken token = default)
+        {
             // Make sure the file name starts with custom and ends with _packs.xml.
             if (!strFileName.StartsWith("custom_", StringComparison.OrdinalIgnoreCase))
             {
@@ -77,18 +127,15 @@ namespace Chummer
 
             // See if a Kit with this name already exists for the Custom category.
             // This was originally done without the XmlManager, but because amends and overrides and toggling custom data directories can change names, we need to use it.
-            if ((await _objCharacter.LoadDataXPathAsync("packs.xml").ConfigureAwait(false))
+            if ((await objCharacter.LoadDataXPathAsync("packs.xml", token: token).ConfigureAwait(false))
                 .TryGetNodeByNameOrId("/chummer/packs/pack", strName, "category = 'Custom'")
                 != null)
             {
-                await Program.ShowScrollableMessageBoxAsync(
-                    this,
-                    StringExtensions.FastFormat(
-                        await LanguageManager.GetStringAsync("Message_CreatePACKSKit_DuplicateName")
-                            .ConfigureAwait(false), strName),
-                    await LanguageManager.GetStringAsync("MessageTitle_CreatePACKSKit_DuplicateName")
-                        .ConfigureAwait(false), MessageBoxButtons.OK, MessageBoxIcon.Information).ConfigureAwait(false);
-                return;
+                return (StringExtensions.FastFormat(
+                            await LanguageManager.GetStringAsync("Message_CreatePACKSKit_DuplicateName", token: token)
+                                .ConfigureAwait(false), strName),
+                        await LanguageManager.GetStringAsync("MessageTitle_CreatePACKSKit_DuplicateName", token: token)
+                            .ConfigureAwait(false));
             }
 
             if (!Directory.Exists(Utils.GetPacksFolderPath))
@@ -99,10 +146,8 @@ namespace Chummer
                 }
                 catch (UnauthorizedAccessException)
                 {
-                    await Program.ShowScrollableMessageBoxAsync(await LanguageManager
-                        .GetStringAsync("Message_Insufficient_Permissions_Warning")
-                        .ConfigureAwait(false)).ConfigureAwait(false);
-                    return;
+                    return (await LanguageManager.GetStringAsync("Message_Insufficient_Permissions_Warning", token: token).ConfigureAwait(false),
+                            string.Empty);
                 }
             }
 
@@ -116,21 +161,19 @@ namespace Chummer
                 {
                     try
                     {
-                        await objXmlCurrentDocument.LoadStandardAsync(strPath).ConfigureAwait(false);
+                        await objXmlCurrentDocument.LoadStandardAsync(strPath, token: token).ConfigureAwait(false);
                     }
                     catch (IOException ex)
                     {
-                        await Program.ShowScrollableMessageBoxAsync(this, ex.ToString()).ConfigureAwait(false);
-                        return;
+                        return (ex.ToString(), string.Empty);
                     }
                     catch (XmlException ex)
                     {
-                        await Program.ShowScrollableMessageBoxAsync(this, ex.ToString()).ConfigureAwait(false);
-                        return;
+                        return (ex.ToString(), string.Empty);
                     }
                 }
 
-                IAsyncDisposable objLocker = await _objCharacter.LockObject.EnterReadLockAsync().ConfigureAwait(false);
+                IAsyncDisposable objLocker = await objCharacter.LockObject.EnterReadLockAsync(token).ConfigureAwait(false);
                 try
                 {
                     using (FileStream objStream =
@@ -159,35 +202,35 @@ namespace Chummer
                         await objWriter.WriteElementStringAsync("category", "Custom").ConfigureAwait(false);
 
                         // Export Attributes.
-                        if (await chkAttributes.DoThreadSafeFuncAsync(x => x.Checked).ConfigureAwait(false))
+                        if (setParts.Contains("attributes"))
                         {
-                            int intBOD = await _objCharacter.BOD.GetValueAsync().ConfigureAwait(false) -
-                                         (await _objCharacter.BOD.GetMetatypeMinimumAsync().ConfigureAwait(false) - 1);
-                            int intAGI = await _objCharacter.AGI.GetValueAsync().ConfigureAwait(false) -
-                                         (await _objCharacter.AGI.GetMetatypeMinimumAsync().ConfigureAwait(false) - 1);
-                            int intREA = await _objCharacter.REA.GetValueAsync().ConfigureAwait(false) -
-                                         (await _objCharacter.REA.GetMetatypeMinimumAsync().ConfigureAwait(false) - 1);
-                            int intSTR = await _objCharacter.STR.GetValueAsync().ConfigureAwait(false) -
-                                         (await _objCharacter.STR.GetMetatypeMinimumAsync().ConfigureAwait(false) - 1);
-                            int intCHA = await _objCharacter.CHA.GetValueAsync().ConfigureAwait(false) -
-                                         (await _objCharacter.CHA.GetMetatypeMinimumAsync().ConfigureAwait(false) - 1);
-                            int intINT = await _objCharacter.INT.GetValueAsync().ConfigureAwait(false) -
-                                         (await _objCharacter.INT.GetMetatypeMinimumAsync().ConfigureAwait(false) - 1);
-                            int intLOG = await _objCharacter.LOG.GetValueAsync().ConfigureAwait(false) -
-                                         (await _objCharacter.LOG.GetMetatypeMinimumAsync().ConfigureAwait(false) - 1);
-                            int intWIL = await _objCharacter.WIL.GetValueAsync().ConfigureAwait(false) -
-                                         (await _objCharacter.WIL.GetMetatypeMinimumAsync().ConfigureAwait(false) - 1);
-                            int intEDG = await _objCharacter.EDG.GetValueAsync().ConfigureAwait(false) -
-                                         (await _objCharacter.EDG.GetMetatypeMinimumAsync().ConfigureAwait(false) - 1);
-                            int intMAG = await _objCharacter.MAG.GetValueAsync().ConfigureAwait(false) -
-                                         (await _objCharacter.MAG.GetMetatypeMinimumAsync().ConfigureAwait(false) - 1);
-                            int intMAGAdept = await _objCharacter.MAGAdept.GetValueAsync().ConfigureAwait(false) -
-                                              (await _objCharacter.MAGAdept.GetMetatypeMinimumAsync()
+                            int intBOD = await objCharacter.BOD.GetValueAsync().ConfigureAwait(false) -
+                                         (await objCharacter.BOD.GetMetatypeMinimumAsync().ConfigureAwait(false) - 1);
+                            int intAGI = await objCharacter.AGI.GetValueAsync().ConfigureAwait(false) -
+                                         (await objCharacter.AGI.GetMetatypeMinimumAsync().ConfigureAwait(false) - 1);
+                            int intREA = await objCharacter.REA.GetValueAsync().ConfigureAwait(false) -
+                                         (await objCharacter.REA.GetMetatypeMinimumAsync().ConfigureAwait(false) - 1);
+                            int intSTR = await objCharacter.STR.GetValueAsync().ConfigureAwait(false) -
+                                         (await objCharacter.STR.GetMetatypeMinimumAsync().ConfigureAwait(false) - 1);
+                            int intCHA = await objCharacter.CHA.GetValueAsync().ConfigureAwait(false) -
+                                         (await objCharacter.CHA.GetMetatypeMinimumAsync().ConfigureAwait(false) - 1);
+                            int intINT = await objCharacter.INT.GetValueAsync().ConfigureAwait(false) -
+                                         (await objCharacter.INT.GetMetatypeMinimumAsync().ConfigureAwait(false) - 1);
+                            int intLOG = await objCharacter.LOG.GetValueAsync().ConfigureAwait(false) -
+                                         (await objCharacter.LOG.GetMetatypeMinimumAsync().ConfigureAwait(false) - 1);
+                            int intWIL = await objCharacter.WIL.GetValueAsync().ConfigureAwait(false) -
+                                         (await objCharacter.WIL.GetMetatypeMinimumAsync().ConfigureAwait(false) - 1);
+                            int intEDG = await objCharacter.EDG.GetValueAsync().ConfigureAwait(false) -
+                                         (await objCharacter.EDG.GetMetatypeMinimumAsync().ConfigureAwait(false) - 1);
+                            int intMAG = await objCharacter.MAG.GetValueAsync().ConfigureAwait(false) -
+                                         (await objCharacter.MAG.GetMetatypeMinimumAsync().ConfigureAwait(false) - 1);
+                            int intMAGAdept = await objCharacter.MAGAdept.GetValueAsync().ConfigureAwait(false) -
+                                              (await objCharacter.MAGAdept.GetMetatypeMinimumAsync()
                                                   .ConfigureAwait(false) - 1);
-                            int intDEP = await _objCharacter.DEP.GetValueAsync().ConfigureAwait(false) -
-                                         (await _objCharacter.DEP.GetMetatypeMinimumAsync().ConfigureAwait(false) - 1);
-                            int intRES = await _objCharacter.RES.GetValueAsync().ConfigureAwait(false) -
-                                         (await _objCharacter.RES.GetMetatypeMinimumAsync().ConfigureAwait(false) - 1);
+                            int intDEP = await objCharacter.DEP.GetValueAsync().ConfigureAwait(false) -
+                                         (await objCharacter.DEP.GetMetatypeMinimumAsync().ConfigureAwait(false) - 1);
+                            int intRES = await objCharacter.RES.GetValueAsync().ConfigureAwait(false) -
+                                         (await objCharacter.RES.GetMetatypeMinimumAsync().ConfigureAwait(false) - 1);
                             // <attributes>
                             await objWriter.WriteStartElementAsync("attributes").ConfigureAwait(false);
                             await objWriter
@@ -217,23 +260,23 @@ namespace Chummer
                             await objWriter
                                 .WriteElementStringAsync("edg", intEDG.ToString(GlobalSettings.InvariantCultureInfo))
                                 .ConfigureAwait(false);
-                            if (await _objCharacter.GetMAGEnabledAsync().ConfigureAwait(false))
+                            if (await objCharacter.GetMAGEnabledAsync().ConfigureAwait(false))
                             {
                                 await objWriter
                                     .WriteElementStringAsync("mag", intMAG.ToString(GlobalSettings.InvariantCultureInfo))
                                     .ConfigureAwait(false);
-                                if (await (await _objCharacter.GetSettingsAsync().ConfigureAwait(false)).GetMysAdeptSecondMAGAttributeAsync()
+                                if (await (await objCharacter.GetSettingsAsync().ConfigureAwait(false)).GetMysAdeptSecondMAGAttributeAsync()
                                         .ConfigureAwait(false) &&
-                                    await _objCharacter.GetIsMysticAdeptAsync().ConfigureAwait(false))
+                                    await objCharacter.GetIsMysticAdeptAsync().ConfigureAwait(false))
                                     await objWriter.WriteElementStringAsync("magadept",
                                         intMAGAdept.ToString(GlobalSettings.InvariantCultureInfo)).ConfigureAwait(false);
                             }
 
-                            if (await _objCharacter.GetRESEnabledAsync().ConfigureAwait(false))
+                            if (await objCharacter.GetRESEnabledAsync().ConfigureAwait(false))
                                 await objWriter
                                     .WriteElementStringAsync("res", intRES.ToString(GlobalSettings.InvariantCultureInfo))
                                     .ConfigureAwait(false);
-                            if (await _objCharacter.GetDEPEnabledAsync().ConfigureAwait(false))
+                            if (await objCharacter.GetDEPEnabledAsync().ConfigureAwait(false))
                                 await objWriter
                                     .WriteElementStringAsync("dep", intDEP.ToString(GlobalSettings.InvariantCultureInfo))
                                     .ConfigureAwait(false);
@@ -242,12 +285,12 @@ namespace Chummer
                         }
 
                         // Export Qualities.
-                        if (await chkQualities.DoThreadSafeFuncAsync(x => x.Checked).ConfigureAwait(false))
+                        if (setParts.Contains("qualities"))
                         {
                             bool blnPositive = false;
                             bool blnNegative = false;
                             // Determine if Positive or Negative Qualities exist.
-                            await _objCharacter.Qualities.ForEachWithBreakAsync(objQuality =>
+                            await objCharacter.Qualities.ForEachWithBreakAsync(objQuality =>
                             {
                                 switch (objQuality.Type)
                                 {
@@ -271,7 +314,7 @@ namespace Chummer
                             {
                                 // <positive>
                                 await objWriter.WriteStartElementAsync("positive").ConfigureAwait(false);
-                                await _objCharacter.Qualities.ForEachAsync(async objQuality =>
+                                await objCharacter.Qualities.ForEachAsync(async objQuality =>
                                 {
                                     if (objQuality.Type == QualityType.Positive)
                                     {
@@ -295,7 +338,7 @@ namespace Chummer
                             {
                                 // <negative>
                                 await objWriter.WriteStartElementAsync("negative").ConfigureAwait(false);
-                                await _objCharacter.Qualities.ForEachAsync(async objQuality =>
+                                await objCharacter.Qualities.ForEachAsync(async objQuality =>
                                 {
                                     if (objQuality.Type == QualityType.Negative)
                                     {
@@ -319,10 +362,10 @@ namespace Chummer
                         }
 
                         // Export Starting Nuyen.
-                        if (await chkStartingNuyen.DoThreadSafeFuncAsync(x => x.Checked).ConfigureAwait(false))
+                        if (setParts.Contains("startingnuyen"))
                         {
-                            decimal decNuyenBP = await _objCharacter.GetNuyenBPAsync().ConfigureAwait(false);
-                            if (!await _objCharacter.GetEffectiveBuildMethodUsesPriorityTablesAsync().ConfigureAwait(false))
+                            decimal decNuyenBP = await objCharacter.GetNuyenBPAsync().ConfigureAwait(false);
+                            if (!await objCharacter.GetEffectiveBuildMethodUsesPriorityTablesAsync().ConfigureAwait(false))
                                 decNuyenBP /= 2.0m;
                             await objWriter
                                 .WriteElementStringAsync("nuyenbp",
@@ -331,13 +374,13 @@ namespace Chummer
 
                         /* TODO: Add support for active and knowledge skills and skill groups
                         // Export Active Skills.
-                        if (await chkActiveSkills.DoThreadSafeFuncAsync(x => x.Checked))
+                        if (setParts.Contains("activeskills"))
                         {
                             // <skills>
                             await objWriter.WriteStartElementAsync("skills");
 
                             // Active Skills.
-                            foreach (Skill objSkill in _objCharacter.SkillsSection.Skills)
+                            foreach (Skill objSkill in objCharacter.SkillsSection.Skills)
                             {
                                 if (!objSkill.IsKnowledgeSkill && objSkill.Rating > 0)
                                 {
@@ -353,7 +396,7 @@ namespace Chummer
                             }
 
                             // Skill Groups.
-                            foreach (SkillGroup objSkillGroup in _objCharacter.SkillsSection.SkillGroups)
+                            foreach (SkillGroup objSkillGroup in objCharacter.SkillsSection.SkillGroups)
                             {
                                 if (objSkillGroup.BaseUnbroken && objSkillGroup.Rating > 0)
                                 {
@@ -370,11 +413,11 @@ namespace Chummer
                         }
 
                         // Export Knowledge Skills.
-                        if (await chkKnowledgeSkills.DoThreadSafeFuncAsync(x => x.Checked))
+                        if (setParts.Contains("knowledgeskills"))
                         {
                             // <knowledgeskills>
                             await objWriter.WriteStartElementAsync("knowledgeskills");
-                            foreach (KnowledgeSkill objSkill in _objCharacter.SkillsSection.Skills.OfType<KnowledgeSkill>())
+                            foreach (KnowledgeSkill objSkill in objCharacter.SkillsSection.Skills.OfType<KnowledgeSkill>())
                             {
                                 // <skill>
                                 await objWriter.WriteStartElementAsync("skill");
@@ -393,12 +436,12 @@ namespace Chummer
                         */
 
                         // Export Martial Arts.
-                        if (await chkMartialArts.DoThreadSafeFuncAsync(x => x.Checked).ConfigureAwait(false))
+                        if (setParts.Contains("martialarts"))
                         {
                             // <martialarts>
                             await objWriter.WriteStartElementAsync("martialarts").ConfigureAwait(false);
                             // ReSharper disable AccessToDisposedClosure
-                            await _objCharacter.MartialArts.ForEachAsync(async objArt =>
+                            await objCharacter.MartialArts.ForEachAsync(async objArt =>
                             {
                                 // <martialart>
                                 await objWriter.WriteStartElementAsync("martialart").ConfigureAwait(false);
@@ -425,12 +468,12 @@ namespace Chummer
                         }
 
                         // Export Spells.
-                        if (await chkSpells.DoThreadSafeFuncAsync(x => x.Checked).ConfigureAwait(false))
+                        if (setParts.Contains("spells"))
                         {
                             // <spells>
                             await objWriter.WriteStartElementAsync("spells").ConfigureAwait(false);
                             // ReSharper disable AccessToDisposedClosure
-                            await _objCharacter.Spells.ForEachAsync(async objSpell =>
+                            await objCharacter.Spells.ForEachAsync(async objSpell =>
                             {
                                 await objWriter.WriteStartElementAsync("spell").ConfigureAwait(false);
                                 await objWriter.WriteStartElementAsync("name").ConfigureAwait(false);
@@ -450,12 +493,12 @@ namespace Chummer
                         }
 
                         // Export Complex Forms.
-                        if (await chkComplexForms.DoThreadSafeFuncAsync(x => x.Checked).ConfigureAwait(false))
+                        if (setParts.Contains("complexforms"))
                         {
                             // <programs>
                             await objWriter.WriteStartElementAsync("complexforms").ConfigureAwait(false);
                             // ReSharper disable AccessToDisposedClosure
-                            await _objCharacter.ComplexForms.ForEachAsync(async objComplexForm =>
+                            await objCharacter.ComplexForms.ForEachAsync(async objComplexForm =>
                             {
                                 // <program>
                                 await objWriter.WriteStartElementAsync("complexform").ConfigureAwait(false);
@@ -476,11 +519,11 @@ namespace Chummer
                         }
 
                         // Export Cyberware/Bioware.
-                        if (await chkCyberware.DoThreadSafeFuncAsync(x => x.Checked).ConfigureAwait(false))
+                        if (setParts.Contains("cyberware"))
                         {
                             bool blnCyberware = false;
                             bool blnBioware = false;
-                            await _objCharacter.Cyberware.ForEachWithBreakAsync(objCharacterCyberware =>
+                            await objCharacter.Cyberware.ForEachWithBreakAsync(objCharacterCyberware =>
                             {
                                 switch (objCharacterCyberware.SourceType)
                                 {
@@ -501,7 +544,7 @@ namespace Chummer
                                 // <cyberwares>
                                 await objWriter.WriteStartElementAsync("cyberwares").ConfigureAwait(false);
                                 // ReSharper disable AccessToDisposedClosure
-                                await _objCharacter.Cyberware.ForEachAsync(async objCyberware =>
+                                await objCharacter.Cyberware.ForEachAsync(async objCyberware =>
                                 {
                                     if (objCyberware.SourceType == Improvement.ImprovementSource.Cyberware)
                                     {
@@ -579,7 +622,7 @@ namespace Chummer
                                 // <biowares>
                                 await objWriter.WriteStartElementAsync("biowares").ConfigureAwait(false);
                                 // ReSharper disable AccessToDisposedClosure
-                                await _objCharacter.Cyberware.ForEachAsync(async objCyberware =>
+                                await objCharacter.Cyberware.ForEachAsync(async objCyberware =>
                                 {
                                     if (objCyberware.SourceType == Improvement.ImprovementSource.Bioware)
                                     {
@@ -655,12 +698,12 @@ namespace Chummer
                         }
 
                         // Export Lifestyle.
-                        if (await chkLifestyle.DoThreadSafeFuncAsync(x => x.Checked).ConfigureAwait(false))
+                        if (setParts.Contains("lifestyle"))
                         {
                             // <lifestyles>
                             await objWriter.WriteStartElementAsync("lifestyles").ConfigureAwait(false);
                             // ReSharper disable AccessToDisposedClosure
-                            await _objCharacter.Lifestyles.ForEachAsync(async objLifestyle =>
+                            await objCharacter.Lifestyles.ForEachAsync(async objLifestyle =>
                             {
                                 // <lifestyle>
                                 await objWriter.WriteStartElementAsync("lifestyle").ConfigureAwait(false);
@@ -709,12 +752,12 @@ namespace Chummer
                         }
 
                         // Export Armor.
-                        if (await chkArmor.DoThreadSafeFuncAsync(x => x.Checked).ConfigureAwait(false))
+                        if (setParts.Contains("armor"))
                         {
                             // <armors>
                             await objWriter.WriteStartElementAsync("armors").ConfigureAwait(false);
                             // ReSharper disable AccessToDisposedClosure
-                            await _objCharacter.Armor.ForEachAsync(async objArmor =>
+                            await objCharacter.Armor.ForEachAsync(async objArmor =>
                             {
                                 // <armor>
                                 await objWriter.WriteStartElementAsync("armor").ConfigureAwait(false);
@@ -755,12 +798,12 @@ namespace Chummer
                         }
 
                         // Export Weapons.
-                        if (await chkWeapons.DoThreadSafeFuncAsync(x => x.Checked).ConfigureAwait(false))
+                        if (setParts.Contains("weapons"))
                         {
                             // <weapons>
                             await objWriter.WriteStartElementAsync("weapons").ConfigureAwait(false);
                             // ReSharper disable AccessToDisposedClosure
-                            await _objCharacter.Weapons.ForEachAsync(async objWeapon =>
+                            await objCharacter.Weapons.ForEachAsync(async objWeapon =>
                             {
                                 // Don't attempt to export Cyberware and Gear Weapons since those are handled by those object types. The default Unarmed Attack Weapon should also not be exported.
                                 if (objWeapon.Category != "Cyberware" && objWeapon.Category != "Gear"
@@ -825,18 +868,18 @@ namespace Chummer
                         }
 
                         // Export Gear.
-                        if (await chkGear.DoThreadSafeFuncAsync(x => x.Checked).ConfigureAwait(false))
+                        if (setParts.Contains("gear"))
                         {
-                            await WriteGear(objWriter, _objCharacter.Gear).ConfigureAwait(false);
+                            await WriteGear(objWriter, objCharacter.Gear).ConfigureAwait(false);
                         }
 
                         // Export Vehicles.
-                        if (await chkVehicles.DoThreadSafeFuncAsync(x => x.Checked).ConfigureAwait(false))
+                        if (setParts.Contains("vehicles"))
                         {
                             // <vehicles>
                             await objWriter.WriteStartElementAsync("vehicles").ConfigureAwait(false);
                             // ReSharper disable AccessToDisposedClosure
-                            await _objCharacter.Vehicles.ForEachAsync(async objVehicle =>
+                            await objCharacter.Vehicles.ForEachAsync(async objVehicle =>
                             {
                                 bool blnWeapons = false;
                                 // <vehicle>
@@ -976,18 +1019,9 @@ namespace Chummer
                 }
             }
 
-            await Program.ShowScrollableMessageBoxAsync(
-                this,
-                StringExtensions.FastFormat(
-                    await LanguageManager.GetStringAsync("Message_CreatePACKSKit_SuiteCreated")
-                        .ConfigureAwait(false), strName),
-                await LanguageManager.GetStringAsync("MessageTitle_CreatePACKSKit_SuiteCreated").ConfigureAwait(false),
-                MessageBoxButtons.OK, MessageBoxIcon.Information).ConfigureAwait(false);
-            await this.DoThreadSafeAsync(x =>
-            {
-                x.DialogResult = DialogResult.OK;
-                x.Close();
-            }).ConfigureAwait(false);
+            // Reload the data so the new entry can be found (and its name can't be reused) without restarting
+            await objCharacter.LoadDataAsync("packs.xml", string.Empty, true, token).ConfigureAwait(false);
+            return (string.Empty, string.Empty);
         }
 
         private void cmdCancel_Click(object sender, EventArgs e)

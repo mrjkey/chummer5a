@@ -30,7 +30,6 @@ namespace Chummer
 {
     public partial class CreateNaturalWeapon : Form, IHasCharacterObject
     {
-        private readonly XPathNavigator _objXmlPowersDocument;
         private readonly XPathNavigator _objXmlSkillsDocument;
 
         private readonly Character _objCharacter;
@@ -43,7 +42,6 @@ namespace Chummer
         public CreateNaturalWeapon(Character objCharacter)
         {
             _objCharacter = objCharacter ?? throw new ArgumentNullException(nameof(objCharacter));
-            _objXmlPowersDocument = _objCharacter.LoadDataXPath("critterpowers.xml").SelectSingleNodeAndCacheExpression("/chummer");
             _objXmlSkillsDocument = _objCharacter.LoadDataXPath("skills.xml").SelectSingleNodeAndCacheExpression("/chummer");
 
             InitializeComponent();
@@ -129,9 +127,36 @@ namespace Chummer
 
         private async Task AcceptForm(CancellationToken token = default)
         {
+            _objWeapon = await CreateWeaponAsync(_objCharacter,
+                                                 await txtName.DoThreadSafeFuncAsync(x => x.Text, token).ConfigureAwait(false),
+                                                 await cboSkill.DoThreadSafeFuncAsync(x => x.SelectedValue.ToString(), token: token).ConfigureAwait(false),
+                                                 await cboDVBase.DoThreadSafeFuncAsync(x => x.SelectedValue.ToString(), token: token).ConfigureAwait(false),
+                                                 await nudDVMod.DoThreadSafeFuncAsync(x => x.ValueAsInt, token: token).ConfigureAwait(false),
+                                                 await cboDVType.DoThreadSafeFuncAsync(x => x.SelectedValue.ToString(), token: token).ConfigureAwait(false),
+                                                 await nudAP.DoThreadSafeFuncAsync(x => x.ValueAsInt, token: token).ConfigureAwait(false),
+                                                 await nudReach.DoThreadSafeFuncAsync(x => x.ValueAsInt, token: token).ConfigureAwait(false),
+                                                 token).ConfigureAwait(false);
+            if (_objWeapon != null)
+            {
+                await this.DoThreadSafeAsync(x =>
+                {
+                    x.DialogResult = DialogResult.OK;
+                    x.Close();
+                }, token: token).ConfigureAwait(false);
+            }
+        }
+
+        /// <summary>
+        /// Build a natural weapon (the Natural Weapon critter power's attack) from the dialog's fields. The caller adds it to the character's weapons.
+        /// </summary>
+        /// <param name="strDVBase">The DV box's value: "({STR}/2)", "({STR})" or a number.</param>
+        /// <param name="strDVType">"P" or "S".</param>
+        /// <returns>The weapon, or null if the data has no Natural Weapon power.</returns>
+        public static async Task<Weapon> CreateWeaponAsync(Character objCharacter, string strName, string strSkill, string strDVBase, int intDVMod, string strDVType,
+                                                           int intAP, int intReach, CancellationToken token = default)
+        {
             // Assemble the DV from the fields.
-            string strDamage = await cboDVBase.DoThreadSafeFuncAsync(x => x.SelectedValue.ToString(), token: token).ConfigureAwait(false);
-            int intDVMod = await nudDVMod.DoThreadSafeFuncAsync(x => x.ValueAsInt, token: token).ConfigureAwait(false);
+            string strDamage = strDVBase;
             if (intDVMod != 0)
             {
                 if (intDVMod < 0)
@@ -139,11 +164,10 @@ namespace Chummer
                 else
                     strDamage += "+" + intDVMod.ToString(GlobalSettings.InvariantCultureInfo);
             }
-            strDamage += await cboDVType.DoThreadSafeFuncAsync(x => x.SelectedValue.ToString(), token: token).ConfigureAwait(false);
+            strDamage += strDVType;
 
             // Create the AP value.
             string strAP;
-            int intAP = await nudAP.DoThreadSafeFuncAsync(x => x.ValueAsInt, token: token).ConfigureAwait(false);
             if (intAP == 0)
                 strAP = "0";
             else if (intAP > 0)
@@ -152,44 +176,40 @@ namespace Chummer
                 strAP = intAP.ToString(GlobalSettings.InvariantCultureInfo);
 
             // Get the information for the Natural Weapon Critter Power.
-            XPathNavigator objPower = _objXmlPowersDocument.SelectSingleNodeAndCacheExpression("powers/power[name = \"Natural Weapon\"]", token);
+            XPathNavigator objPower = (await objCharacter.LoadDataXPathAsync("critterpowers.xml", token: token).ConfigureAwait(false))
+                                      .SelectSingleNodeAndCacheExpression("/chummer/powers/power[name = \"Natural Weapon\"]", token);
+            if (objPower == null)
+                return null;
 
-            if (objPower != null)
+            // Create the Weapon.
+            Weapon objWeapon = new Weapon(objCharacter);
+            try
             {
-                // Create the Weapon.
-                _objWeapon = new Weapon(_objCharacter);
-                try
-                {
-                    _objWeapon.Name = await txtName.DoThreadSafeFuncAsync(x => x.Text, token).ConfigureAwait(false);
-                    _objWeapon.Category = await LanguageManager.GetStringAsync("Tab_Critter", GlobalSettings.DefaultLanguage, token: token).ConfigureAwait(false);
-                    _objWeapon.RangeType = "Melee";
-                    _objWeapon.Reach = (await nudReach.DoThreadSafeFuncAsync(x => x.ValueAsInt, token: token).ConfigureAwait(false)).ToString(GlobalSettings.InvariantCultureInfo);
-                    _objWeapon.Accuracy = "Physical";
-                    _objWeapon.Damage = strDamage;
-                    _objWeapon.AP = strAP;
-                    _objWeapon.Mode = "0";
-                    _objWeapon.RC = "0";
-                    _objWeapon.Concealability = "0";
-                    _objWeapon.Avail = "0";
-                    _objWeapon.Cost = "0";
-                    _objWeapon.Ammo = "0";
-                    _objWeapon.UseSkill = await cboSkill.DoThreadSafeFuncAsync(x => x.SelectedValue.ToString(), token: token).ConfigureAwait(false);
-                    _objWeapon.Source = objPower.SelectSingleNodeAndCacheExpression("source", token: token)?.Value ?? "SR5";
-                    _objWeapon.Page = objPower.SelectSingleNodeAndCacheExpression("page", token: token)?.Value ?? "0";
-                    await _objWeapon.CreateClipsAsync(token).ConfigureAwait(false);
-                }
-                catch
-                {
-                    await _objWeapon.DeleteWeaponAsync(token: CancellationToken.None).ConfigureAwait(false);
-                    throw;
-                }
-
-                await this.DoThreadSafeAsync(x =>
-                {
-                    x.DialogResult = DialogResult.OK;
-                    x.Close();
-                }, token: token).ConfigureAwait(false);
+                objWeapon.Name = strName;
+                objWeapon.Category = await LanguageManager.GetStringAsync("Tab_Critter", GlobalSettings.DefaultLanguage, token: token).ConfigureAwait(false);
+                objWeapon.RangeType = "Melee";
+                objWeapon.Reach = intReach.ToString(GlobalSettings.InvariantCultureInfo);
+                objWeapon.Accuracy = "Physical";
+                objWeapon.Damage = strDamage;
+                objWeapon.AP = strAP;
+                objWeapon.Mode = "0";
+                objWeapon.RC = "0";
+                objWeapon.Concealability = "0";
+                objWeapon.Avail = "0";
+                objWeapon.Cost = "0";
+                objWeapon.Ammo = "0";
+                objWeapon.UseSkill = strSkill;
+                objWeapon.Source = objPower.SelectSingleNodeAndCacheExpression("source", token: token)?.Value ?? "SR5";
+                objWeapon.Page = objPower.SelectSingleNodeAndCacheExpression("page", token: token)?.Value ?? "0";
+                await objWeapon.CreateClipsAsync(token).ConfigureAwait(false);
             }
+            catch
+            {
+                await objWeapon.DeleteWeaponAsync(token: CancellationToken.None).ConfigureAwait(false);
+                throw;
+            }
+
+            return objWeapon;
         }
 
         #endregion Methods
