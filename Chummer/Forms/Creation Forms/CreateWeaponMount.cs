@@ -89,49 +89,10 @@ namespace Chummer
                     _blnAllowEditOptions = !_objMount.IncludedInVehicle;
                 }
 
-                XPathNavigator xmlVehicleNode = await _objVehicle.GetNodeXPathAsync(_objGenericToken).ConfigureAwait(false);
                 // Populate the Weapon Mount Category list.
-                CharacterSettings objSettings = await _objCharacter.GetSettingsAsync(_objGenericToken).ConfigureAwait(false);
-                string strSizeFilter = "category = \'Size\' and " + await objSettings.BookXPathAsync(token: _objGenericToken).ConfigureAwait(false);
-                if (!_objVehicle.IsDrone && await objSettings.GetDroneModsAsync(_objGenericToken).ConfigureAwait(false))
-                    strSizeFilter += " and not(optionaldrone)";
-                using (new FetchSafelyFromSafeObjectPool<List<ListItem>>(Utils.ListItemListPool, out List<ListItem> lstSize))
-                {
-                    XPathNodeIterator xmlSizeNodeList
-                        = _xmlDocXPath.Select("/chummer/weaponmounts/weaponmount[" + strSizeFilter + "]");
-                    if (xmlSizeNodeList.Count > 0)
-                    {
-                        foreach (XPathNavigator xmlSizeNode in xmlSizeNodeList)
-                        {
-                            string strId = xmlSizeNode.SelectSingleNodeAndCacheExpression("id", _objGenericToken)?.Value;
-                            if (string.IsNullOrEmpty(strId))
-                                continue;
-
-                            XPathNavigator xmlTestNode = xmlSizeNode.SelectSingleNodeAndCacheExpression("forbidden/vehicledetails", _objGenericToken);
-                            if (xmlTestNode != null && await xmlVehicleNode.ProcessFilterOperationNodeAsync(xmlTestNode, false, _objGenericToken).ConfigureAwait(false))
-                            {
-                                // Assumes topmost parent is an AND node
-                                continue;
-                            }
-
-                            xmlTestNode = xmlSizeNode.SelectSingleNodeAndCacheExpression("required/vehicledetails", _objGenericToken);
-                            if (xmlTestNode != null && !await xmlVehicleNode.ProcessFilterOperationNodeAsync(xmlTestNode, false, _objGenericToken).ConfigureAwait(false))
-                            {
-                                // Assumes topmost parent is an AND node
-                                continue;
-                            }
-
-                            lstSize.Add(new ListItem(
-                                            strId,
-                                            xmlSizeNode.SelectSingleNodeAndCacheExpression("translate", _objGenericToken)?.Value
-                                            ?? xmlSizeNode.SelectSingleNodeAndCacheExpression("name", _objGenericToken)?.Value
-                                            ?? await LanguageManager.GetStringAsync("String_Unknown", token: _objGenericToken).ConfigureAwait(false)));
-                        }
-                    }
-
-                    await cboSize.PopulateWithListItemsAsync(lstSize, _objGenericToken).ConfigureAwait(false);
-                    await cboSize.DoThreadSafeAsync(x => x.Enabled = _blnAllowEditOptions && lstSize.Count > 1, _objGenericToken).ConfigureAwait(false);
-                }
+                List<ListItem> lstSize = await GetAllowedSizesAsync(_objCharacter, _objVehicle, _objGenericToken).ConfigureAwait(false);
+                await cboSize.PopulateWithListItemsAsync(lstSize, _objGenericToken).ConfigureAwait(false);
+                await cboSize.DoThreadSafeAsync(x => x.Enabled = _blnAllowEditOptions && lstSize.Count > 1, _objGenericToken).ConfigureAwait(false);
 
                 if (_objMount != null)
                 {
@@ -415,26 +376,8 @@ namespace Chummer
 
                         _objMount.DiscountCost = await chkBlackMarketDiscount.DoThreadSafeFuncAsync(x => x.Checked, _objGenericToken).ConfigureAwait(false);
 
-                        WeaponMountOption objControlOption = new WeaponMountOption(_objCharacter);
-                        if (await objControlOption.CreateAsync(xmlSelectedControl, _objGenericToken).ConfigureAwait(false))
-                        {
-                            await _objMount.WeaponMountOptions.RemoveAllAsync(x => x.Category == "Control", _objGenericToken).ConfigureAwait(false);
-                            await _objMount.WeaponMountOptions.AddAsync(objControlOption, _objGenericToken).ConfigureAwait(false);
-                        }
-
-                        WeaponMountOption objFlexibilityOption = new WeaponMountOption(_objCharacter);
-                        if (await objFlexibilityOption.CreateAsync(xmlSelectedFlexibility, _objGenericToken).ConfigureAwait(false))
-                        {
-                            await _objMount.WeaponMountOptions.RemoveAllAsync(x => x.Category == "Flexibility", _objGenericToken).ConfigureAwait(false);
-                            await _objMount.WeaponMountOptions.AddAsync(objFlexibilityOption, _objGenericToken).ConfigureAwait(false);
-                        }
-
-                        WeaponMountOption objVisibilityOption = new WeaponMountOption(_objCharacter);
-                        if (await objVisibilityOption.CreateAsync(xmlSelectedVisibility, _objGenericToken).ConfigureAwait(false))
-                        {
-                            await _objMount.WeaponMountOptions.RemoveAllAsync(x => x.Category == "Visibility", _objGenericToken).ConfigureAwait(false);
-                            await _objMount.WeaponMountOptions.AddAsync(objVisibilityOption, _objGenericToken).ConfigureAwait(false);
-                        }
+                        await SetWeaponMountOptionsAsync(_objCharacter, _objMount, xmlSelectedControl, xmlSelectedFlexibility, xmlSelectedVisibility, _objGenericToken)
+                            .ConfigureAwait(false);
                     }
 
                     List<VehicleMod> lstOldRemovedVehicleMods
@@ -456,109 +399,25 @@ namespace Chummer
                     bool blnFreeCost = await chkFreeItem.DoThreadSafeFuncAsync(x => x.Checked, _objGenericToken).ConfigureAwait(false);
                     if (await _objCharacter.GetCreatedAsync(_objGenericToken).ConfigureAwait(false))
                     {
-                        CharacterSettings objSettings = await _objCharacter.GetSettingsAsync(_objGenericToken).ConfigureAwait(false);
-                        bool blnRemoveMountAfterCheck = false;
-                        try
+                        string strRefusal = await CheckCareerPurchaseAsync(_objCharacter, _objVehicle, _objMount, _decOldBaseCost,
+                                                                           await nudMarkup.DoThreadSafeFuncAsync(x => x.Value, _objGenericToken).ConfigureAwait(false),
+                                                                           blnFreeCost, _objGenericToken).ConfigureAwait(false);
+                        if (!string.IsNullOrEmpty(strRefusal))
                         {
-                            // Do not allow the user to add a new Vehicle Mod if the Vehicle's Capacity has been reached.
-                            if (await objSettings.GetEnforceCapacityAsync(_objGenericToken).ConfigureAwait(false))
+                            await Program.ShowScrollableMessageBoxAsync(this, await LanguageManager.GetStringAsync(strRefusal, token: _objGenericToken).ConfigureAwait(false),
+                                await LanguageManager.GetStringAsync(strRefusal.Replace("Message_", "MessageTitle_"), token: _objGenericToken).ConfigureAwait(false),
+                                MessageBoxButtons.OK, MessageBoxIcon.Information, token: _objGenericToken).ConfigureAwait(false);
+                            if (blnNewWeaponMount)
                             {
-                                // New mount, so temporarily add it to parent vehicle to make sure we can capture everything
-                                if (_objMount.Parent == null)
-                                {
-                                    blnRemoveMountAfterCheck = true;
-                                    await _objVehicle.WeaponMounts.AddAsync(_objMount, _objGenericToken).ConfigureAwait(false);
-                                }
-                                bool blnOverCapacity;
-                                if (await objSettings.BookEnabledAsync("R5", _objGenericToken).ConfigureAwait(false))
-                                {
-                                    if (_objVehicle.IsDrone && await objSettings.GetDroneModsAsync(_objGenericToken).ConfigureAwait(false))
-                                        blnOverCapacity
-                                            = await _objVehicle.GetDroneModSlotsUsedAsync(_objGenericToken)
-                                                               .ConfigureAwait(false) > await _objVehicle
-                                                .GetDroneModSlotsAsync(_objGenericToken).ConfigureAwait(false);
-                                    else
-                                        blnOverCapacity = await _objVehicle.OverR5CapacityAsync("Weapons", _objGenericToken)
-                                                                           .ConfigureAwait(false);
-                                }
-                                else
-                                    blnOverCapacity = await _objVehicle.GetSlotsAsync(_objGenericToken).ConfigureAwait(false)
-                                                      < await _objVehicle.GetSlotsUsedAsync(_objGenericToken)
-                                                                         .ConfigureAwait(false);
-
-                                if (blnOverCapacity)
-                                {
-                                    await Program.ShowScrollableMessageBoxAsync(this, await LanguageManager.GetStringAsync("Message_CapacityReached", token: _objGenericToken).ConfigureAwait(false),
-                                        await LanguageManager.GetStringAsync("MessageTitle_CapacityReached", token: _objGenericToken).ConfigureAwait(false),
-                                        MessageBoxButtons.OK, MessageBoxIcon.Information, token: _objGenericToken).ConfigureAwait(false);
-                                    if (blnRemoveMountAfterCheck)
-                                    {
-                                        _objMount = null;
-                                    }
-                                    else
-                                    {
-                                        await _objMount.Mods.RemoveAllAsync(x => lstNewVehicleMods.Contains(x), _objGenericToken).ConfigureAwait(false);
-                                        await _objMount.Mods.AddRangeAsync(lstOldRemovedVehicleMods, _objGenericToken).ConfigureAwait(false);
-                                    }
-                                    return;
-                                }
+                                await _objMount.DeleteWeaponMountAsync(token: CancellationToken.None).ConfigureAwait(false);
+                                _objMount = null;
                             }
-
-                            // Check the item's Cost and make sure the character can afford it.
-                            if (!blnFreeCost)
+                            else
                             {
-                                // New mount, so temporarily add it to parent vehicle to make sure we can capture everything
-                                if (_objMount.Parent == null)
-                                {
-                                    blnRemoveMountAfterCheck = true;
-                                    await _objVehicle.WeaponMounts.AddAsync(_objMount, _objGenericToken).ConfigureAwait(false);
-                                }
-
-                                decimal decCost = await _objVehicle.GetTotalCostAsync(_objGenericToken).ConfigureAwait(false) - _decOldBaseCost;
-
-                                // Apply a markup if applicable.
-                                decimal decMarkup = await nudMarkup.DoThreadSafeFuncAsync(x => x.Value, _objGenericToken).ConfigureAwait(false);
-                                if (decMarkup != 0)
-                                {
-                                    decCost *= 1 + decMarkup / 100.0m;
-                                }
-
-                                // Multiply the cost if applicable.
-                                switch ((await _objMount.TotalAvailTupleAsync(token: _objGenericToken).ConfigureAwait(false)).Suffix)
-                                {
-                                    case 'R' when objSettings.MultiplyRestrictedCost:
-                                        decCost *= objSettings.RestrictedCostMultiplier;
-                                        break;
-
-                                    case 'F' when objSettings.MultiplyForbiddenCost:
-                                        decCost *= objSettings.ForbiddenCostMultiplier;
-                                        break;
-                                }
-
-                                if (decCost > await _objCharacter.GetNuyenAsync(_objGenericToken).ConfigureAwait(false))
-                                {
-                                    await Program.ShowScrollableMessageBoxAsync(this, await LanguageManager.GetStringAsync("Message_NotEnoughNuyen", token: _objGenericToken).ConfigureAwait(false),
-                                        await LanguageManager.GetStringAsync("MessageTitle_NotEnoughNuyen", token: _objGenericToken).ConfigureAwait(false),
-                                        MessageBoxButtons.OK, MessageBoxIcon.Information, token: _objGenericToken).ConfigureAwait(false);
-                                    if (blnRemoveMountAfterCheck)
-                                    {
-                                        _objMount = null;
-                                    }
-                                    else
-                                    {
-                                        await _objMount.Mods.RemoveAllAsync(x => lstNewVehicleMods.Contains(x), _objGenericToken).ConfigureAwait(false);
-                                        await _objMount.Mods.AddRangeAsync(lstOldRemovedVehicleMods, _objGenericToken).ConfigureAwait(false);
-                                    }
-                                    return;
-                                }
+                                await _objMount.Mods.RemoveAllAsync(x => lstNewVehicleMods.Contains(x), _objGenericToken).ConfigureAwait(false);
+                                await _objMount.Mods.AddRangeAsync(lstOldRemovedVehicleMods, _objGenericToken).ConfigureAwait(false);
                             }
-                        }
-                        finally
-                        {
-                            if (blnRemoveMountAfterCheck)
-                            {
-                                await _objVehicle.WeaponMounts.RemoveAsync(_objMount, _objGenericToken).ConfigureAwait(false);
-                            }
+                            return;
                         }
                     }
 
@@ -1065,238 +924,412 @@ namespace Chummer
             using (CancellationTokenSource objJoinedCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(token, objNewToken))
             {
                 token = objJoinedCancellationTokenSource.Token;
-                XPathNavigator xmlRequiredNode = null;
-                XPathNavigator xmlForbiddenNode = null;
                 string strSelectedMount = await cboSize.DoThreadSafeFuncAsync(x => x.SelectedValue?.ToString(), token: token).ConfigureAwait(false);
-                if (!string.IsNullOrEmpty(strSelectedMount))
+                (List<ListItem> lstVisibility, List<ListItem> lstFlexibility, List<ListItem> lstControl)
+                    = await GetAllowedOptionsAsync(_objCharacter, _objVehicle, strSelectedMount, token).ConfigureAwait(false);
+
+                Interlocked.Increment(ref _intLoading);
+                try
                 {
-                    XPathNavigator xmlSelectedMount = _xmlDocXPath.TryGetNodeByNameOrId("/chummer/weaponmounts/weaponmount", strSelectedMount);
-                    if (xmlSelectedMount != null)
-                    {
-                        xmlForbiddenNode = xmlSelectedMount.SelectSingleNodeAndCacheExpression("forbidden/weaponmountdetails", token: token);
-                        xmlRequiredNode = xmlSelectedMount.SelectSingleNodeAndCacheExpression("required/weaponmountdetails", token: token);
-                    }
-                }
-
-                XPathNavigator xmlVehicleNode = await _objVehicle.GetNodeXPathAsync(token: token).ConfigureAwait(false);
-                using (new FetchSafelyFromSafeObjectPool<List<ListItem>>(Utils.ListItemListPool, out List<ListItem> lstVisibility))
-                using (new FetchSafelyFromSafeObjectPool<List<ListItem>>(Utils.ListItemListPool, out List<ListItem> lstFlexibility))
-                using (new FetchSafelyFromSafeObjectPool<List<ListItem>>(Utils.ListItemListPool, out List<ListItem> lstControl))
-                {
-                    // Populate the Weapon Mount Category list.
-                    CharacterSettings objSettings = await _objCharacter.GetSettingsAsync(token).ConfigureAwait(false);
-                    string strFilter = "category != \"Size\" and " + await objSettings.BookXPathAsync(token: token).ConfigureAwait(false);
-                    if (!_objVehicle.IsDrone && await objSettings.GetDroneModsAsync(token).ConfigureAwait(false))
-                        strFilter += " and not(optionaldrone)";
-                    XPathNodeIterator xmlWeaponMountOptionNodeList
-                        = _xmlDocXPath.Select("/chummer/weaponmounts/weaponmount[" + strFilter + "]");
-                    if (xmlWeaponMountOptionNodeList.Count > 0)
-                    {
-                        foreach (XPathNavigator xmlWeaponMountOptionNode in xmlWeaponMountOptionNodeList)
-                        {
-                            string strId = xmlWeaponMountOptionNode.SelectSingleNodeAndCacheExpression("id", token)?.Value;
-                            if (string.IsNullOrEmpty(strId))
-                                continue;
-
-                            XPathNavigator xmlTestNode = xmlWeaponMountOptionNode.SelectSingleNodeAndCacheExpression("forbidden/vehicledetails", token: token);
-                            if (xmlTestNode != null && await xmlVehicleNode.ProcessFilterOperationNodeAsync(xmlTestNode, false, token: token).ConfigureAwait(false))
-                            {
-                                // Assumes topmost parent is an AND node
-                                continue;
-                            }
-
-                            xmlTestNode = xmlWeaponMountOptionNode.SelectSingleNodeAndCacheExpression("required/vehicledetails", token: token);
-                            if (xmlTestNode != null && !await xmlVehicleNode.ProcessFilterOperationNodeAsync(xmlTestNode, false, token: token).ConfigureAwait(false))
-                            {
-                                // Assumes topmost parent is an AND node
-                                continue;
-                            }
-
-                            string strName = xmlWeaponMountOptionNode.SelectSingleNodeAndCacheExpression("name", token: token)?.Value
-                                             ?? await LanguageManager.GetStringAsync("String_Unknown", token: token).ConfigureAwait(false);
-                            bool blnAddItem = true;
-                            switch (xmlWeaponMountOptionNode.SelectSingleNodeAndCacheExpression("category", token: token)?.Value)
-                            {
-                                case "Visibility":
-                                    {
-                                        XPathNodeIterator xmlNodeList = xmlForbiddenNode?.SelectAndCacheExpression("visibility", token);
-                                        if (xmlNodeList?.Count > 0)
-                                        {
-                                            foreach (XPathNavigator xmlLoopNode in xmlNodeList)
-                                            {
-                                                if (xmlLoopNode.Value == strName)
-                                                {
-                                                    blnAddItem = false;
-                                                    break;
-                                                }
-                                            }
-                                        }
-
-                                        if (xmlRequiredNode != null)
-                                        {
-                                            blnAddItem = false;
-                                            xmlNodeList = xmlRequiredNode.SelectAndCacheExpression("visibility", token);
-                                            if (xmlNodeList.Count > 0)
-                                            {
-                                                foreach (XPathNavigator xmlLoopNode in xmlNodeList)
-                                                {
-                                                    if (xmlLoopNode.Value == strName)
-                                                    {
-                                                        blnAddItem = true;
-                                                        break;
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        if (blnAddItem)
-                                            lstVisibility.Add(
-                                                new ListItem(
-                                                    strId, xmlWeaponMountOptionNode.SelectSingleNodeAndCacheExpression("translate", token: token)?.Value ?? strName));
-                                    }
-                                    break;
-
-                                case "Flexibility":
-                                    {
-                                        if (xmlForbiddenNode != null)
-                                        {
-                                            XPathNodeIterator xmlNodeList
-                                                = xmlForbiddenNode.SelectAndCacheExpression("flexibility", token: token);
-                                            if (xmlNodeList?.Count > 0)
-                                            {
-                                                foreach (XPathNavigator xmlLoopNode in xmlNodeList)
-                                                {
-                                                    if (xmlLoopNode.Value == strName)
-                                                    {
-                                                        blnAddItem = false;
-                                                        break;
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        if (xmlRequiredNode != null)
-                                        {
-                                            blnAddItem = false;
-                                            XPathNodeIterator xmlNodeList = xmlRequiredNode.SelectAndCacheExpression("flexibility", token: token);
-                                            if (xmlNodeList?.Count > 0)
-                                            {
-                                                foreach (XPathNavigator xmlLoopNode in xmlNodeList)
-                                                {
-                                                    if (xmlLoopNode.Value == strName)
-                                                    {
-                                                        blnAddItem = true;
-                                                        break;
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        if (blnAddItem)
-                                            lstFlexibility.Add(
-                                                new ListItem(
-                                                    strId, xmlWeaponMountOptionNode.SelectSingleNodeAndCacheExpression("translate", token: token)?.Value ?? strName));
-                                    }
-                                    break;
-
-                                case "Control":
-                                    {
-                                        if (xmlForbiddenNode != null)
-                                        {
-                                            XPathNodeIterator xmlNodeList
-                                                = xmlForbiddenNode.SelectAndCacheExpression("control", token: token);
-                                            if (xmlNodeList?.Count > 0)
-                                            {
-                                                foreach (XPathNavigator xmlLoopNode in xmlNodeList)
-                                                {
-                                                    if (xmlLoopNode.Value == strName)
-                                                    {
-                                                        blnAddItem = false;
-                                                        break;
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        if (xmlRequiredNode != null)
-                                        {
-                                            blnAddItem = false;
-                                            XPathNodeIterator xmlNodeList = xmlRequiredNode.SelectAndCacheExpression("control", token: token);
-                                            if (xmlNodeList?.Count > 0)
-                                            {
-                                                foreach (XPathNavigator xmlLoopNode in xmlNodeList)
-                                                {
-                                                    if (xmlLoopNode.Value == strName)
-                                                    {
-                                                        blnAddItem = true;
-                                                        break;
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        if (blnAddItem)
-                                            lstControl.Add(
-                                                new ListItem(
-                                                    strId, xmlWeaponMountOptionNode.SelectSingleNodeAndCacheExpression("translate", token: token)?.Value ?? strName));
-                                    }
-                                    break;
-
-                                default:
-                                    Utils.BreakIfDebug();
-                                    break;
-                            }
-                        }
-                    }
-
-                    Interlocked.Increment(ref _intLoading);
-                    try
-                    {
-                        string strOldVisibility = await cboVisibility
-                                                        .DoThreadSafeFuncAsync(
-                                                            x => x.SelectedValue?.ToString(), token: token)
-                                                        .ConfigureAwait(false);
-                        string strOldFlexibility = await cboFlexibility
-                                                         .DoThreadSafeFuncAsync(
-                                                             x => x.SelectedValue?.ToString(), token: token)
-                                                         .ConfigureAwait(false);
-                        string strOldControl = await cboControl
-                                                     .DoThreadSafeFuncAsync(x => x.SelectedValue?.ToString(), token: token)
+                    string strOldVisibility = await cboVisibility
+                                                    .DoThreadSafeFuncAsync(
+                                                        x => x.SelectedValue?.ToString(), token: token)
+                                                    .ConfigureAwait(false);
+                    string strOldFlexibility = await cboFlexibility
+                                                     .DoThreadSafeFuncAsync(
+                                                         x => x.SelectedValue?.ToString(), token: token)
                                                      .ConfigureAwait(false);
-                        await cboVisibility.PopulateWithListItemsAsync(lstVisibility, token: token).ConfigureAwait(false);
-                        await cboVisibility.DoThreadSafeAsync(x =>
-                        {
-                            x.Enabled = _blnAllowEditOptions && lstVisibility.Count > 1;
-                            if (!string.IsNullOrEmpty(strOldVisibility))
-                                x.SelectedValue = strOldVisibility;
-                            if (x.SelectedIndex == -1 && lstVisibility.Count > 0)
-                                x.SelectedIndex = 0;
-                        }, token: token).ConfigureAwait(false);
-                        await cboFlexibility.PopulateWithListItemsAsync(lstFlexibility, token: token).ConfigureAwait(false);
-                        await cboFlexibility.DoThreadSafeAsync(x =>
-                        {
-                            x.Enabled = _blnAllowEditOptions && lstFlexibility.Count > 1;
-                            if (!string.IsNullOrEmpty(strOldFlexibility))
-                                x.SelectedValue = strOldFlexibility;
-                            if (x.SelectedIndex == -1 && lstFlexibility.Count > 0)
-                                x.SelectedIndex = 0;
-                        }, token: token).ConfigureAwait(false);
-                        await cboControl.PopulateWithListItemsAsync(lstControl, token: token).ConfigureAwait(false);
-                        await cboControl.DoThreadSafeAsync(x =>
-                        {
-                            x.Enabled = _blnAllowEditOptions && lstControl.Count > 1;
-                            if (!string.IsNullOrEmpty(strOldControl))
-                                x.SelectedValue = strOldControl;
-                            if (x.SelectedIndex == -1 && lstControl.Count > 0)
-                                x.SelectedIndex = 0;
-                        }, token: token).ConfigureAwait(false);
-                    }
-                    finally
+                    string strOldControl = await cboControl
+                                                 .DoThreadSafeFuncAsync(x => x.SelectedValue?.ToString(), token: token)
+                                                 .ConfigureAwait(false);
+                    await cboVisibility.PopulateWithListItemsAsync(lstVisibility, token: token).ConfigureAwait(false);
+                    await cboVisibility.DoThreadSafeAsync(x =>
                     {
-                        Interlocked.Decrement(ref _intLoading);
+                        x.Enabled = _blnAllowEditOptions && lstVisibility.Count > 1;
+                        if (!string.IsNullOrEmpty(strOldVisibility))
+                            x.SelectedValue = strOldVisibility;
+                        if (x.SelectedIndex == -1 && lstVisibility.Count > 0)
+                            x.SelectedIndex = 0;
+                    }, token: token).ConfigureAwait(false);
+                    await cboFlexibility.PopulateWithListItemsAsync(lstFlexibility, token: token).ConfigureAwait(false);
+                    await cboFlexibility.DoThreadSafeAsync(x =>
+                    {
+                        x.Enabled = _blnAllowEditOptions && lstFlexibility.Count > 1;
+                        if (!string.IsNullOrEmpty(strOldFlexibility))
+                            x.SelectedValue = strOldFlexibility;
+                        if (x.SelectedIndex == -1 && lstFlexibility.Count > 0)
+                            x.SelectedIndex = 0;
+                    }, token: token).ConfigureAwait(false);
+                    await cboControl.PopulateWithListItemsAsync(lstControl, token: token).ConfigureAwait(false);
+                    await cboControl.DoThreadSafeAsync(x =>
+                    {
+                        x.Enabled = _blnAllowEditOptions && lstControl.Count > 1;
+                        if (!string.IsNullOrEmpty(strOldControl))
+                            x.SelectedValue = strOldControl;
+                        if (x.SelectedIndex == -1 && lstControl.Count > 0)
+                            x.SelectedIndex = 0;
+                    }, token: token).ConfigureAwait(false);
+                }
+                finally
+                {
+                    Interlocked.Decrement(ref _intLoading);
+                }
+            }
+        }
+
+        /// <summary>
+        /// The visibility, flexibility and control options the dialog offers for a mount of the given size on a vehicle: those in the enabled books that
+        /// the vehicle and the size allow.
+        /// </summary>
+        public static async Task<(List<ListItem> Visibility, List<ListItem> Flexibility, List<ListItem> Control)> GetAllowedOptionsAsync(
+            Character objCharacter, Vehicle objVehicle, string strSelectedMount, CancellationToken token = default)
+        {
+            XPathNavigator xmlDocXPath = await objCharacter.LoadDataXPathAsync("vehicles.xml", token: token).ConfigureAwait(false);
+            XPathNavigator xmlRequiredNode = null;
+            XPathNavigator xmlForbiddenNode = null;
+            if (!string.IsNullOrEmpty(strSelectedMount))
+            {
+                XPathNavigator xmlSelectedMount = xmlDocXPath.TryGetNodeByNameOrId("/chummer/weaponmounts/weaponmount", strSelectedMount);
+                if (xmlSelectedMount != null)
+                {
+                    xmlForbiddenNode = xmlSelectedMount.SelectSingleNodeAndCacheExpression("forbidden/weaponmountdetails", token: token);
+                    xmlRequiredNode = xmlSelectedMount.SelectSingleNodeAndCacheExpression("required/weaponmountdetails", token: token);
+                }
+            }
+
+            XPathNavigator xmlVehicleNode = await objVehicle.GetNodeXPathAsync(token: token).ConfigureAwait(false);
+            List<ListItem> lstVisibility = new List<ListItem>();
+            List<ListItem> lstFlexibility = new List<ListItem>();
+            List<ListItem> lstControl = new List<ListItem>();
+            // Populate the Weapon Mount Category list.
+            CharacterSettings objSettings = await objCharacter.GetSettingsAsync(token).ConfigureAwait(false);
+            string strFilter = "category != \"Size\" and " + await objSettings.BookXPathAsync(token: token).ConfigureAwait(false);
+            if (!objVehicle.IsDrone && await objSettings.GetDroneModsAsync(token).ConfigureAwait(false))
+                strFilter += " and not(optionaldrone)";
+            XPathNodeIterator xmlWeaponMountOptionNodeList
+                = xmlDocXPath.Select("/chummer/weaponmounts/weaponmount[" + strFilter + "]");
+            if (xmlWeaponMountOptionNodeList.Count > 0)
+            {
+                foreach (XPathNavigator xmlWeaponMountOptionNode in xmlWeaponMountOptionNodeList)
+                {
+                    string strId = xmlWeaponMountOptionNode.SelectSingleNodeAndCacheExpression("id", token)?.Value;
+                    if (string.IsNullOrEmpty(strId))
+                        continue;
+
+                    XPathNavigator xmlTestNode = xmlWeaponMountOptionNode.SelectSingleNodeAndCacheExpression("forbidden/vehicledetails", token: token);
+                    if (xmlTestNode != null && await xmlVehicleNode.ProcessFilterOperationNodeAsync(xmlTestNode, false, token: token).ConfigureAwait(false))
+                    {
+                        // Assumes topmost parent is an AND node
+                        continue;
+                    }
+
+                    xmlTestNode = xmlWeaponMountOptionNode.SelectSingleNodeAndCacheExpression("required/vehicledetails", token: token);
+                    if (xmlTestNode != null && !await xmlVehicleNode.ProcessFilterOperationNodeAsync(xmlTestNode, false, token: token).ConfigureAwait(false))
+                    {
+                        // Assumes topmost parent is an AND node
+                        continue;
+                    }
+
+                    string strName = xmlWeaponMountOptionNode.SelectSingleNodeAndCacheExpression("name", token: token)?.Value
+                                     ?? await LanguageManager.GetStringAsync("String_Unknown", token: token).ConfigureAwait(false);
+                    bool blnAddItem = true;
+                    switch (xmlWeaponMountOptionNode.SelectSingleNodeAndCacheExpression("category", token: token)?.Value)
+                    {
+                        case "Visibility":
+                            {
+                                XPathNodeIterator xmlNodeList = xmlForbiddenNode?.SelectAndCacheExpression("visibility", token);
+                                if (xmlNodeList?.Count > 0)
+                                {
+                                    foreach (XPathNavigator xmlLoopNode in xmlNodeList)
+                                    {
+                                        if (xmlLoopNode.Value == strName)
+                                        {
+                                            blnAddItem = false;
+                                            break;
+                                        }
+                                    }
+                                }
+
+                                if (xmlRequiredNode != null)
+                                {
+                                    blnAddItem = false;
+                                    xmlNodeList = xmlRequiredNode.SelectAndCacheExpression("visibility", token);
+                                    if (xmlNodeList.Count > 0)
+                                    {
+                                        foreach (XPathNavigator xmlLoopNode in xmlNodeList)
+                                        {
+                                            if (xmlLoopNode.Value == strName)
+                                            {
+                                                blnAddItem = true;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if (blnAddItem)
+                                    lstVisibility.Add(
+                                        new ListItem(
+                                            strId, xmlWeaponMountOptionNode.SelectSingleNodeAndCacheExpression("translate", token: token)?.Value ?? strName));
+                            }
+                            break;
+
+                        case "Flexibility":
+                            {
+                                if (xmlForbiddenNode != null)
+                                {
+                                    XPathNodeIterator xmlNodeList
+                                        = xmlForbiddenNode.SelectAndCacheExpression("flexibility", token: token);
+                                    if (xmlNodeList?.Count > 0)
+                                    {
+                                        foreach (XPathNavigator xmlLoopNode in xmlNodeList)
+                                        {
+                                            if (xmlLoopNode.Value == strName)
+                                            {
+                                                blnAddItem = false;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if (xmlRequiredNode != null)
+                                {
+                                    blnAddItem = false;
+                                    XPathNodeIterator xmlNodeList = xmlRequiredNode.SelectAndCacheExpression("flexibility", token: token);
+                                    if (xmlNodeList?.Count > 0)
+                                    {
+                                        foreach (XPathNavigator xmlLoopNode in xmlNodeList)
+                                        {
+                                            if (xmlLoopNode.Value == strName)
+                                            {
+                                                blnAddItem = true;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if (blnAddItem)
+                                    lstFlexibility.Add(
+                                        new ListItem(
+                                            strId, xmlWeaponMountOptionNode.SelectSingleNodeAndCacheExpression("translate", token: token)?.Value ?? strName));
+                            }
+                            break;
+
+                        case "Control":
+                            {
+                                if (xmlForbiddenNode != null)
+                                {
+                                    XPathNodeIterator xmlNodeList
+                                        = xmlForbiddenNode.SelectAndCacheExpression("control", token: token);
+                                    if (xmlNodeList?.Count > 0)
+                                    {
+                                        foreach (XPathNavigator xmlLoopNode in xmlNodeList)
+                                        {
+                                            if (xmlLoopNode.Value == strName)
+                                            {
+                                                blnAddItem = false;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if (xmlRequiredNode != null)
+                                {
+                                    blnAddItem = false;
+                                    XPathNodeIterator xmlNodeList = xmlRequiredNode.SelectAndCacheExpression("control", token: token);
+                                    if (xmlNodeList?.Count > 0)
+                                    {
+                                        foreach (XPathNavigator xmlLoopNode in xmlNodeList)
+                                        {
+                                            if (xmlLoopNode.Value == strName)
+                                            {
+                                                blnAddItem = true;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if (blnAddItem)
+                                    lstControl.Add(
+                                        new ListItem(
+                                            strId, xmlWeaponMountOptionNode.SelectSingleNodeAndCacheExpression("translate", token: token)?.Value ?? strName));
+                            }
+                            break;
+
+                        default:
+                            Utils.BreakIfDebug();
+                            break;
                     }
                 }
             }
+
+            return (lstVisibility, lstFlexibility, lstControl);
+        }
+
+        /// <summary>
+        /// The mount sizes the dialog offers for a vehicle: those in the enabled books that the vehicle allows.
+        /// </summary>
+        public static async Task<List<ListItem>> GetAllowedSizesAsync(Character objCharacter, Vehicle objVehicle, CancellationToken token = default)
+        {
+            XPathNavigator xmlDocXPath = await objCharacter.LoadDataXPathAsync("vehicles.xml", token: token).ConfigureAwait(false);
+            XPathNavigator xmlVehicleNode = await objVehicle.GetNodeXPathAsync(token).ConfigureAwait(false);
+            CharacterSettings objSettings = await objCharacter.GetSettingsAsync(token).ConfigureAwait(false);
+            string strSizeFilter = "category = \'Size\' and " + await objSettings.BookXPathAsync(token: token).ConfigureAwait(false);
+            if (!objVehicle.IsDrone && await objSettings.GetDroneModsAsync(token).ConfigureAwait(false))
+                strSizeFilter += " and not(optionaldrone)";
+            List<ListItem> lstSize = new List<ListItem>();
+            XPathNodeIterator xmlSizeNodeList
+                = xmlDocXPath.Select("/chummer/weaponmounts/weaponmount[" + strSizeFilter + "]");
+            if (xmlSizeNodeList.Count > 0)
+            {
+                foreach (XPathNavigator xmlSizeNode in xmlSizeNodeList)
+                {
+                    string strId = xmlSizeNode.SelectSingleNodeAndCacheExpression("id", token)?.Value;
+                    if (string.IsNullOrEmpty(strId))
+                        continue;
+
+                    XPathNavigator xmlTestNode = xmlSizeNode.SelectSingleNodeAndCacheExpression("forbidden/vehicledetails", token);
+                    if (xmlTestNode != null && await xmlVehicleNode.ProcessFilterOperationNodeAsync(xmlTestNode, false, token).ConfigureAwait(false))
+                    {
+                        // Assumes topmost parent is an AND node
+                        continue;
+                    }
+
+                    xmlTestNode = xmlSizeNode.SelectSingleNodeAndCacheExpression("required/vehicledetails", token);
+                    if (xmlTestNode != null && !await xmlVehicleNode.ProcessFilterOperationNodeAsync(xmlTestNode, false, token).ConfigureAwait(false))
+                    {
+                        // Assumes topmost parent is an AND node
+                        continue;
+                    }
+
+                    lstSize.Add(new ListItem(
+                                    strId,
+                                    xmlSizeNode.SelectSingleNodeAndCacheExpression("translate", token)?.Value
+                                    ?? xmlSizeNode.SelectSingleNodeAndCacheExpression("name", token)?.Value
+                                    ?? await LanguageManager.GetStringAsync("String_Unknown", token: token).ConfigureAwait(false)));
+                }
+            }
+
+            return lstSize;
+        }
+
+        /// <summary>
+        /// Give a mount the chosen control, flexibility and visibility, replacing what it had in those categories.
+        /// </summary>
+        public static async Task SetWeaponMountOptionsAsync(Character objCharacter, WeaponMount objMount, XmlNode xmlControl, XmlNode xmlFlexibility,
+                                                            XmlNode xmlVisibility, CancellationToken token = default)
+        {
+            WeaponMountOption objControlOption = new WeaponMountOption(objCharacter);
+            if (await objControlOption.CreateAsync(xmlControl, token).ConfigureAwait(false))
+            {
+                await objMount.WeaponMountOptions.RemoveAllAsync(x => x.Category == "Control", token).ConfigureAwait(false);
+                await objMount.WeaponMountOptions.AddAsync(objControlOption, token).ConfigureAwait(false);
+            }
+
+            WeaponMountOption objFlexibilityOption = new WeaponMountOption(objCharacter);
+            if (await objFlexibilityOption.CreateAsync(xmlFlexibility, token).ConfigureAwait(false))
+            {
+                await objMount.WeaponMountOptions.RemoveAllAsync(x => x.Category == "Flexibility", token).ConfigureAwait(false);
+                await objMount.WeaponMountOptions.AddAsync(objFlexibilityOption, token).ConfigureAwait(false);
+            }
+
+            WeaponMountOption objVisibilityOption = new WeaponMountOption(objCharacter);
+            if (await objVisibilityOption.CreateAsync(xmlVisibility, token).ConfigureAwait(false))
+            {
+                await objMount.WeaponMountOptions.RemoveAllAsync(x => x.Category == "Visibility", token).ConfigureAwait(false);
+                await objMount.WeaponMountOptions.AddAsync(objVisibilityOption, token).ConfigureAwait(false);
+            }
+        }
+
+        /// <summary>
+        /// The career-mode checks before a mount is bought or changed: the vehicle's capacity, and whether the character can afford the change in the
+        /// vehicle's cost from <paramref name="decOldBaseCost"/>. Returns the refusal's language key ("Message_CapacityReached" or "Message_NotEnoughNuyen"),
+        /// or an empty string when it may go ahead. A new mount is put on the vehicle only for the checks.
+        /// </summary>
+        public static async Task<string> CheckCareerPurchaseAsync(Character objCharacter, Vehicle objVehicle, WeaponMount objMount, decimal decOldBaseCost,
+                                                                  decimal decMarkup, bool blnFreeCost, CancellationToken token = default)
+        {
+            CharacterSettings objSettings = await objCharacter.GetSettingsAsync(token).ConfigureAwait(false);
+            bool blnRemoveMountAfterCheck = false;
+            try
+            {
+                // Do not allow the user to add a new Vehicle Mod if the Vehicle's Capacity has been reached.
+                if (await objSettings.GetEnforceCapacityAsync(token).ConfigureAwait(false))
+                {
+                    // New mount, so temporarily add it to parent vehicle to make sure we can capture everything
+                    if (!blnRemoveMountAfterCheck && !await objVehicle.WeaponMounts.ContainsAsync(objMount, token).ConfigureAwait(false))
+                    {
+                        blnRemoveMountAfterCheck = true;
+                        await objVehicle.WeaponMounts.AddAsync(objMount, token).ConfigureAwait(false);
+                    }
+                    bool blnOverCapacity;
+                    if (await objSettings.BookEnabledAsync("R5", token).ConfigureAwait(false))
+                    {
+                        if (objVehicle.IsDrone && await objSettings.GetDroneModsAsync(token).ConfigureAwait(false))
+                            blnOverCapacity
+                                = await objVehicle.GetDroneModSlotsUsedAsync(token)
+                                                   .ConfigureAwait(false) > await objVehicle
+                                    .GetDroneModSlotsAsync(token).ConfigureAwait(false);
+                        else
+                            blnOverCapacity = await objVehicle.OverR5CapacityAsync("Weapons", token)
+                                                               .ConfigureAwait(false);
+                    }
+                    else
+                        blnOverCapacity = await objVehicle.GetSlotsAsync(token).ConfigureAwait(false)
+                                          < await objVehicle.GetSlotsUsedAsync(token)
+                                                             .ConfigureAwait(false);
+
+                    if (blnOverCapacity)
+                        return "Message_CapacityReached";
+                }
+
+                // Check the item's Cost and make sure the character can afford it.
+                if (!blnFreeCost)
+                {
+                    // New mount, so temporarily add it to parent vehicle to make sure we can capture everything
+                    if (!blnRemoveMountAfterCheck && !await objVehicle.WeaponMounts.ContainsAsync(objMount, token).ConfigureAwait(false))
+                    {
+                        blnRemoveMountAfterCheck = true;
+                        await objVehicle.WeaponMounts.AddAsync(objMount, token).ConfigureAwait(false);
+                    }
+
+                    decimal decCost = await objVehicle.GetTotalCostAsync(token).ConfigureAwait(false) - decOldBaseCost;
+
+                    // Apply a markup if applicable.
+                    if (decMarkup != 0)
+                    {
+                        decCost *= 1 + decMarkup / 100.0m;
+                    }
+
+                    // Multiply the cost if applicable.
+                    switch ((await objMount.TotalAvailTupleAsync(token: token).ConfigureAwait(false)).Suffix)
+                    {
+                        case 'R' when objSettings.MultiplyRestrictedCost:
+                            decCost *= objSettings.RestrictedCostMultiplier;
+                            break;
+
+                        case 'F' when objSettings.MultiplyForbiddenCost:
+                            decCost *= objSettings.ForbiddenCostMultiplier;
+                            break;
+                    }
+
+                    if (decCost > await objCharacter.GetNuyenAsync(token).ConfigureAwait(false))
+                        return "Message_NotEnoughNuyen";
+                }
+            }
+            finally
+            {
+                if (blnRemoveMountAfterCheck)
+                {
+                    await objVehicle.WeaponMounts.RemoveAsync(objMount, token).ConfigureAwait(false);
+                }
+            }
+
+            return string.Empty;
         }
 
         private async void lblSource_Click(object sender, EventArgs e)

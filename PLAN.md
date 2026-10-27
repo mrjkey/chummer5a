@@ -161,6 +161,7 @@ Each tool calls a core extracted from the GUI. The GUI now calls the same core:
 | `add_weapon_accessory` | `AddWeaponAccessoryFromNodeAsync`; mounts as the dialog picks them from `Weapon.GetAccessoryMountsAsync` |
 | `add_armor_mod` | `AddArmorModFromNodeAsync`; categories from `GetArmorModCategories` |
 | `add_vehicle_mod` | `AddVehicleModFromNodeAsync` |
+| `add_weapon_mount` | `CreateWeaponMount`'s static `GetAllowedSizesAsync`/`GetAllowedOptionsAsync`/`SetWeaponMountOptionsAsync`/`CheckCareerPurchaseAsync`, then `CharacterCareer.AddWeaponMountAsync` in career mode |
 
 Other changes:
 - `remove_item` also removes spirits (unfettered first, as the editor does), complex forms, martial arts and techniques, arts, metamagics, initiation grades, accessories and mods.

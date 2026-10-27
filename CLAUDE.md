@@ -27,6 +27,8 @@ Chummer is a .NET Framework 4.8 WinForms app (Windows only). The repo lives on t
   | `SelectMetatypeKarma` | `ApplyMetatypeSelectionAsync` |
   | `ChummerMainForm` | `OpenNewCharacterEditorAsync` |
   | `CharacterSheetViewer` | `TransformToHtmlAsync`, `ConvertHtmlToPdfAsync` |
+  | `CreateWeaponMount` | `GetAllowedSizesAsync`, `GetAllowedOptionsAsync`, `SetWeaponMountOptionsAsync`, `CheckCareerPurchaseAsync` (static) |
+  | `CharacterCareer` | `AddWeaponMountAsync` |
   | `CharacterShared` | `SaveCharacterToFileAsync`, `AddSpirit`/`AddSprite`, `Add{WeaponAccessory,VehicleMod}FromNodeAsync` |
   | Backend | `MartialArt.PurchaseFromNodeAsync`, `Spirit.FillSpiritTypeChoicesAsync`, `SelectMartialArtTechnique.FillAllowedTechniques` |
 

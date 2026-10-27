@@ -214,6 +214,20 @@ namespace Chummer.Tests
             return strRefusal.Substring(intIndex + 9).Split(new[] { ", ", "; " }, StringSplitOptions.None)[0].TrimEnd('.');
         }
 
+        /// <summary>
+        /// A standard weapon mount size the vehicle can take, from the sizes add_weapon_mount lists (they depend on the enabled books).
+        /// </summary>
+        private static async Task<string> PickStandardMountSizeAsync(string strCharacter, string strVehicle, CancellationToken token)
+        {
+            (bool blnIsError, string strText) = await TryCallOnAsync(strCharacter, "add_weapon_mount", new JObject { ["vehicle"] = strVehicle, ["size"] = "No Such Size" },
+                                                                     token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+            int intIndex = strText.IndexOf("Options: ", StringComparison.Ordinal);
+            Assert.IsTrue(intIndex >= 0, strText);
+            List<string> lstSizes = strText.Substring(intIndex + 9).TrimEnd('.').Split(new[] { ", " }, StringSplitOptions.None).ToList();
+            return new[] { "Standard", "Standard [SR5]", "Standard (Drone)" }.FirstOrDefault(lstSizes.Contains) ?? lstSizes[0];
+        }
+
         private static async Task RunMagicSkillsAndModsScenarioAsync(CancellationToken token)
         {
             // A hermetic mage: tradition, spirits, mentor, specialization, initiation and metamagic
@@ -548,6 +562,23 @@ namespace Chummer.Tests
             Assert.IsTrue(HasChild(strMount, "AK-97"), "The rifle is not in the mount");
             Assert.IsTrue(HasChild(strMountedRifle, "Laser Sight"), "The laser sight is not on the mounted rifle");
 
+            // A new weapon mount on the drone, as the vehicle tab's Add Weapon Mount does; only the dialog's choices are allowed
+            string strDrone = lstItems.First(x => x.Value<string>("kind") == "vehicle" && x.Value<string>("name").StartsWith("GM-Nissan Doberman", StringComparison.Ordinal))
+                                      .Value<string>("id");
+            int intMounts = lstItems.Count(x => x.Value<string>("kind") == "weapon mount");
+            string strSize = await PickStandardMountSizeAsync(strRunner, strDrone, token).ConfigureAwait(false);
+            (blnIsError, strText) = await TryCallOnAsync(strRunner, "add_weapon_mount", new JObject { ["vehicle"] = strDrone, ["size"] = strSize, ["control"] = "No Such Control" },
+                                                         token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+            StringAssert.Contains(strText, "Options: ");
+            StringAssert.Contains(strText, "Remote");
+            objResult = (JObject)await CallOnAsync(strRunner, "add_weapon_mount", new JObject { ["vehicle"] = strDrone, ["size"] = strSize }, token).ConfigureAwait(false);
+            string strNewMount = objResult.Value<string>("result").Split(new[] { "(id " }, StringSplitOptions.None)[1].TrimEnd(')', '.');
+            await CallOnAsync(strRunner, "add_weapon", new JObject { ["id"] = "Ares Predator V", ["parent"] = strNewMount }, token).ConfigureAwait(false);
+            lstItems = await ListAllItemsAsync(strRunner, token).ConfigureAwait(false);
+            Assert.AreEqual(intMounts + 1, lstItems.Count(x => x.Value<string>("kind") == "weapon mount"), "The new mount is not on the drone");
+            Assert.IsTrue(HasChild(strNewMount, "Ares Predator V"), "The pistol is not in the new mount");
+
             // Primary arm and portraits
             await CallOnAsync(strRunner, "set_character_details", new JObject { ["primary_arm"] = "Left" }, token).ConfigureAwait(false);
             Assert.AreEqual("Left", ((JObject)await CallOnAsync(strRunner, "export_character", new JObject { ["section"] = "primaryarm" }, token).ConfigureAwait(false))
@@ -707,6 +738,21 @@ namespace Chummer.Tests
             Assert.AreEqual(decNuyen - 1000, objResult.Value<decimal>("nuyen"), objResult.ToString());
             (blnIsError, strText) = await TryCallOnAsync(strVet, "log_nuyen", new JObject { ["amount"] = -100000000, ["reason"] = "A yacht" }, token).ConfigureAwait(false);
             Assert.IsTrue(blnIsError, strText);
+
+            // A new weapon mount is paid for, as the career vehicle tab's Add Weapon Mount does
+            await CallOnAsync(strVet, "log_nuyen", new JObject { ["amount"] = 20000, ["reason"] = "Drone budget" }, token).ConfigureAwait(false);
+            objResult = (JObject)await CallOnAsync(strVet, "add_vehicle", new JObject { ["id"] = "GM-Nissan Doberman (Medium)" }, token).ConfigureAwait(false);
+            string strDrone = objResult.Value<string>("result").Split(new[] { "(id " }, StringSplitOptions.None)[1].TrimEnd(')', '.');
+            decNuyen = objResult.Value<decimal>("nuyen");
+            string strSize = await PickStandardMountSizeAsync(strVet, strDrone, token).ConfigureAwait(false);
+            objResult = (JObject)await CallOnAsync(strVet, "add_weapon_mount", new JObject { ["vehicle"] = strDrone, ["size"] = strSize }, token).ConfigureAwait(false);
+            Assert.IsTrue(objResult.Value<decimal>("nuyen") < decNuyen, objResult.ToString());
+            // The drone has no weapon slots left for another; the refused mount is not left on it
+            int intMounts = (await ListAllItemsAsync(strVet, token).ConfigureAwait(false)).Count(x => x.Value<string>("kind") == "weapon mount");
+            (blnIsError, strText) = await TryCallOnAsync(strVet, "add_weapon_mount", new JObject { ["vehicle"] = strDrone, ["size"] = strSize }, token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+            StringAssert.Contains(strText, "Capacity");
+            Assert.AreEqual(intMounts, (await ListAllItemsAsync(strVet, token).ConfigureAwait(false)).Count(x => x.Value<string>("kind") == "weapon mount"));
 
             // Attributes, skills, knowledge skills and specializations cost karma
             objResult = (JObject)await CallOnAsync(strVet, "improve_attribute", new JObject { ["name"] = "BOD" }, token).ConfigureAwait(false);

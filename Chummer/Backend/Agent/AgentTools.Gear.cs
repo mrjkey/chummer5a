@@ -126,6 +126,20 @@ namespace Chummer.Agent
                                  ("black_market", "boolean", BlackMarketDescription),
                                  ("character", "string", CharacterArgDescription)),
                 AddVehicleModAsync);
+            yield return new AgentTool("add_weapon_mount",
+                "Build a weapon mount on a vehicle or drone the character has, as the vehicle tab's Add Weapon Mount dialog does: a size plus its "
+                + "visibility, flexibility and control. Only the choices the dialog offers for that vehicle and size are allowed; a wrong one lists them. "
+                + "Then put weapons in it with add_weapon(parent=<mount id>). In career mode it checks the vehicle's capacity and the character's nuyen.",
+                AgentTool.Schema(("vehicle!", "string", "Vehicle id from get_character_summary, or its name."),
+                                 ("size!", "string", "Mount size, by name or id, e.g. 'Light', 'Standard', 'Heavy' (Rigger 5.0), 'Standard [SR5]' (core book), "
+                                                     + "or a drone size such as 'Small (Drone)'."),
+                                 ("visibility", "string", "e.g. 'External', 'Internal', 'Concealed'. Default the first the size allows."),
+                                 ("flexibility", "string", "e.g. 'Fixed', 'Flexible', 'Turret'. Default the first the size allows."),
+                                 ("control", "string", "e.g. 'Remote', 'Manual', 'Armored Manual'. Default the first the size allows."),
+                                 ("free", "boolean", FreeDescription),
+                                 ("black_market", "boolean", BlackMarketDescription),
+                                 ("character", "string", CharacterArgDescription)),
+                AddWeaponMountAsync);
             yield return new AgentTool("add_lifestyle",
                 "Add a lifestyle, as the Lifestyles tab's Add Lifestyle (or Add Advanced Lifestyle) dialog does: a base lifestyle from "
                 + "search_catalog(kind='lifestyle'), paid for some months, with optional roommates, cost percentage, trust fund and lifestyle qualities. "
@@ -1262,6 +1276,92 @@ namespace Chummer.Agent
                                                                     : "The mod was not installed.");
             return await FinishAnyEditAsync(frmCharacter, "Installed " + await objMod.GetCurrentDisplayNameAsync(token).ConfigureAwait(false)
                                                     + " in " + objVehicle.Name + " (id " + objMod.InternalId + ").", token).ConfigureAwait(false);
+        }
+
+        private static async Task<object> AddWeaponMountAsync(JObject objArgs, CancellationToken token)
+        {
+            CharacterShared frmCharacter = await GetCharacterFormAsync(objArgs, token).ConfigureAwait(false);
+            Character objCharacter = frmCharacter.CharacterObject;
+            decimal decMarkup = GetMarkup(objArgs, frmCharacter);
+            string strVehicle = RequiredString(objArgs, "vehicle");
+            Vehicle objVehicle = await FindOwnedAsync(await (await objCharacter.GetVehiclesAsync(token).ConfigureAwait(false)).ToListAsync(token).ConfigureAwait(false),
+                                                      strVehicle, token).ConfigureAwait(false)
+                                 ?? throw new AgentToolException("The character has no vehicle '" + strVehicle + "'.");
+            bool blnFree = objArgs.Value<bool?>("free") == true;
+            bool blnBlackMarket = objArgs.Value<bool?>("black_market") == true;
+
+            // The choices the Create Weapon Mount dialog offers for this vehicle, and then for the chosen size
+            XmlDocument xmlDoc = await objCharacter.LoadDataAsync("vehicles.xml", token: token).ConfigureAwait(false);
+            XmlNode xmlSize = PickWeaponMountChoice(xmlDoc, await CreateWeaponMount.GetAllowedSizesAsync(objCharacter, objVehicle, token).ConfigureAwait(false),
+                                                    RequiredString(objArgs, "size"), "size", objVehicle.Name);
+            (List<ListItem> lstVisibility, List<ListItem> lstFlexibility, List<ListItem> lstControl)
+                = await CreateWeaponMount.GetAllowedOptionsAsync(objCharacter, objVehicle, xmlSize["id"]?.InnerText, token).ConfigureAwait(false);
+            string strSizeName = xmlSize["name"]?.InnerText;
+            XmlNode xmlVisibility = PickWeaponMountChoice(xmlDoc, lstVisibility, objArgs.Value<string>("visibility"), "visibility", strSizeName);
+            XmlNode xmlFlexibility = PickWeaponMountChoice(xmlDoc, lstFlexibility, objArgs.Value<string>("flexibility"), "flexibility", strSizeName);
+            XmlNode xmlControl = PickWeaponMountChoice(xmlDoc, lstControl, objArgs.Value<string>("control"), "control", strSizeName);
+            if (blnBlackMarket)
+            {
+                // The dialog only enables the discount for mount categories the character's Black Market Pipeline covers
+                List<string> lstBlackMarket = await objCharacter.GenerateBlackMarketMappingsAsync(
+                    (await objCharacter.LoadDataXPathAsync("vehicles.xml", token: token).ConfigureAwait(false))
+                    .SelectSingleNodeAndCacheExpression("/chummer/weaponmountcategories", token), token).ConfigureAwait(false);
+                if (!lstBlackMarket.Contains(xmlSize["category"]?.InnerText ?? string.Empty))
+                    throw new AgentToolException("The Black Market Pipeline discount doesn't apply to this weapon mount for this character.");
+            }
+
+            WeaponMount objMount = new WeaponMount(objCharacter, objVehicle);
+            bool blnAdded = false;
+            try
+            {
+                await objMount.CreateAsync(xmlSize, token).ConfigureAwait(false);
+                objMount.DiscountCost = blnBlackMarket;
+                await CreateWeaponMount.SetWeaponMountOptionsAsync(objCharacter, objMount, xmlControl, xmlFlexibility, xmlVisibility, token).ConfigureAwait(false);
+                if (frmCharacter is CharacterCareer frmCareer)
+                {
+                    string strRefusal = await CreateWeaponMount.CheckCareerPurchaseAsync(objCharacter, objVehicle, objMount,
+                                                                                         await objVehicle.GetTotalCostAsync(token).ConfigureAwait(false),
+                                                                                         decMarkup, blnFree, token).ConfigureAwait(false);
+                    if (!string.IsNullOrEmpty(strRefusal))
+                        throw new AgentToolException(await GetRefusalMessageAsync(strRefusal, string.Empty, token).ConfigureAwait(false));
+                    objMount.FreeCost = blnFree;
+                    await frmCareer.AddWeaponMountAsync(objVehicle, objMount, decMarkup, token).ConfigureAwait(false);
+                }
+                else
+                {
+                    // Character creation doesn't check the vehicle's capacity here; validation reports overfull vehicles
+                    objMount.FreeCost = blnFree;
+                    await objVehicle.WeaponMounts.AddAsync(objMount, token).ConfigureAwait(false);
+                }
+
+                blnAdded = true;
+            }
+            finally
+            {
+                if (!blnAdded)
+                    await objMount.DeleteWeaponMountAsync(token: CancellationToken.None).ConfigureAwait(false);
+            }
+
+            return await FinishAnyEditAsync(frmCharacter, "Built " + await objMount.GetCurrentDisplayNameAsync(token).ConfigureAwait(false)
+                                                    + " on " + objVehicle.Name + " (id " + objMount.InternalId + ").", token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// One of the weapon mount choices the Create Weapon Mount dialog lists, by id or English name; the first, as the dialog preselects, when none is asked for.
+        /// </summary>
+        private static XmlNode PickWeaponMountChoice(XmlDocument xmlDoc, IEnumerable<ListItem> lstChoices, string strWanted, string strWhat, string strFor)
+        {
+            List<XmlNode> lstNodes = lstChoices.Select(x => xmlDoc.TryGetNodeByNameOrId("/chummer/weaponmounts/weaponmount", x.Value.ToString()))
+                                               .Where(x => x != null).ToList();
+            if (lstNodes.Count == 0)
+                throw new AgentToolException("No weapon mount " + strWhat + " is available for " + strFor + ".");
+            if (string.IsNullOrWhiteSpace(strWanted))
+                return lstNodes[0];
+            strWanted = strWanted.Trim();
+            return lstNodes.Find(x => string.Equals(x["id"]?.InnerText, strWanted, StringComparison.OrdinalIgnoreCase))
+                   ?? lstNodes.Find(x => string.Equals(x["name"]?.InnerText, strWanted, StringComparison.OrdinalIgnoreCase))
+                   ?? throw new AgentToolException("'" + strWanted + "' is not a weapon mount " + strWhat + " available for " + strFor + ". Options: "
+                                                   + string.Join(", ", lstNodes.Select(x => x["name"]?.InnerText)) + ".");
         }
 
         /// <summary>

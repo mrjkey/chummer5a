@@ -10892,54 +10892,62 @@ namespace Chummer
                     decMarkup = frmCreateWeaponMount.MyForm.Markup;
                 }
 
-                if (objNewWeaponMount.FreeCost)
-                    await objVehicle.WeaponMounts.AddAsync(objNewWeaponMount, GenericToken).ConfigureAwait(false);
-                else
-                {
-                    // Calculate cost based on total vehicle cost change to make sure we capture everything
-                    decimal decCost = -await objVehicle.GetTotalCostAsync(GenericToken).ConfigureAwait(false);
-                    await objVehicle.WeaponMounts.AddAsync(objNewWeaponMount, GenericToken).ConfigureAwait(false);
-                    decCost += await objVehicle.GetTotalCostAsync(GenericToken).ConfigureAwait(false);
-
-                    // Apply a markup if applicable.
-                    if (decMarkup != 0)
-                    {
-                        decCost *= 1 + decMarkup / 100.0m;
-                    }
-
-                    // Multiply the cost if applicable.
-                    char chrAvail = (await objNewWeaponMount.TotalAvailTupleAsync(token: GenericToken).ConfigureAwait(false)).Suffix;
-                    switch (chrAvail)
-                    {
-                        case 'R' when CharacterObjectSettings.MultiplyRestrictedCost:
-                            decCost *= CharacterObjectSettings.RestrictedCostMultiplier;
-                            break;
-
-                        case 'F' when CharacterObjectSettings.MultiplyForbiddenCost:
-                            decCost *= CharacterObjectSettings.ForbiddenCostMultiplier;
-                            break;
-                    }
-
-                    // Create the Expense Log Entry.
-                    ExpenseLogEntry objExpense = new ExpenseLogEntry(CharacterObject);
-                    objExpense.Create(decCost * -1,
-                                      await LanguageManager.GetStringAsync("String_ExpensePurchaseVehicleWeaponMount", token: GenericToken)
-                                                           .ConfigureAwait(false)
-                                      + await LanguageManager.GetStringAsync("String_Space", token: GenericToken).ConfigureAwait(false)
-                                      + await objNewWeaponMount.GetCurrentDisplayNameShortAsync(GenericToken)
-                                                               .ConfigureAwait(false), ExpenseType.Nuyen,
-                                      DateTime.Now);
-                    await CharacterObject.ExpenseEntries.AddWithSortAsync(objExpense, token: GenericToken).ConfigureAwait(false);
-                    await CharacterObject.ModifyNuyenAsync(-decCost, GenericToken).ConfigureAwait(false);
-
-                    ExpenseUndo objUndo = new ExpenseUndo();
-                    objUndo.CreateNuyen(NuyenExpenseType.AddVehicleWeaponMount, objNewWeaponMount.InternalId);
-                    objExpense.Undo = objUndo;
-                }
+                await AddWeaponMountAsync(objVehicle, objNewWeaponMount, decMarkup, GenericToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
                 //swallow this
+            }
+        }
+
+        /// <summary>
+        /// Put a mount from the Create Weapon Mount dialog on a vehicle and pay for it, as the vehicle tab's Add Weapon Mount does.
+        /// </summary>
+        public async Task AddWeaponMountAsync(Vehicle objVehicle, WeaponMount objWeaponMount, decimal decMarkup, CancellationToken token = default)
+        {
+            if (objWeaponMount.FreeCost)
+                await objVehicle.WeaponMounts.AddAsync(objWeaponMount, token).ConfigureAwait(false);
+            else
+            {
+                // Calculate cost based on total vehicle cost change to make sure we capture everything
+                decimal decCost = -await objVehicle.GetTotalCostAsync(token).ConfigureAwait(false);
+                await objVehicle.WeaponMounts.AddAsync(objWeaponMount, token).ConfigureAwait(false);
+                decCost += await objVehicle.GetTotalCostAsync(token).ConfigureAwait(false);
+
+                // Apply a markup if applicable.
+                if (decMarkup != 0)
+                {
+                    decCost *= 1 + decMarkup / 100.0m;
+                }
+
+                // Multiply the cost if applicable.
+                char chrAvail = (await objWeaponMount.TotalAvailTupleAsync(token: token).ConfigureAwait(false)).Suffix;
+                switch (chrAvail)
+                {
+                    case 'R' when CharacterObjectSettings.MultiplyRestrictedCost:
+                        decCost *= CharacterObjectSettings.RestrictedCostMultiplier;
+                        break;
+
+                    case 'F' when CharacterObjectSettings.MultiplyForbiddenCost:
+                        decCost *= CharacterObjectSettings.ForbiddenCostMultiplier;
+                        break;
+                }
+
+                // Create the Expense Log Entry.
+                ExpenseLogEntry objExpense = new ExpenseLogEntry(CharacterObject);
+                objExpense.Create(decCost * -1,
+                                  await LanguageManager.GetStringAsync("String_ExpensePurchaseVehicleWeaponMount", token: token)
+                                                       .ConfigureAwait(false)
+                                  + await LanguageManager.GetStringAsync("String_Space", token: token).ConfigureAwait(false)
+                                  + await objWeaponMount.GetCurrentDisplayNameShortAsync(token)
+                                                           .ConfigureAwait(false), ExpenseType.Nuyen,
+                                  DateTime.Now);
+                await CharacterObject.ExpenseEntries.AddWithSortAsync(objExpense, token: token).ConfigureAwait(false);
+                await CharacterObject.ModifyNuyenAsync(-decCost, token).ConfigureAwait(false);
+
+                ExpenseUndo objUndo = new ExpenseUndo();
+                objUndo.CreateNuyen(NuyenExpenseType.AddVehicleWeaponMount, objWeaponMount.InternalId);
+                objExpense.Undo = objUndo;
             }
         }
 
