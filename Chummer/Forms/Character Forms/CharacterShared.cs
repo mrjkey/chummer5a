@@ -1556,6 +1556,34 @@ namespace Chummer
         }
 
         /// <summary>
+        /// Make a sprite character a free sprite, as Special > Convert to Free Sprite does: it gains the Free Sprite metatype category and the
+        /// Denial power (outside the power limit), when the data has that power.
+        /// </summary>
+        /// <returns>Whether the Denial power was added.</returns>
+        internal async Task<bool> ConvertToFreeSpriteAsync(CancellationToken token = default)
+        {
+            XmlNode objXmlPower
+                = (await CharacterObject.LoadDataAsync("critterpowers.xml", token: token)
+                                        .ConfigureAwait(false))
+                .SelectSingleNode("/chummer/powers/power[name = \"Denial\"]");
+            bool blnPowerAdded = false;
+            if (objXmlPower != null)
+            {
+                CritterPower objPower = new CritterPower(CharacterObject);
+                await objPower.CreateAsync(objXmlPower, token: token).ConfigureAwait(false);
+                objPower.CountTowardsLimit = false;
+                if (!objPower.InternalId.IsEmptyGuid())
+                {
+                    await CharacterObject.CritterPowers.AddAsync(objPower, token).ConfigureAwait(false);
+                    blnPowerAdded = true;
+                }
+            }
+
+            await CharacterObject.SetMetatypeCategoryAsync("Free Sprite", token).ConfigureAwait(false);
+            return blnPowerAdded;
+        }
+
+        /// <summary>
         /// The drug categories a piece of ware holds (its allowdrug node), comma-separated as SelectDrug takes them. Empty if it holds any drug.
         /// </summary>
         internal static string GetAllowedDrugCategories(Cyberware objCyberware, CancellationToken token = default)
@@ -11425,30 +11453,7 @@ namespace Chummer
                         return;
                     }
 
-                    foreach (XPathNavigator xmlContact in xmlDoc.CreateNavigator()
-                                 .SelectAndCacheExpression(
-                                     "/chummer/contacts/contact", token: token))
-                    {
-                        Contact objContact = new Contact(CharacterObject);
-                        try
-                        {
-                            await objContact.LoadAsync(xmlContact, token).ConfigureAwait(false);
-                            await CharacterObject.Contacts.AddAsync(objContact, token).ConfigureAwait(false);
-                        }
-                        catch
-                        {
-                            try
-                            {
-                                await CharacterObject.Contacts.RemoveAsync(objContact, token: token).ConfigureAwait(false);
-                            }
-                            catch
-                            {
-                                //swallow this
-                            }
-                            await objContact.DisposeAsync().ConfigureAwait(false);
-                            throw;
-                        }
-                    }
+                    await ImportContactsAsync(xmlDoc, token).ConfigureAwait(false);
                 }
                 finally
                 {
@@ -11459,6 +11464,42 @@ namespace Chummer
             {
                 await objCursorWait.DisposeAsync().ConfigureAwait(false);
             }
+        }
+
+        /// <summary>
+        /// Add the contacts in a contacts file (/chummer/contacts/contact), as Add Contacts From File does once the file is read.
+        /// </summary>
+        /// <returns>How many contacts were added.</returns>
+        internal async Task<int> ImportContactsAsync(XPathDocument xmlDoc, CancellationToken token = default)
+        {
+            int intCount = 0;
+            foreach (XPathNavigator xmlContact in xmlDoc.CreateNavigator()
+                         .SelectAndCacheExpression(
+                             "/chummer/contacts/contact", token: token))
+            {
+                Contact objContact = new Contact(CharacterObject);
+                try
+                {
+                    await objContact.LoadAsync(xmlContact, token).ConfigureAwait(false);
+                    await CharacterObject.Contacts.AddAsync(objContact, token).ConfigureAwait(false);
+                    ++intCount;
+                }
+                catch
+                {
+                    try
+                    {
+                        await CharacterObject.Contacts.RemoveAsync(objContact, token: token).ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        //swallow this
+                    }
+                    await objContact.DisposeAsync().ConfigureAwait(false);
+                    throw;
+                }
+            }
+
+            return intCount;
         }
 
         #endregion Additional Relationships Tab Control Events

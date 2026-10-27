@@ -144,6 +144,7 @@ namespace Chummer.Agent
             yield return new AgentTool("list_metatypes",
                 "Metatypes with their attribute ranges (min/max/augmented max), karma cost and metavariants.",
                 AgentTool.Schema(("category", "string", "Only this category, e.g. 'Metahuman', 'Metasapient', 'Shapeshifter' (optional)."),
+                                 ("critters", "boolean", "List the critters (critters.xml) that create_critter makes instead. Default false."),
                                  ("character", "string", CharacterArgDescription)),
                 ListMetatypesAsync);
         }
@@ -489,7 +490,8 @@ namespace Chummer.Agent
         private static async Task<object> ListMetatypesAsync(JObject objArgs, CancellationToken token)
         {
             Character objCharacter = await TryGetCharacterAsync(objArgs, token).ConfigureAwait(false);
-            (XPathNavigator objRoot, CharacterSettings objSettings) = await LoadDataAsync(objCharacter, "metatypes.xml", token).ConfigureAwait(false);
+            (XPathNavigator objRoot, CharacterSettings objSettings) = await LoadDataAsync(objCharacter, objArgs.Value<bool?>("critters") == true ? "critters.xml" : "metatypes.xml",
+                                                                                          token).ConfigureAwait(false);
             List<string> lstFilters = new List<string>();
             if (objSettings != null)
                 lstFilters.Add(await objSettings.BookXPathAsync(token: token).ConfigureAwait(false));

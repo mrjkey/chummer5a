@@ -5639,19 +5639,7 @@ namespace Chummer
         {
             try
             {
-                XmlDocument objXmlDocument
-                    = await CharacterObject.LoadDataAsync("critterpowers.xml", token: GenericToken)
-                                           .ConfigureAwait(false);
-                XmlNode objXmlPower = objXmlDocument.SelectSingleNode("/chummer/powers/power[name = \"Denial\"]");
-                CritterPower objPower = new CritterPower(CharacterObject);
-                await objPower.CreateAsync(objXmlPower, token: GenericToken).ConfigureAwait(false);
-                objPower.CountTowardsLimit = false;
-                if (objPower.InternalId.IsEmptyGuid())
-                    return;
-
-                await CharacterObject.CritterPowers.AddAsync(objPower, GenericToken).ConfigureAwait(false);
-
-                await CharacterObject.SetMetatypeCategoryAsync("Free Sprite", GenericToken).ConfigureAwait(false);
+                await ConvertToFreeSpriteAsync(GenericToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {

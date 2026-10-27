@@ -2055,10 +2055,7 @@ namespace Chummer
                                 return;
                         }
 
-                        // Override the defaults for the setting.
-                        await objCharacter.SetIgnoreRulesAsync(true, _objGenericToken).ConfigureAwait(false);
-                        await objCharacter.SetIsCritterAsync(true, _objGenericToken).ConfigureAwait(false);
-                        await objCharacter.SetCreatedAsync(true, token: _objGenericToken).ConfigureAwait(false);
+                        await PrepareNewCritterAsync(objCharacter, _objGenericToken).ConfigureAwait(false);
 
                         // Show the Metatype selection window.
                         using (ThreadSafeForm<SelectMetatypeKarma> frmSelectMetatype =
@@ -2069,8 +2066,7 @@ namespace Chummer
                                 return;
                         }
 
-                        await Program.OpenCharacters.AddAsync(objCharacter, _objGenericToken).ConfigureAwait(false);
-                        await OpenCharacter(objCharacter, false, _objGenericToken).ConfigureAwait(false);
+                        await OpenNewCritterEditorAsync(objCharacter, _objGenericToken).ConfigureAwait(false);
                     }
                     finally
                     {
@@ -2087,6 +2083,26 @@ namespace Chummer
             {
                 //swallow this
             }
+        }
+
+        /// <summary>
+        /// Override a new critter's settings as File > New Critter does, before its metatype is picked: rules are off and it skips creation.
+        /// </summary>
+        internal static async Task PrepareNewCritterAsync(Character objCharacter, CancellationToken token = default)
+        {
+            // Override the defaults for the setting.
+            await objCharacter.SetIgnoreRulesAsync(true, token).ConfigureAwait(false);
+            await objCharacter.SetIsCritterAsync(true, token).ConfigureAwait(false);
+            await objCharacter.SetCreatedAsync(true, token: token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Open a new critter in the (career) editor, as File > New Critter does once its metatype is picked.
+        /// </summary>
+        internal async Task OpenNewCritterEditorAsync(Character objCharacter, CancellationToken token = default)
+        {
+            await Program.OpenCharacters.AddAsync(objCharacter, token).ConfigureAwait(false);
+            await OpenCharacter(objCharacter, false, token).ConfigureAwait(false);
         }
 
         private async void mnuMRU_Click(object sender, EventArgs e)

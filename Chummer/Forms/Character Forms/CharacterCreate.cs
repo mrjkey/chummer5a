@@ -1663,7 +1663,7 @@ namespace Chummer
                                         MessageBoxButtons.YesNo, MessageBoxIcon.Exclamation, token: GenericToken).ConfigureAwait(false) == DialogResult.Yes)
                                     {
                                         await DoReapplyImprovements(lstInternalIdsNeedingReapplyImprovements,
-                                            GenericToken).ConfigureAwait(false);
+                                            token: GenericToken).ConfigureAwait(false);
                                     }
                                 }
 
@@ -3266,10 +3266,17 @@ namespace Chummer
                 await DoReapplyImprovements(eParam, token: token).ConfigureAwait(false);
         }
 
-        private async Task DoReapplyImprovements(IReadOnlyCollection<string> lstInternalIdFilter = null,
-                                                      CancellationToken token = default)
+        /// <summary>
+        /// Re-create the improvements of everything the character has (or of the items in <paramref name="lstInternalIdFilter"/>) from the data
+        /// files, as Special > Reapply Improvements does after its confirmation.
+        /// </summary>
+        /// <param name="blnShowOutdatedItems">Show the editor's message listing items the data no longer has.</param>
+        /// <returns>The items the data no longer has, one per line.</returns>
+        internal async Task<string> DoReapplyImprovements(IReadOnlyCollection<string> lstInternalIdFilter = null, bool blnShowOutdatedItems = true,
+                                                          CancellationToken token = default)
         {
             token.ThrowIfCancellationRequested();
+            string strOutdatedItems = string.Empty;
             CursorWait objCursorWait = await CursorWait.NewAsync(this, token: token).ConfigureAwait(false);
             try
             {
@@ -3514,7 +3521,7 @@ namespace Chummer
                                 await objMartialArt.Techniques.ForEachWithSideEffectsAsync(async (objTechnique, t2) =>
                                 {
                                     if (lstInternalIdFilter?.Contains(objTechnique.InternalId) == false)
-                                        return;
+                                        return string.Empty;
                                     XmlNode objNode = await objTechnique.GetNodeAsync(token: t2)
                                                                         .ConfigureAwait(false);
                                     if (objNode != null)
@@ -3539,7 +3546,7 @@ namespace Chummer
                             await CharacterObject.Spells.ForEachWithSideEffectsAsync(async (objSpell, t) =>
                             {
                                 if (lstInternalIdFilter?.Contains(objSpell.InternalId) == false)
-                                    return;
+                                    return string.Empty;
                                 XmlNode objNode = await objSpell.GetNodeAsync(token: t).ConfigureAwait(false);
                                 if (objNode != null)
                                 {
@@ -3577,7 +3584,7 @@ namespace Chummer
                             await CharacterObject.Powers.ForEachWithSideEffectsAsync(async (objPower, t) =>
                             {
                                 if (lstInternalIdFilter?.Contains(objPower.InternalId) == false)
-                                    return;
+                                    return string.Empty;
                                 XmlNode objNode = await objPower.GetNodeAsync(token: t).ConfigureAwait(false);
                                 if (objNode != null)
                                 {
@@ -3604,7 +3611,7 @@ namespace Chummer
                             await CharacterObject.ComplexForms.ForEachWithSideEffectsAsync(async (objComplexForm, t) =>
                             {
                                 if (lstInternalIdFilter?.Contains(objComplexForm.InternalId) == false)
-                                    return;
+                                    return string.Empty;
                                 XmlNode objNode = await objComplexForm.GetNodeAsync(token: t).ConfigureAwait(false);
                                 if (objNode != null)
                                 {
@@ -3645,7 +3652,7 @@ namespace Chummer
                             await CharacterObject.AIPrograms.ForEachWithSideEffectsAsync(async (objProgram, t) =>
                             {
                                 if (lstInternalIdFilter?.Contains(objProgram.InternalId) == false)
-                                    return;
+                                    return string.Empty;
                                 XmlNode objNode = await objProgram.GetNodeAsync(token: t).ConfigureAwait(false);
                                 if (objNode != null)
                                 {
@@ -3684,7 +3691,7 @@ namespace Chummer
                             await CharacterObject.CritterPowers.ForEachWithSideEffectsAsync(async (objPower, t) =>
                             {
                                 if (lstInternalIdFilter?.Contains(objPower.InternalId) == false)
-                                    return;
+                                    return string.Empty;
                                 XmlNode objNode = await objPower.GetNodeAsync(token: t).ConfigureAwait(false);
                                 if (objNode != null)
                                 {
@@ -4075,10 +4082,11 @@ namespace Chummer
                         }
                         catch (OperationCanceledException)
                         {
-                            return;
+                            return string.Empty;
                         }
 
-                        if (sbdOutdatedItems.Length > 0 && !Utils.IsUnitTest)
+                        strOutdatedItems = sbdOutdatedItems.ToString();
+                        if (sbdOutdatedItems.Length > 0 && blnShowOutdatedItems && !Utils.IsUnitTest)
                         {
                             await Program.ShowScrollableMessageBoxAsync(
                                 this, await LanguageManager.GetStringAsync(
@@ -4109,6 +4117,7 @@ namespace Chummer
             }
 
             await SetDirty(true, token).ConfigureAwait(false);
+            return strOutdatedItems;
         }
 
         private async void mnuEditCopy_Click(object sender, EventArgs e)
@@ -4575,19 +4584,7 @@ namespace Chummer
         {
             try
             {
-                XmlNode objXmlPower
-                    = (await CharacterObject.LoadDataAsync("critterpowers.xml", token: GenericToken)
-                                            .ConfigureAwait(false))
-                    .SelectSingleNode("/chummer/powers/power[name = \"Denial\"]");
-                CritterPower objPower = new CritterPower(CharacterObject);
-                await objPower.CreateAsync(objXmlPower, token: GenericToken).ConfigureAwait(false);
-                objPower.CountTowardsLimit = false;
-                if (objPower.InternalId.IsEmptyGuid())
-                    return;
-
-                await CharacterObject.CritterPowers.AddAsync(objPower, GenericToken).ConfigureAwait(false);
-
-                await CharacterObject.SetMetatypeCategoryAsync("Free Sprite", GenericToken).ConfigureAwait(false);
+                await ConvertToFreeSpriteAsync(GenericToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -5840,30 +5837,7 @@ namespace Chummer
                     bool blnAddAgain;
                     do
                     {
-                        //from 1 to second highest life module order possible (ye hardcoding is bad, but extra stage is a niche case)
-                        int intStage;
-                        for (intStage = 1; intStage < 5; ++intStage)
-                        {
-                            XPathNavigator xmlStageNode = xmlStagesParentNode
-                                                                .SelectSingleNodeAndCacheExpression(
-                                                                    "stage[@order = "
-                                                                    + intStage.ToString(
-                                                                                  GlobalSettings.InvariantCultureInfo)
-                                                                              .CleanXPath()
-                                                                    + "]", GenericToken);
-                            if (xmlStageNode == null)
-                            {
-                                --intStage;
-                                break;
-                            }
-
-                            if (!await CharacterObject.Qualities.AnyAsync(x => x.Type == QualityType.LifeModule
-                                                                               && x.Stage == xmlStageNode.Value,
-                                                                          GenericToken).ConfigureAwait(false))
-                            {
-                                break;
-                            }
-                        }
+                        int intStage = await GetNextLifeModuleStageAsync(xmlStagesParentNode, GenericToken).ConfigureAwait(false);
 
                         //i--; //Counter last increment
                         XmlNode objXmlLifeModule;
@@ -5881,33 +5855,7 @@ namespace Chummer
                             objXmlLifeModule = frmSelectLifeModule.MyForm.SelectedNode;
                         }
 
-                        List<Weapon> lstWeapons = new List<Weapon>(1);
-                        Quality objLifeModule = new Quality(CharacterObject);
-                        try
-                        {
-                            await objLifeModule.CreateAsync(objXmlLifeModule, QualitySource.LifeModule, lstWeapons, token: GenericToken).ConfigureAwait(false);
-                            if (objLifeModule.InternalId.IsEmptyGuid())
-                            {
-                                await objLifeModule.DeleteQualityAsync(token: GenericToken).ConfigureAwait(false);
-                                continue;
-                            }
-
-                            //Is there any reason not to add it?
-                            if (true)
-                            {
-                                await CharacterObject.Qualities.AddAsync(objLifeModule, GenericToken).ConfigureAwait(false);
-
-                                foreach (Weapon objWeapon in lstWeapons)
-                                {
-                                    await CharacterObject.Weapons.AddAsync(objWeapon, GenericToken).ConfigureAwait(false);
-                                }
-                            }
-                        }
-                        catch
-                        {
-                            await objLifeModule.DeleteQualityAsync(token: CancellationToken.None).ConfigureAwait(false);
-                            throw;
-                        }
+                        await AddLifeModuleFromNodeAsync(objXmlLifeModule, GenericToken).ConfigureAwait(false);
 
                         //Stupid hardcoding but no sane way
                         //To do group skills (not that anything else is sane)
@@ -5922,6 +5870,76 @@ namespace Chummer
             {
                 //swallow this
             }
+        }
+
+        /// <summary>
+        /// The life module stage the Life Module button offers next: the first one the character has no module for.
+        /// </summary>
+        internal async Task<int> GetNextLifeModuleStageAsync(XPathNavigator xmlStagesParentNode, CancellationToken token = default)
+        {
+            //from 1 to second highest life module order possible (ye hardcoding is bad, but extra stage is a niche case)
+            int intStage;
+            for (intStage = 1; intStage < 5; ++intStage)
+            {
+                XPathNavigator xmlStageNode = xmlStagesParentNode
+                                                    .SelectSingleNodeAndCacheExpression(
+                                                        "stage[@order = "
+                                                        + intStage.ToString(
+                                                                      GlobalSettings.InvariantCultureInfo)
+                                                                  .CleanXPath()
+                                                        + "]", token);
+                if (xmlStageNode == null)
+                {
+                    --intStage;
+                    break;
+                }
+
+                if (!await CharacterObject.Qualities.AnyAsync(x => x.Type == QualityType.LifeModule
+                                                                   && x.Stage == xmlStageNode.Value,
+                                                              token).ConfigureAwait(false))
+                {
+                    break;
+                }
+            }
+
+            return intStage;
+        }
+
+        /// <summary>
+        /// Add a life module (with its chosen version merged in, as Quality.GetNodeOverrideable gives it) to the character, as the life module dialog's OK does.
+        /// </summary>
+        /// <returns>The life module, or null if it could not be created.</returns>
+        internal async Task<Quality> AddLifeModuleFromNodeAsync(XmlNode objXmlLifeModule, CancellationToken token = default)
+        {
+            List<Weapon> lstWeapons = new List<Weapon>(1);
+            Quality objLifeModule = new Quality(CharacterObject);
+            try
+            {
+                await objLifeModule.CreateAsync(objXmlLifeModule, QualitySource.LifeModule, lstWeapons, token: token).ConfigureAwait(false);
+                if (objLifeModule.InternalId.IsEmptyGuid())
+                {
+                    await objLifeModule.DeleteQualityAsync(token: token).ConfigureAwait(false);
+                    return null;
+                }
+
+                //Is there any reason not to add it?
+                if (true)
+                {
+                    await CharacterObject.Qualities.AddAsync(objLifeModule, token).ConfigureAwait(false);
+
+                    foreach (Weapon objWeapon in lstWeapons)
+                    {
+                        await CharacterObject.Weapons.AddAsync(objWeapon, token).ConfigureAwait(false);
+                    }
+                }
+            }
+            catch
+            {
+                await objLifeModule.DeleteQualityAsync(token: CancellationToken.None).ConfigureAwait(false);
+                throw;
+            }
+
+            return objLifeModule;
         }
 
         private async void cmdAddQuality_Click(object sender, EventArgs e)
@@ -6490,68 +6508,78 @@ namespace Chummer
                     }
                 } while (lstGear.Count > 0 && eResult != DialogResult.Cancel);
 
-                // Make sure at least 2 Foci were selected.
-                if (lstStack.Count < 2)
+                (Gear _, string strError) = await CreateStackedFocusAsync(lstStack, GenericToken).ConfigureAwait(false);
+                if (!string.IsNullOrEmpty(strError))
                 {
                     await Program.ShowScrollableMessageBoxAsync(
-                        this, await LanguageManager.GetStringAsync("Message_StackedFocusMinimum", token: GenericToken).ConfigureAwait(false),
+                        this, await LanguageManager.GetStringAsync(strError, token: GenericToken).ConfigureAwait(false),
                         await LanguageManager.GetStringAsync("MessageTitle_CannotStackFoci", token: GenericToken).ConfigureAwait(false),
                         MessageBoxButtons.OK, MessageBoxIcon.Information, token: GenericToken).ConfigureAwait(false);
-                    return;
                 }
-
-                // Make sure the combined Force of the Foci do not exceed 6.
-                if (!CharacterObjectSettings.AllowHigherStackedFoci)
-                {
-                    int intCombined = await lstStack.SumAsync(objGear => objGear.GetRatingAsync(GenericToken), GenericToken).ConfigureAwait(false);
-                    if (intCombined > 6)
-                    {
-                        foreach (Gear objGear in lstStack)
-                            objGear.Bonded = false;
-                        await Program.ShowScrollableMessageBoxAsync(
-                            this,
-                            await LanguageManager.GetStringAsync("Message_StackedFocusForce", token: GenericToken).ConfigureAwait(false),
-                            await LanguageManager.GetStringAsync("MessageTitle_CannotStackFoci", token: GenericToken).ConfigureAwait(false),
-                            MessageBoxButtons.OK, MessageBoxIcon.Information, token: GenericToken).ConfigureAwait(false);
-                        return;
-                    }
-                }
-
-                // Create the Stacked Focus.
-                StackedFocus objStack = new StackedFocus(CharacterObject);
-                foreach (Gear objGear in lstStack)
-                    await objStack.Gear.AddAsync(objGear, GenericToken).ConfigureAwait(false);
-                await CharacterObject.StackedFoci.AddAsync(objStack, GenericToken).ConfigureAwait(false);
-
-                // Remove the Gear from the character and replace it with a Stacked Focus item.
-                decimal decCost = 0;
-                foreach (Gear objGear in lstStack)
-                {
-                    decCost += await objGear.GetTotalCostAsync(GenericToken).ConfigureAwait(false);
-                    await CharacterObject.Gear.RemoveAsync(objGear, GenericToken).ConfigureAwait(false);
-                }
-
-                Gear objStackItem = new Gear(CharacterObject)
-                {
-                    Category = "Stacked Focus",
-                    Name = "Stacked Focus: "
-                           + await objStack.GetCurrentDisplayNameAsync(GenericToken).ConfigureAwait(false),
-                    MinRating = string.Empty,
-                    MaxRating = string.Empty,
-                    Source = "SR5",
-                    Page = "1",
-                    Cost = decCost.ToString(GlobalSettings.CultureInfo),
-                    Avail = "0"
-                };
-
-                await CharacterObject.Gear.AddAsync(objStackItem, GenericToken).ConfigureAwait(false);
-
-                objStack.GearId = objStackItem.InternalId;
             }
             catch (OperationCanceledException)
             {
                 //swallow this
             }
+        }
+
+        /// <summary>
+        /// Combine unbonded foci into a stacked focus, as the Create Stacked Focus button does once they are picked: they are bonded, taken out of
+        /// the character's gear and replaced by one Stacked Focus item.
+        /// </summary>
+        /// <returns>The stacked focus item, or the language key of the reason it can't be made (Message_StackedFocusMinimum or Message_StackedFocusForce).</returns>
+        internal async Task<(Gear StackItem, string Error)> CreateStackedFocusAsync(List<Gear> lstStack, CancellationToken token = default)
+        {
+            // Make sure at least 2 Foci were selected.
+            if (lstStack.Count < 2)
+                return (null, "Message_StackedFocusMinimum");
+
+            foreach (Gear objGear in lstStack)
+                objGear.Bonded = true;
+
+            // Make sure the combined Force of the Foci do not exceed 6.
+            if (!CharacterObjectSettings.AllowHigherStackedFoci)
+            {
+                int intCombined = await lstStack.SumAsync(objGear => objGear.GetRatingAsync(token), token).ConfigureAwait(false);
+                if (intCombined > 6)
+                {
+                    foreach (Gear objGear in lstStack)
+                        objGear.Bonded = false;
+                    return (null, "Message_StackedFocusForce");
+                }
+            }
+
+            // Create the Stacked Focus.
+            StackedFocus objStack = new StackedFocus(CharacterObject);
+            foreach (Gear objGear in lstStack)
+                await objStack.Gear.AddAsync(objGear, token).ConfigureAwait(false);
+            await CharacterObject.StackedFoci.AddAsync(objStack, token).ConfigureAwait(false);
+
+            // Remove the Gear from the character and replace it with a Stacked Focus item.
+            decimal decCost = 0;
+            foreach (Gear objGear in lstStack)
+            {
+                decCost += await objGear.GetTotalCostAsync(token).ConfigureAwait(false);
+                await CharacterObject.Gear.RemoveAsync(objGear, token).ConfigureAwait(false);
+            }
+
+            Gear objStackItem = new Gear(CharacterObject)
+            {
+                Category = "Stacked Focus",
+                Name = "Stacked Focus: "
+                       + await objStack.GetCurrentDisplayNameAsync(token).ConfigureAwait(false),
+                MinRating = string.Empty,
+                MaxRating = string.Empty,
+                Source = "SR5",
+                Page = "1",
+                Cost = decCost.ToString(GlobalSettings.CultureInfo),
+                Avail = "0"
+            };
+
+            await CharacterObject.Gear.AddAsync(objStackItem, token).ConfigureAwait(false);
+
+            objStack.GearId = objStackItem.InternalId;
+            return (objStackItem, string.Empty);
         }
 
         private async void cmdAddArmor_Click(object sender, EventArgs e)
@@ -8411,23 +8439,31 @@ namespace Chummer
             }
         }
 
+        /// <summary>
+        /// Whether the character may design another spell: the maximum number of spells a character can start with is
+        /// 2 x (highest of Spellcasting or Ritual Spellcasting skill), plus SpellLimit improvements.
+        /// </summary>
+        internal async Task<bool> CanCreateSpellAsync(CancellationToken token = default)
+        {
+            // Run through the list of Active Skills and pick out the two applicable ones.
+            int intSkillValue = 0;
+            Skill objSpellcasting = await CharacterObject.SkillsSection.GetActiveSkillAsync("Spellcasting", token).ConfigureAwait(false);
+            if (objSpellcasting != null)
+                intSkillValue = await objSpellcasting.GetRatingAsync(token).ConfigureAwait(false);
+            Skill objRitualSpellcasting = await CharacterObject.SkillsSection.GetActiveSkillAsync("Ritual Spellcasting", token).ConfigureAwait(false);
+            if (objRitualSpellcasting != null)
+                intSkillValue = Math.Max(intSkillValue, await objRitualSpellcasting.GetRatingAsync(token).ConfigureAwait(false));
+            return await CharacterObject.Spells.GetCountAsync(token).ConfigureAwait(false) < 2 * intSkillValue
+                   + await ImprovementManager.ValueOfAsync(CharacterObject, Improvement.ImprovementType.SpellLimit, token: token)
+                                             .ConfigureAwait(false)
+                   || await CharacterObject.GetIgnoreRulesAsync(token).ConfigureAwait(false);
+        }
+
         private async void tsCreateSpell_Click(object sender, EventArgs e)
         {
             try
             {
-                // Run through the list of Active Skills and pick out the two applicable ones.
-                int intSkillValue = 0;
-                Skill objSpellcasting = await CharacterObject.SkillsSection.GetActiveSkillAsync("Spellcasting", GenericToken).ConfigureAwait(false);
-                if (objSpellcasting != null)
-                    intSkillValue = await objSpellcasting.GetRatingAsync(GenericToken).ConfigureAwait(false);
-                Skill objRitualSpellcasting = await CharacterObject.SkillsSection.GetActiveSkillAsync("Ritual Spellcasting", GenericToken).ConfigureAwait(false);
-                if (objRitualSpellcasting != null)
-                    intSkillValue = Math.Max(intSkillValue, await objRitualSpellcasting.GetRatingAsync(GenericToken).ConfigureAwait(false));
-                // The maximum number of Spells a character can start with is 2 x (highest of Spellcasting or Ritual Spellcasting Skill).
-                if (await CharacterObject.Spells.GetCountAsync(GenericToken).ConfigureAwait(false) >= 2 * intSkillValue
-                    + await ImprovementManager.ValueOfAsync(CharacterObject, Improvement.ImprovementType.SpellLimit, token: GenericToken)
-                                              .ConfigureAwait(false)
-                    && !await CharacterObject.GetIgnoreRulesAsync(GenericToken).ConfigureAwait(false))
+                if (!await CanCreateSpellAsync(GenericToken).ConfigureAwait(false))
                 {
                     await Program.ShowScrollableMessageBoxAsync(
                         this, await LanguageManager.GetStringAsync("Message_SpellLimit", token: GenericToken).ConfigureAwait(false),
@@ -14256,7 +14292,7 @@ namespace Chummer
                                 MessageBoxButtons.YesNo, MessageBoxIcon.Exclamation, token: GenericToken).ConfigureAwait(false) == DialogResult.Yes)
                             {
                                 await DoReapplyImprovements(lstInternalIdsNeedingReapplyImprovements,
-                                    GenericToken).ConfigureAwait(false);
+                                    token: GenericToken).ConfigureAwait(false);
                             }
                         }
                     }
@@ -24077,18 +24113,7 @@ namespace Chummer
                     = await CursorWait.NewAsync(this, true, token: GenericToken).ConfigureAwait(false);
                 try
                 {
-                    StoryBuilder objBuilder = new StoryBuilder(CharacterObject);
-                    if (Interlocked.CompareExchange(ref _objStoryBuilder, objBuilder, null) == null)
-                    {
-                        await btnCreateBackstory.DoThreadSafeAsync(x => x.Enabled = false, token: GenericToken)
-                            .ConfigureAwait(false);
-                    }
-                    else
-                        await objBuilder.DisposeAsync().ConfigureAwait(false);
-
-                    await CharacterObject
-                        .SetBackgroundAsync(await _objStoryBuilder.GetStory(token: GenericToken).ConfigureAwait(false),
-                            GenericToken).ConfigureAwait(false);
+                    await CreateBackstoryAsync(GenericToken).ConfigureAwait(false);
                 }
                 finally
                 {
@@ -24099,6 +24124,26 @@ namespace Chummer
             {
                 //swallow this
             }
+        }
+
+        /// <summary>
+        /// Write the character's background from its life modules, as the Create Backstory button does (the button only works once).
+        /// </summary>
+        /// <returns>The new background.</returns>
+        internal async Task<string> CreateBackstoryAsync(CancellationToken token = default)
+        {
+            StoryBuilder objBuilder = new StoryBuilder(CharacterObject);
+            if (Interlocked.CompareExchange(ref _objStoryBuilder, objBuilder, null) == null)
+            {
+                await btnCreateBackstory.DoThreadSafeAsync(x => x.Enabled = false, token: token)
+                    .ConfigureAwait(false);
+            }
+            else
+                await objBuilder.DisposeAsync().ConfigureAwait(false);
+
+            string strStory = await _objStoryBuilder.GetStory(token: token).ConfigureAwait(false);
+            await CharacterObject.SetBackgroundAsync(strStory, token).ConfigureAwait(false);
+            return strStory;
         }
 
         private async void mnuSpecialConfirmValidity_Click(object sender, EventArgs e)

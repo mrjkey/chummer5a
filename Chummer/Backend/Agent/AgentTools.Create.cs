@@ -289,6 +289,33 @@ namespace Chummer.Agent
         }
 
         /// <summary>
+        /// Apply a metatype (or, for critters, a critter from critters.xml) through the karma build's metatype dialog, as its OK button does.
+        /// </summary>
+        private static async Task<string> ApplyKarmaMetatypeAsync(Character objCharacter, string strMetatype, string strMetavariant, int intForce, CancellationToken token)
+        {
+            ChummerMainForm frmMain = Program.MainForm ?? throw new AgentToolException("Chummer's main window is not open.");
+            XPathNavigator xmlMetatypes = (await objCharacter.LoadDataXPathAsync(objCharacter.IsCritter ? "critters.xml" : "metatypes.xml", token: token)
+                                                             .ConfigureAwait(false)).SelectSingleNode("/chummer/metatypes");
+            string strBookXPath = await (await objCharacter.GetSettingsAsync(token).ConfigureAwait(false)).BookXPathAsync(token: token).ConfigureAwait(false);
+            if (xmlMetatypes?.TryGetNodeByNameOrId("metatype", strMetatype, strBookXPath) == null)
+                throw new AgentToolException("There is no metatype '" + strMetatype + "' in the enabled books. Use list_metatypes.");
+            SelectMetatypeKarma frmKarma = await frmMain.DoThreadSafeFuncAsync(() => new SelectMetatypeKarma(objCharacter), token).ConfigureAwait(false);
+            try
+            {
+                string strRefusal = await frmKarma.ApplyMetatypeSelectionAsync(strMetatype, strMetavariant, string.Empty, intForce, string.Empty, token)
+                                                  .ConfigureAwait(false);
+                if (!string.IsNullOrEmpty(strRefusal))
+                    throw new AgentToolException(strRefusal);
+            }
+            finally
+            {
+                await frmKarma.DoThreadSafeAsync(x => x.Dispose(), CancellationToken.None).ConfigureAwait(false);
+            }
+
+            return strMetatype + (string.IsNullOrEmpty(strMetavariant) || strMetavariant.IsEmptyGuid() ? string.Empty : " (" + strMetavariant + ")");
+        }
+
+        /// <summary>
         /// Apply metatype (and for priority builds, priorities and talent) through the same code as the new-character dialogs' OK buttons.
         /// Anything not in <paramref name="objArgs"/> keeps the character's current value.
         /// </summary>
@@ -312,25 +339,7 @@ namespace Chummer.Agent
             {
                 if (ReadPriorities(objArgs) != null || !string.IsNullOrEmpty(objArgs.Value<string>("talent")))
                     throw new AgentToolException("These settings use a karma build, which has no priorities or talents: buy magic or resonance with qualities instead.");
-                XPathNavigator xmlMetatypes = (await objCharacter.LoadDataXPathAsync(objCharacter.IsCritter ? "critters.xml" : "metatypes.xml", token: token)
-                                                                 .ConfigureAwait(false)).SelectSingleNode("/chummer/metatypes");
-                string strBookXPath = await (await objCharacter.GetSettingsAsync(token).ConfigureAwait(false)).BookXPathAsync(token: token).ConfigureAwait(false);
-                if (xmlMetatypes?.TryGetNodeByNameOrId("metatype", strMetatype, strBookXPath) == null)
-                    throw new AgentToolException("There is no metatype '" + strMetatype + "' in the enabled books. Use list_metatypes.");
-                SelectMetatypeKarma frmKarma = await frmMain.DoThreadSafeFuncAsync(() => new SelectMetatypeKarma(objCharacter), token).ConfigureAwait(false);
-                try
-                {
-                    string strRefusal = await frmKarma.ApplyMetatypeSelectionAsync(strMetatype, strMetavariant, string.Empty, intForce, string.Empty, token)
-                                                      .ConfigureAwait(false);
-                    if (!string.IsNullOrEmpty(strRefusal))
-                        throw new AgentToolException(strRefusal);
-                }
-                finally
-                {
-                    await frmKarma.DoThreadSafeAsync(x => x.Dispose(), CancellationToken.None).ConfigureAwait(false);
-                }
-
-                return strMetatype + (string.IsNullOrEmpty(strMetavariant) || strMetavariant.IsEmptyGuid() ? string.Empty : " (" + strMetavariant + ")");
+                return await ApplyKarmaMetatypeAsync(objCharacter, strMetatype, strMetavariant, intForce, token).ConfigureAwait(false);
             }
 
             JObject objPriorities = ReadPriorities(objArgs) ?? new JObject();

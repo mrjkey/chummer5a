@@ -86,6 +86,7 @@ namespace Chummer.Agent
                                  ("fettered", "boolean", "Fettered (spirits only, where allowed)."),
                                  ("name", "string", "The spirit's own name."),
                                  ("notes", "string", "Notes. Empty clears them."),
+                                 ("linked_file", "string", "Path of the spirit's own .chum5 file, as Attach Character does; empty removes the link."),
                                  ("character", "string", CharacterArgDescription)),
                 SetSpiritDetailsAsync);
             yield return new AgentTool("bond_focus",
@@ -97,6 +98,17 @@ namespace Chummer.Agent
                                                             + "own); summoning, banishing and binding foci to a spirit type."),
                                  ("character", "string", CharacterArgDescription)),
                 BondFocusAsync);
+            yield return new AgentTool("create_stacked_focus",
+                "Combine two or more unbonded foci the character has into one stacked focus, as the foci tab's Create Stacked Focus does: they are "
+                + "bonded and replaced by a Stacked Focus item. Their combined force can't pass 6 unless the settings allow it.",
+                AgentTool.Schema(("foci!", "array", "Ids (from list_items) of the unbonded foci to stack."),
+                                 ("character", "string", CharacterArgDescription)),
+                CreateStackedFocusAsync);
+            yield return new AgentTool("convert_to_free_sprite",
+                "Make a sprite character a free sprite, as Special > Convert to Free Sprite does: it gains the Free Sprite category (and the Denial power, "
+                + "if the data has it).",
+                AgentTool.Schema(("character", "string", CharacterArgDescription)),
+                ConvertToFreeSpriteAsync);
             yield return new AgentTool("add_initiation",
                 "Raise the initiate grade (or the submersion grade for technomancers) by one, as the editor's Add Initiation/Submersion does. "
                 + "Each grade costs karma and allows one metamagic or echo.",
@@ -378,6 +390,23 @@ namespace Chummer.Agent
             bool blnSprite = await objSpirit.GetEntityTypeAsync(token).ConfigureAwait(false) == SpiritType.Sprite;
             bool blnIgnoreRules = await objCharacter.GetIgnoreRulesAsync(token).ConfigureAwait(false);
             List<string> lstChanged = new List<string>();
+
+            // The link button's Attach Character and Remove Character menu items
+            string strLinkedFile = objArgs.Value<string>("linked_file");
+            if (strLinkedFile != null)
+            {
+                if (string.IsNullOrWhiteSpace(strLinkedFile))
+                {
+                    await objSpirit.SetFileNameAsync(string.Empty, token).ConfigureAwait(false);
+                    await objSpirit.SetRelativeFileNameAsync(string.Empty, token).ConfigureAwait(false);
+                    lstChanged.Add("removed the linked file");
+                }
+                else
+                {
+                    await objSpirit.SetFileNameAsync(GetExistingCharacterFile(strLinkedFile), token).ConfigureAwait(false);
+                    lstChanged.Add("linked file");
+                }
+            }
 
             // The panel's boxes, in the order the editor binds them
             string strType = objArgs.Value<string>("type")?.Trim();
@@ -663,6 +692,45 @@ namespace Chummer.Agent
                                                     + " Magic now goes to adept powers ("
                                                     + (await objCharacter.GetPowerPointsTotalAsync(token).ConfigureAwait(false)).ToString(GlobalSettings.InvariantCultureInfo)
                                                     + " power points).", token).ConfigureAwait(false);
+        }
+
+        private static async Task<object> CreateStackedFocusAsync(JObject objArgs, CancellationToken token)
+        {
+            CharacterCreate frmCreate = await GetCreateFormAsync(objArgs, token).ConfigureAwait(false);
+            Character objCharacter = frmCreate.CharacterObject;
+            // The foci the button lets the character pick from
+            List<Gear> lstFoci = await objCharacter.Gear.ToListAsync(x => (x.Category == "Foci" || x.Category == "Metamagic Foci") && !x.Bonded, token)
+                                                   .ConfigureAwait(false);
+            if (!(objArgs["foci"] is JArray objIds) || objIds.Count == 0)
+                throw new AgentToolException("`foci` is required.");
+            List<Gear> lstStack = new List<Gear>(objIds.Count);
+            foreach (JToken objId in objIds)
+            {
+                string strId = objId.ToString().Trim();
+                Gear objFocus = await FindOwnedAsync(lstFoci, strId, token).ConfigureAwait(false)
+                                ?? throw new AgentToolException("'" + strId + "' isn't an unbonded focus the character has. Options: "
+                                                                + string.Join(", ", lstFoci.Select(x => x.Name + " (id " + x.InternalId + ")")) + ".");
+                if (!lstStack.Contains(objFocus))
+                    lstStack.Add(objFocus);
+            }
+
+            (Gear objStackItem, string strError) = await frmCreate.CreateStackedFocusAsync(lstStack, token).ConfigureAwait(false);
+            if (!string.IsNullOrEmpty(strError))
+                throw new AgentToolException(await GetRefusalMessageAsync(strError, string.Empty, token).ConfigureAwait(false));
+            return await FinishEditAsync(frmCreate, "Made " + objStackItem.Name + " (id " + objStackItem.InternalId + "). Bond it with bond_focus.", token)
+                .ConfigureAwait(false);
+        }
+
+        private static async Task<object> ConvertToFreeSpriteAsync(JObject objArgs, CancellationToken token)
+        {
+            CharacterShared frmCharacter = await GetCharacterFormAsync(objArgs, token).ConfigureAwait(false);
+            // The menu item only shows for sprites
+            if (!frmCharacter.CharacterObject.IsSprite)
+                throw new AgentToolException("Only sprite characters can become free sprites.");
+            bool blnDenial = await frmCharacter.ConvertToFreeSpriteAsync(token).ConfigureAwait(false);
+            return await FinishAnyEditAsync(frmCharacter, "The sprite is now a free sprite"
+                                                          + (blnDenial ? ", with the Denial power." : ". Chummer's data has no Denial power, so add it by hand if you need it."),
+                                            token).ConfigureAwait(false);
         }
     }
 }

@@ -55573,42 +55573,14 @@ namespace Chummer
             try
             {
                 token.ThrowIfCancellationRequested();
-                bool blnEssence = true;
-                decimal decEssence = 0;
-                using (new FetchSafelyFromObjectPool<StringBuilder>(Utils.StringBuilderPool, out StringBuilder sbdMessage))
+                string strProblem = await GetCyberzombieRequirementsProblemAsync(token).ConfigureAwait(false);
+                if (!string.IsNullOrEmpty(strProblem))
                 {
-                    sbdMessage.AppendLine(await LanguageManager
-                        .GetStringAsync("Message_CyberzombieRequirements", token: token).ConfigureAwait(false));
-
-                    // Make sure the character has an Essence lower than 0.
-                    decEssence = await EssenceAsync(token: token).ConfigureAwait(false);
-                    if (decEssence >= 0)
-                    {
-                        sbdMessage.Append('\t',
-                                      await LanguageManager
-                                          .GetStringAsync("Message_CyberzombieRequirementsEssence", token: token)
-                                          .ConfigureAwait(false)).AppendLine();
-                        blnEssence = false;
-                    }
-
-                    bool blnEnabled = (await ImprovementManager
-                        .GetCachedImprovementListForValueOfAsync(this, Improvement.ImprovementType.EnableCyberzombie,
-                            token: token).ConfigureAwait(false)).Count > 0;
-
-                    if (!blnEnabled)
-                        sbdMessage.Append('\t',
-                                      await LanguageManager
-                                          .GetStringAsync("Message_CyberzombieRequirementsImprovement", token: token)
-                                          .ConfigureAwait(false)).AppendLine();
-
-                    if (!blnEssence || !blnEnabled)
-                    {
-                        await Program.ShowScrollableMessageBoxAsync(sbdMessage.ToTrimmedString(),
-                            await LanguageManager.GetStringAsync("MessageTitle_CyberzombieRequirements", token: token)
-                                .ConfigureAwait(false),
-                            MessageBoxButtons.OK, MessageBoxIcon.Error, token: token).ConfigureAwait(false);
-                        return false;
-                    }
+                    await Program.ShowScrollableMessageBoxAsync(strProblem,
+                        await LanguageManager.GetStringAsync("MessageTitle_CyberzombieRequirements", token: token)
+                            .ConfigureAwait(false),
+                        MessageBoxButtons.OK, MessageBoxIcon.Error, token: token).ConfigureAwait(false);
+                    return false;
                 }
 
                 if (await Program.ShowScrollableMessageBoxAsync(
@@ -55640,6 +55612,75 @@ namespace Chummer
                     intWILResult = frmWILHits.MyForm.Result;
                 }
 
+                await ApplyCyberzombieAsync(intWILResult, token).ConfigureAwait(false);
+                return true;
+            }
+            finally
+            {
+                await objLocker.DisposeAsync().ConfigureAwait(false);
+            }
+        }
+
+        /// <summary>
+        /// Why the character can't become a cyberzombie (Essence must be below 0, and something must enable it), or an empty string if it can.
+        /// </summary>
+        public async Task<string> GetCyberzombieRequirementsProblemAsync(CancellationToken token = default)
+        {
+            IAsyncDisposable objLocker = await LockObject.EnterReadLockAsync(token).ConfigureAwait(false);
+            try
+            {
+                token.ThrowIfCancellationRequested();
+                bool blnEssence = true;
+                using (new FetchSafelyFromObjectPool<StringBuilder>(Utils.StringBuilderPool, out StringBuilder sbdMessage))
+                {
+                    sbdMessage.AppendLine(await LanguageManager
+                        .GetStringAsync("Message_CyberzombieRequirements", token: token).ConfigureAwait(false));
+
+                    // Make sure the character has an Essence lower than 0.
+                    if (await EssenceAsync(token: token).ConfigureAwait(false) >= 0)
+                    {
+                        sbdMessage.Append('\t',
+                                      await LanguageManager
+                                          .GetStringAsync("Message_CyberzombieRequirementsEssence", token: token)
+                                          .ConfigureAwait(false)).AppendLine();
+                        blnEssence = false;
+                    }
+
+                    bool blnEnabled = (await ImprovementManager
+                        .GetCachedImprovementListForValueOfAsync(this, Improvement.ImprovementType.EnableCyberzombie,
+                            token: token).ConfigureAwait(false)).Count > 0;
+
+                    if (!blnEnabled)
+                        sbdMessage.Append('\t',
+                                      await LanguageManager
+                                          .GetStringAsync("Message_CyberzombieRequirementsImprovement", token: token)
+                                          .ConfigureAwait(false)).AppendLine();
+
+                    if (!blnEssence || !blnEnabled)
+                        return sbdMessage.ToTrimmedString();
+                }
+
+                return string.Empty;
+
+            }
+            finally
+            {
+                await objLocker.DisposeAsync().ConfigureAwait(false);
+            }
+        }
+
+        /// <summary>
+        /// Make the character a cyberzombie, as Special > Cyberzombie does once its Willpower test is rolled: free negative qualities from the test,
+        /// no Resonance, Magic fixed at 1, the cyberzombie lifestyle addition and its critter powers.
+        /// </summary>
+        /// <param name="intWILResult">Hits on the Willpower test.</param>
+        public async Task ApplyCyberzombieAsync(int intWILResult, CancellationToken token = default)
+        {
+            IAsyncDisposable objLocker = await LockObject.EnterUpgradeableReadLockAsync(token).ConfigureAwait(false);
+            try
+            {
+                token.ThrowIfCancellationRequested();
+                decimal decEssence = await EssenceAsync(token: token).ConfigureAwait(false);
                 // The character gains 10 + ((Threshold - Hits) * 10)BP worth of Negative Qualities.
                 int intThreshold = 3 + (decEssence - await (await GetAttributeAsync("ESS", token: token).ConfigureAwait(false)).GetMetatypeMaximumAsync(token).ConfigureAwait(false))
                     .ToInt32();
@@ -55737,7 +55778,6 @@ namespace Chummer
                     }
                 }
 
-                return true;
             }
             finally
             {

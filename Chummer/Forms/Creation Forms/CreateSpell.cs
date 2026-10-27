@@ -653,251 +653,45 @@ namespace Chummer
                 x.Enabled = true;
             }, token: token).ConfigureAwait(false);
 
-            switch (await cboCategory.DoThreadSafeFuncAsync(x => x.SelectedValue.ToString(), token: token).ConfigureAwait(false))
+            string strCategory = await cboCategory.DoThreadSafeFuncAsync(x => x.SelectedValue.ToString(), token: token).ConfigureAwait(false);
+            IReadOnlyList<(string LabelKey, int Drain)> lstModifiers = GetCategoryModifiers(strCategory);
+            CheckBox[] achkModifiers = ModifierCheckBoxes;
+            for (int i = 0; i < lstModifiers.Count; ++i)
+            {
+                string strText = await LanguageManager.GetStringAsync(lstModifiers[i].LabelKey, token: token).ConfigureAwait(false);
+                string strTag = lstModifiers[i].Drain.ToString("+0;-0;+0", GlobalSettings.InvariantCultureInfo);
+                await achkModifiers[i].DoThreadSafeAsync(x =>
+                {
+                    x.Tag = strTag;
+                    x.Text = strText;
+                }, token: token).ConfigureAwait(false);
+            }
+
+            // Combat and Manipulation spells take a number of effects next to their multiplying modifier
+            CheckBox chkEffectsModifier;
+            switch (strCategory)
             {
                 case "Detection":
-                {
-                    string strText1 = await LanguageManager.GetStringAsync("Checkbox_DetectionSpell1", token: token).ConfigureAwait(false);
-                    await chkModifier1.DoThreadSafeAsync(x =>
-                    {
-                        x.Tag = "+0";
-                        x.Text = strText1;
-                    }, token: token).ConfigureAwait(false);
-                    string strText2 = await LanguageManager.GetStringAsync("Checkbox_DetectionSpell2", token: token).ConfigureAwait(false);
-                    await chkModifier2.DoThreadSafeAsync(x =>
-                    {
-                        x.Tag = "+0";
-                        x.Text = strText2;
-                    }, token: token).ConfigureAwait(false);
-                    string strText3 = await LanguageManager.GetStringAsync("Checkbox_DetectionSpell3", token: token).ConfigureAwait(false);
-                    await chkModifier3.DoThreadSafeAsync(x =>
-                    {
-                        x.Tag = "+0";
-                        x.Text = strText3;
-                    }, token: token).ConfigureAwait(false);
-                    string strText4 = await LanguageManager.GetStringAsync("Checkbox_DetectionSpell4", token: token).ConfigureAwait(false);
-                    await chkModifier4.DoThreadSafeAsync(x =>
-                    {
-                        x.Tag = "+0";
-                        x.Text = strText4;
-                    }, token: token).ConfigureAwait(false);
-                    string strText5 = await LanguageManager.GetStringAsync("Checkbox_DetectionSpell5", token: token).ConfigureAwait(false);
-                    await chkModifier5.DoThreadSafeAsync(x =>
-                    {
-                        x.Tag = "+0";
-                        x.Text = strText5;
-                    }, token: token).ConfigureAwait(false);
-                    string strText6 = await LanguageManager.GetStringAsync("Checkbox_DetectionSpell6", token: token).ConfigureAwait(false);
-                    await chkModifier6.DoThreadSafeAsync(x =>
-                    {
-                        x.Tag = "+0";
-                        x.Text = strText6;
-                    }, token: token).ConfigureAwait(false);
-                    string strText7 = await LanguageManager.GetStringAsync("Checkbox_DetectionSpell7", token: token).ConfigureAwait(false);
-                    await chkModifier7.DoThreadSafeAsync(x =>
-                    {
-                        x.Tag = "+1";
-                        x.Text = strText7;
-                    }, token: token).ConfigureAwait(false);
-                    string strText8 = await LanguageManager.GetStringAsync("Checkbox_DetectionSpell8", token: token).ConfigureAwait(false);
-                    await chkModifier8.DoThreadSafeAsync(x =>
-                    {
-                        x.Tag = "+1";
-                        x.Text = strText8;
-                    }, token: token).ConfigureAwait(false);
-                    string strText9 = await LanguageManager.GetStringAsync("Checkbox_DetectionSpell9", token: token).ConfigureAwait(false);
-                    await chkModifier9.DoThreadSafeAsync(x =>
-                    {
-                        x.Tag = "+2";
-                        x.Text = strText9;
-                    }, token: token).ConfigureAwait(false);
-                    string strText10 = await LanguageManager.GetStringAsync("Checkbox_DetectionSpell10", token: token).ConfigureAwait(false);
-                    await chkModifier10.DoThreadSafeAsync(x =>
-                    {
-                        x.Tag = "+4";
-                        x.Text = strText10;
-                    }, token: token).ConfigureAwait(false);
-                    string strText11 = await LanguageManager.GetStringAsync("Checkbox_DetectionSpell11", token: token).ConfigureAwait(false);
-                    await chkModifier11.DoThreadSafeAsync(x =>
-                    {
-                        x.Tag = "+1";
-                        x.Text = strText11;
-                    }, token: token).ConfigureAwait(false);
-                    string strText12 = await LanguageManager.GetStringAsync("Checkbox_DetectionSpell12", token: token).ConfigureAwait(false);
-                    await chkModifier12.DoThreadSafeAsync(x =>
-                    {
-                        x.Tag = "+2";
-                        x.Text = strText12;
-                    }, token: token).ConfigureAwait(false);
-                    string strText13 = await LanguageManager.GetStringAsync("Checkbox_DetectionSpell13", token: token).ConfigureAwait(false);
-                    await chkModifier13.DoThreadSafeAsync(x =>
-                    {
-                        x.Tag = "+4";
-                        x.Text = strText13;
-                    }, token: token).ConfigureAwait(false);
-                    string strText14 = await LanguageManager.GetStringAsync("Checkbox_DetectionSpell14", token: token).ConfigureAwait(false);
-                    await chkModifier14.DoThreadSafeAsync(x =>
-                    {
-                        x.Tag = "+2";
-                        x.Text = strText14;
-                    }, token: token).ConfigureAwait(false);
-                    break;
-                }
                 case "Health":
-                {
-                    string strText1 = await LanguageManager.GetStringAsync("Checkbox_HealthSpell1", token: token).ConfigureAwait(false);
-                    await chkModifier1.DoThreadSafeAsync(x =>
-                    {
-                        x.Tag = "+0";
-                        x.Text = strText1;
-                    }, token: token).ConfigureAwait(false);
-                    string strText2 = await LanguageManager.GetStringAsync("Checkbox_HealthSpell2", token: token).ConfigureAwait(false);
-                    await chkModifier2.DoThreadSafeAsync(x =>
-                    {
-                        x.Tag = "+4";
-                        x.Text = strText2;
-                    }, token: token).ConfigureAwait(false);
-                    string strText3 = await LanguageManager.GetStringAsync("Checkbox_HealthSpell3", token: token).ConfigureAwait(false);
-                    await chkModifier3.DoThreadSafeAsync(x =>
-                    {
-                        x.Tag = "-2";
-                        x.Text = strText3;
-                    }, token: token).ConfigureAwait(false);
-                    string strText4 = await LanguageManager.GetStringAsync("Checkbox_HealthSpell4", token: token).ConfigureAwait(false);
-                    await chkModifier4.DoThreadSafeAsync(x =>
-                    {
-                        x.Tag = "+2";
-                        x.Text = strText4;
-                    }, token: token).ConfigureAwait(false);
-                    string strText5 = await LanguageManager.GetStringAsync("Checkbox_HealthSpell5", token: token).ConfigureAwait(false);
-                    await chkModifier5.DoThreadSafeAsync(x =>
-                    {
-                        x.Tag = "-2";
-                        x.Text = strText5;
-                    }, token: token).ConfigureAwait(false);
-                    break;
-                }
                 case "Illusion":
-                {
-                    string strText1 = await LanguageManager.GetStringAsync("Checkbox_IllusionSpell1", token: token).ConfigureAwait(false);
-                    await chkModifier1.DoThreadSafeAsync(x =>
-                    {
-                        x.Tag = "-1";
-                        x.Text = strText1;
-                    }, token: token).ConfigureAwait(false);
-                    string strText2 = await LanguageManager.GetStringAsync("Checkbox_IllusionSpell2", token: token).ConfigureAwait(false);
-                    await chkModifier2.DoThreadSafeAsync(x =>
-                    {
-                        x.Tag = "+0";
-                        x.Text = strText2;
-                    }, token: token).ConfigureAwait(false);
-                    string strText3 = await LanguageManager.GetStringAsync("Checkbox_IllusionSpell3", token: token).ConfigureAwait(false);
-                    await chkModifier3.DoThreadSafeAsync(x =>
-                    {
-                        x.Tag = "-2";
-                        x.Text = strText3;
-                    }, token: token).ConfigureAwait(false);
-                    string strText4 = await LanguageManager.GetStringAsync("Checkbox_IllusionSpell4", token: token).ConfigureAwait(false);
-                    await chkModifier4.DoThreadSafeAsync(x =>
-                    {
-                        x.Tag = "+0";
-                        x.Text = strText4;
-                    }, token: token).ConfigureAwait(false);
-                    string strText5 = await LanguageManager.GetStringAsync("Checkbox_IllusionSpell5", token: token).ConfigureAwait(false);
-                    await chkModifier5.DoThreadSafeAsync(x =>
-                    {
-                        x.Tag = "+2";
-                        x.Text = strText5;
-                    }, token: token).ConfigureAwait(false);
+                    chkEffectsModifier = null;
                     break;
-                }
                 case "Manipulation":
-                {
-                    string strText1 = await LanguageManager.GetStringAsync("Checkbox_ManipulationSpell1", token: token).ConfigureAwait(false);
-                    await chkModifier1.DoThreadSafeAsync(x =>
-                    {
-                        x.Tag = "-2";
-                        x.Text = strText1;
-                    }, token: token).ConfigureAwait(false);
-                    string strText2 = await LanguageManager.GetStringAsync("Checkbox_ManipulationSpell2", token: token).ConfigureAwait(false);
-                    await chkModifier2.DoThreadSafeAsync(x =>
-                    {
-                        x.Tag = "+0";
-                        x.Text = strText2;
-                    }, token: token).ConfigureAwait(false);
-                    string strText3 = await LanguageManager.GetStringAsync("Checkbox_ManipulationSpell3", token: token).ConfigureAwait(false);
-                    await chkModifier3.DoThreadSafeAsync(x =>
-                    {
-                        x.Tag = "+0";
-                        x.Text = strText3;
-                    }, token: token).ConfigureAwait(false);
-                    string strText4 = await LanguageManager.GetStringAsync("Checkbox_ManipulationSpell4", token: token).ConfigureAwait(false);
-                    await chkModifier4.DoThreadSafeAsync(x =>
-                    {
-                        x.Tag = "+0";
-                        x.Text = strText4;
-                    }, token: token).ConfigureAwait(false);
-                    string strText5 = await LanguageManager.GetStringAsync("Checkbox_ManipulationSpell5", token: token).ConfigureAwait(false);
-                    await chkModifier5.DoThreadSafeAsync(x =>
-                    {
-                        x.Tag = "+2";
-                        x.Text = strText5;
-                    }, token: token).ConfigureAwait(false);
-                    string strText6 = await LanguageManager.GetStringAsync("Checkbox_ManipulationSpell6", token: token).ConfigureAwait(false);
-                    await chkModifier6.DoThreadSafeAsync(x =>
-                    {
-                        x.Tag = "+2";
-                        x.Text = strText6;
-                    }, token: token).ConfigureAwait(false);
-                    int intTop = await chkModifier6.DoThreadSafeFuncAsync(x => x.Top, token: token).ConfigureAwait(false);
-                    await nudNumberOfEffects.DoThreadSafeAsync(x =>
-                    {
-                        x.Visible = true;
-                        x.Top = intTop - 1;
-                    }, token: token).ConfigureAwait(false);
+                    chkEffectsModifier = chkModifier6;
                     break;
-                }
                 default:
-                {
-                    // Combat.
-                    string strText1 = await LanguageManager.GetStringAsync("Checkbox_CombatSpell1", token: token).ConfigureAwait(false);
-                    await chkModifier1.DoThreadSafeAsync(x =>
-                    {
-                        x.Tag = "+0";
-                        x.Text = strText1;
-                    }, token: token).ConfigureAwait(false);
-                    string strText2 = await LanguageManager.GetStringAsync("Checkbox_CombatSpell2", token: token).ConfigureAwait(false);
-                    await chkModifier2.DoThreadSafeAsync(x =>
-                    {
-                        x.Tag = "+0";
-                        x.Text = strText2;
-                    }, token: token).ConfigureAwait(false);
-                    string strText3 = await LanguageManager.GetStringAsync("Checkbox_CombatSpell3", token: token).ConfigureAwait(false);
-                    await chkModifier3.DoThreadSafeAsync(x =>
-                    {
-                        x.Tag = "+2";
-                        x.Text = strText3;
-                    }, token: token).ConfigureAwait(false);
-                    string strText4 = await LanguageManager.GetStringAsync("Checkbox_CombatSpell4", token: token).ConfigureAwait(false);
-                    await chkModifier4.DoThreadSafeAsync(x =>
-                    {
-                        x.Tag = "+0";
-                        x.Text = strText4;
-                    }, token: token).ConfigureAwait(false);
-                    string strText5 = await LanguageManager.GetStringAsync("Checkbox_CombatSpell5", token: token).ConfigureAwait(false);
-                    await chkModifier5.DoThreadSafeAsync(x =>
-                    {
-                        x.Tag = "-1";
-                        x.Text = strText5;
-                    }, token: token).ConfigureAwait(false);
-                    int intTop = await chkModifier3.DoThreadSafeFuncAsync(x => x.Top, token: token).ConfigureAwait(false);
-                    await nudNumberOfEffects.DoThreadSafeAsync(x =>
-                    {
-                        x.Visible = true;
-                        x.Top = intTop - 1;
-                    }, token: token).ConfigureAwait(false);
+                    chkEffectsModifier = chkModifier3;
                     break;
-                }
+            }
+
+            if (chkEffectsModifier != null)
+            {
+                int intTop = await chkEffectsModifier.DoThreadSafeFuncAsync(x => x.Top, token: token).ConfigureAwait(false);
+                await nudNumberOfEffects.DoThreadSafeAsync(x =>
+                {
+                    x.Visible = true;
+                    x.Top = intTop - 1;
+                }, token: token).ConfigureAwait(false);
             }
 
             string strCheckBoxFormat = await LanguageManager.GetStringAsync("String_Space", token: token).ConfigureAwait(false) + "({0})";
@@ -962,73 +756,190 @@ namespace Chummer
             if (_blnLoading)
                 return string.Empty;
 
+            string strCategory = await cboCategory.DoThreadSafeFuncAsync(x => x.SelectedValue.ToString(), token: token).ConfigureAwait(false);
+            HashSet<int> setChecked = await GetCheckedModifiersAsync(token).ConfigureAwait(false);
+            string strDrain = await CalculateDrainAsync(strCategory,
+                                             await cboType.DoThreadSafeFuncAsync(x => x.SelectedValue.ToString(), token: token).ConfigureAwait(false),
+                                             await cboRange.DoThreadSafeFuncAsync(x => x.SelectedValue.ToString(), token: token).ConfigureAwait(false),
+                                             await chkArea.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false),
+                                             await chkRestricted.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false),
+                                             await chkVeryRestricted.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false),
+                                             await cboDuration.DoThreadSafeFuncAsync(x => x.SelectedValue.ToString(), token: token).ConfigureAwait(false),
+                                             await nudNumberOfEffects.DoThreadSafeFuncAsync(x => x.ValueAsInt, token: token).ConfigureAwait(false),
+                                             setChecked, token).ConfigureAwait(false);
+            string strText = await strDrain.Replace('/', '÷').Replace('*', '×')
+                                           .CheapReplaceAsync(
+                                               "F", t => LanguageManager.GetStringAsync("String_SpellForce", token: t), token: token)
+                                           .CheapReplaceAsync("Damage Value",
+                                                              t => LanguageManager.GetStringAsync(
+                                                                  "String_SpellDamageValue", token: t), token: token).ConfigureAwait(false);
+            await lblDV.DoThreadSafeAsync(x => x.Text = strText, token: token).ConfigureAwait(false);
+
+            return strDrain;
+        }
+
+        /// <summary>
+        /// The dialog's modifier checkboxes, in the order <see cref="GetCategoryModifiers"/> lists modifiers.
+        /// </summary>
+        private CheckBox[] ModifierCheckBoxes => new CheckBox[]
+        {
+            chkModifier1, chkModifier2, chkModifier3, chkModifier4, chkModifier5, chkModifier6, chkModifier7, chkModifier8, chkModifier9,
+            chkModifier10, chkModifier11, chkModifier12, chkModifier13, chkModifier14
+        };
+
+        /// <summary>
+        /// Which modifiers are ticked, by their 1-based number in the category's list.
+        /// </summary>
+        private async Task<HashSet<int>> GetCheckedModifiersAsync(CancellationToken token = default)
+        {
+            HashSet<int> setReturn = new HashSet<int>();
+            CheckBox[] achkModifiers = ModifierCheckBoxes;
+            for (int i = 0; i < achkModifiers.Length; ++i)
+            {
+                if (await achkModifiers[i].DoThreadSafeFuncAsync(x => x.Checked && !string.IsNullOrEmpty(x.Tag?.ToString()), token: token).ConfigureAwait(false))
+                    setReturn.Add(i + 1);
+            }
+
+            return setReturn;
+        }
+
+        /// <summary>
+        /// Accept the values of the form.
+        /// </summary>
+        private async Task AcceptForm(CancellationToken token = default)
+        {
+            string strName = await txtName.DoThreadSafeFuncAsync(x => x.Text, token: token).ConfigureAwait(false);
+            string strCategory = await cboCategory.DoThreadSafeFuncAsync(x => x.SelectedValue.ToString(), token: token).ConfigureAwait(false);
+            bool blnRestricted = await chkRestricted.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false);
+            bool blnVeryRestricted = await chkVeryRestricted.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false);
+            string strRestriction = await txtRestriction.DoThreadSafeFuncAsync(x => x.Text, token: token).ConfigureAwait(false);
+            HashSet<int> setChecked = await GetCheckedModifiersAsync(token).ConfigureAwait(false);
+            string strMessage = await ValidateDesignAsync(strName, blnRestricted || blnVeryRestricted, strRestriction, strCategory, setChecked, token)
+                .ConfigureAwait(false);
+
+            // Show the message if necessary.
+            if (!string.IsNullOrEmpty(strMessage))
+            {
+                await Program.ShowScrollableMessageBoxAsync(this, strMessage, await LanguageManager.GetStringAsync("Title_CreateSpell", token: token).ConfigureAwait(false), MessageBoxButtons.OK, MessageBoxIcon.Error, token: token).ConfigureAwait(false);
+                return;
+            }
+
+            _objSpell = await CreateCustomSpellAsync(_objCharacter, strName, strCategory,
+                                                     await cboType.DoThreadSafeFuncAsync(x => x.SelectedValue.ToString(), token: token).ConfigureAwait(false),
+                                                     await cboRange.DoThreadSafeFuncAsync(x => x.SelectedValue.ToString(), token: token).ConfigureAwait(false),
+                                                     await chkArea.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false),
+                                                     await cboDuration.DoThreadSafeFuncAsync(x => x.SelectedValue.ToString(), token: token).ConfigureAwait(false),
+                                                     await chkLimited.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false),
+                                                     blnRestricted, blnVeryRestricted, strRestriction,
+                                                     await nudNumberOfEffects.DoThreadSafeFuncAsync(x => x.ValueAsInt, token: token).ConfigureAwait(false),
+                                                     setChecked, token).ConfigureAwait(false);
+
+            await this.DoThreadSafeAsync(x =>
+            {
+                x.DialogResult = DialogResult.OK;
+                x.Close();
+            }, token: token).ConfigureAwait(false);
+        }
+
+        #endregion Methods
+
+        #region Spell design
+
+        private static readonly IReadOnlyDictionary<string, IReadOnlyList<(string LabelKey, int Drain)>> s_DicCategoryModifiers
+            = new Dictionary<string, IReadOnlyList<(string LabelKey, int Drain)>>
+            {
+                ["Combat"] = new[]
+                {
+                    ("Checkbox_CombatSpell1", 0), ("Checkbox_CombatSpell2", 0), ("Checkbox_CombatSpell3", 2), ("Checkbox_CombatSpell4", 0),
+                    ("Checkbox_CombatSpell5", -1)
+                },
+                ["Detection"] = new[]
+                {
+                    ("Checkbox_DetectionSpell1", 0), ("Checkbox_DetectionSpell2", 0), ("Checkbox_DetectionSpell3", 0), ("Checkbox_DetectionSpell4", 0),
+                    ("Checkbox_DetectionSpell5", 0), ("Checkbox_DetectionSpell6", 0), ("Checkbox_DetectionSpell7", 1), ("Checkbox_DetectionSpell8", 1),
+                    ("Checkbox_DetectionSpell9", 2), ("Checkbox_DetectionSpell10", 4), ("Checkbox_DetectionSpell11", 1), ("Checkbox_DetectionSpell12", 2),
+                    ("Checkbox_DetectionSpell13", 4), ("Checkbox_DetectionSpell14", 2)
+                },
+                ["Health"] = new[]
+                {
+                    ("Checkbox_HealthSpell1", 0), ("Checkbox_HealthSpell2", 4), ("Checkbox_HealthSpell3", -2), ("Checkbox_HealthSpell4", 2),
+                    ("Checkbox_HealthSpell5", -2)
+                },
+                ["Illusion"] = new[]
+                {
+                    ("Checkbox_IllusionSpell1", -1), ("Checkbox_IllusionSpell2", 0), ("Checkbox_IllusionSpell3", -2), ("Checkbox_IllusionSpell4", 0),
+                    ("Checkbox_IllusionSpell5", 2)
+                },
+                ["Manipulation"] = new[]
+                {
+                    ("Checkbox_ManipulationSpell1", -2), ("Checkbox_ManipulationSpell2", 0), ("Checkbox_ManipulationSpell3", 0),
+                    ("Checkbox_ManipulationSpell4", 0), ("Checkbox_ManipulationSpell5", 2), ("Checkbox_ManipulationSpell6", 2)
+                }
+            };
+
+        /// <summary>
+        /// The drain modifiers the dialog offers for a spell category, in checkbox order: the label's language key and its drain. Unknown categories
+        /// get the combat spell modifiers, as the dialog does.
+        /// </summary>
+        public static IReadOnlyList<(string LabelKey, int Drain)> GetCategoryModifiers(string strCategory)
+        {
+            return s_DicCategoryModifiers.TryGetValue(strCategory ?? string.Empty, out IReadOnlyList<(string LabelKey, int Drain)> lstReturn)
+                ? lstReturn
+                : s_DicCategoryModifiers["Combat"];
+        }
+
+        /// <summary>
+        /// A custom spell's drain value from the dialog's choices.
+        /// </summary>
+        /// <param name="strType">"P" or "M".</param>
+        /// <param name="strRange">"T" or "LOS".</param>
+        /// <param name="strDuration">"I", "P" or "S".</param>
+        /// <param name="setChecked">The ticked modifiers, by 1-based number in <see cref="GetCategoryModifiers"/>.</param>
+        public static async Task<string> CalculateDrainAsync(string strCategory, string strType, string strRange, bool blnArea, bool blnRestricted,
+                                                             bool blnVeryRestricted, string strDuration, int intNumberOfEffects, ICollection<int> setChecked,
+                                                             CancellationToken token = default)
+        {
             int intDV = 0;
 
             // Type DV.
-            if (await cboType.DoThreadSafeFuncAsync(x => x.SelectedValue.ToString(), token: token).ConfigureAwait(false) != "M")
+            if (strType != "M")
                 ++intDV;
 
             // Range DV.
-            if (await cboRange.DoThreadSafeFuncAsync(x => x.SelectedValue.ToString(), token: token).ConfigureAwait(false) == "T")
+            if (strRange == "T")
                 intDV -= 2;
 
-            if (chkArea.Checked)
+            if (blnArea)
                 intDV += 2;
 
             // Restriction DV.
-            if (await chkRestricted.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false))
+            if (blnRestricted)
                 --intDV;
-            if (await chkVeryRestricted.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false))
+            if (blnVeryRestricted)
                 intDV -= 2;
-
-            string strCategory = await cboCategory.DoThreadSafeFuncAsync(x => x.SelectedValue.ToString(), token: token).ConfigureAwait(false);
 
             // Duration DV.
             // Curative Health Spells do not have a modifier for Permanent duration.
-            if (await cboDuration.DoThreadSafeFuncAsync(x => x.SelectedValue.ToString(), token: token).ConfigureAwait(false) == "P" && (strCategory != "Health" || !await chkModifier1.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false)))
+            if (strDuration == "P" && (strCategory != "Health" || !setChecked.Contains(1)))
                 intDV += 2;
 
-            int intNumberOfEffects = await nudNumberOfEffects.DoThreadSafeFuncAsync(x => x.ValueAsInt, token: token).ConfigureAwait(false);
-
             // Include any checked modifiers.
-            foreach (CheckBox chkModifier in await flpModifiers.DoThreadSafeFuncAsync(x => x.Controls.OfType<CheckBox>(), token: token).ConfigureAwait(false))
+            IReadOnlyList<(string LabelKey, int Drain)> lstModifiers = GetCategoryModifiers(strCategory);
+            foreach (int intModifier in setChecked)
             {
-                await chkModifier.DoThreadSafeAsync(x =>
-                {
-                    if (x.Visible && x.Checked && int.TryParse(x.Tag.ToString(), NumberStyles.Integer,
-                                GlobalSettings.InvariantCultureInfo, out int intDummy))
-                    {
-                        if (x == chkModifier3 && strCategory == "Combat")
-                            intDV += intDummy * intNumberOfEffects;
-                        else if (x == chkModifier6 && strCategory == "Manipulation")
-                            intDV += intDummy * intNumberOfEffects;
-                        else
-                            intDV += intDummy;
-                    }
-                }, token: token).ConfigureAwait(false);
-            }
-            foreach (Panel panChild in await flpModifiers.DoThreadSafeFuncAsync(x => x.Controls.OfType<Panel>(), token: token).ConfigureAwait(false))
-            {
-                foreach (CheckBox chkModifier in await panChild.DoThreadSafeFuncAsync(x => x.Controls.OfType<CheckBox>(), token: token).ConfigureAwait(false))
-                {
-                    await chkModifier.DoThreadSafeAsync(x =>
-                    {
-                        if (x.Visible && x.Checked && int.TryParse(x.Tag.ToString(), NumberStyles.Integer,
-                                GlobalSettings.InvariantCultureInfo, out int intDummy))
-                        {
-                            if (x == chkModifier3 && strCategory == "Combat")
-                                intDV += intDummy * intNumberOfEffects;
-                            else if (x == chkModifier6 && strCategory == "Manipulation")
-                                intDV += intDummy * intNumberOfEffects;
-                            else
-                                intDV += intDummy;
-                        }
-                    }, token: token).ConfigureAwait(false);
-                }
+                if (intModifier < 1 || intModifier > lstModifiers.Count)
+                    continue;
+                int intDummy = lstModifiers[intModifier - 1].Drain;
+                if (intModifier == 3 && strCategory == "Combat")
+                    intDV += intDummy * intNumberOfEffects;
+                else if (intModifier == 6 && strCategory == "Manipulation")
+                    intDV += intDummy * intNumberOfEffects;
+                else
+                    intDV += intDummy;
             }
 
             string strBase;
-            if (strCategory == "Health" && await chkModifier1.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false))
+            if (strCategory == "Health" && setChecked.Contains(1))
             {
                 // Health Spells use (Damage Value) as their base.
                 strBase = "(" + await LanguageManager.GetStringAsync("String_SpellDamageValue", token: token).ConfigureAwait(false) + ")";
@@ -1044,50 +955,43 @@ namespace Chummer
                 strDV = "+" + strDV;
             if (intDV == 0)
                 strDV = string.Empty;
-            string strText = await (strBase + strDV).Replace('/', '÷').Replace('*', '×')
-                                                    .CheapReplaceAsync(
-                                                        "F", t => LanguageManager.GetStringAsync("String_SpellForce", token: t), token: token)
-                                                    .CheapReplaceAsync("Damage Value",
-                                                                       t => LanguageManager.GetStringAsync(
-                                                                           "String_SpellDamageValue", token: t), token: token).ConfigureAwait(false);
-            await lblDV.DoThreadSafeAsync(x => x.Text = strText, token: token).ConfigureAwait(false);
-
             return strBase + strDV;
         }
 
         /// <summary>
-        /// Accept the values of the form.
+        /// What the dialog's OK button complains about in a design: a missing name or restriction, or a category's required choices.
         /// </summary>
-        private async Task AcceptForm(CancellationToken token = default)
+        /// <returns>The messages, one per line, or an empty string if the design is complete.</returns>
+        public static async Task<string> ValidateDesignAsync(string strName, bool blnRestrictionNeeded, string strRestriction, string strCategory,
+                                                             ICollection<int> setChecked, CancellationToken token = default)
         {
-            string strMessage = string.Empty;
             using (new FetchSafelyFromObjectPool<StringBuilder>(Utils.StringBuilderPool, out StringBuilder sbdMessage))
             {
                 // Make sure a name has been provided.
-                if (string.IsNullOrWhiteSpace(await txtName.DoThreadSafeFuncAsync(x => x.Text, token: token).ConfigureAwait(false)))
+                if (string.IsNullOrWhiteSpace(strName))
                 {
                     sbdMessage.AppendLine(await LanguageManager.GetStringAsync("Message_SpellName", token: token).ConfigureAwait(false));
                 }
 
                 // Make sure a Restricted value if the field is enabled.
-                if (txtRestriction.Enabled && string.IsNullOrWhiteSpace(await txtRestriction.DoThreadSafeFuncAsync(x => x.Text, token: token).ConfigureAwait(false)))
+                if (blnRestrictionNeeded && string.IsNullOrWhiteSpace(strRestriction))
                 {
                     sbdMessage.AppendLine(await LanguageManager.GetStringAsync("Message_SpellRestricted", token: token).ConfigureAwait(false));
                 }
 
-                switch (await cboCategory.DoThreadSafeFuncAsync(x => x.SelectedValue.ToString(), token: token).ConfigureAwait(false))
+                switch (strCategory)
                 {
                     // Make sure the Spell has met all of its requirements.
                     case "Combat":
                         {
                             // Either Direct or Indirect must be selected.
-                            if (!await chkModifier1.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false) && !await chkModifier2.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false))
+                            if (!setChecked.Contains(1) && !setChecked.Contains(2))
                             {
                                 sbdMessage.AppendLine(await LanguageManager.GetStringAsync("Message_CombatSpellRequirement1", token: token).ConfigureAwait(false));
                             }
 
                             // Either Physical damage or Stun damage must be selected.
-                            if (!await chkModifier4.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false) && !await chkModifier5.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false))
+                            if (!setChecked.Contains(4) && !setChecked.Contains(5))
                             {
                                 sbdMessage.AppendLine(await LanguageManager.GetStringAsync("Message_CombatSpellRequirement2", token: token).ConfigureAwait(false));
                             }
@@ -1097,13 +1001,13 @@ namespace Chummer
                     case "Detection":
                         {
                             // Either Directional, Area, or Psychic must be selected.
-                            if (!await chkModifier1.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false) && !await chkModifier2.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false) && !await chkModifier3.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false))
+                            if (!setChecked.Contains(1) && !setChecked.Contains(2) && !setChecked.Contains(3))
                             {
                                 sbdMessage.AppendLine(await LanguageManager.GetStringAsync("Message_DetectionSpellRequirement1", token: token).ConfigureAwait(false));
                             }
 
                             // Either Active or Passive must be selected.
-                            if (!await chkModifier4.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false) && !await chkModifier5.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false))
+                            if (!setChecked.Contains(4) && !setChecked.Contains(5))
                             {
                                 sbdMessage.AppendLine(await LanguageManager.GetStringAsync("Message_DetectionSpellRequirement2", token: token).ConfigureAwait(false));
                             }
@@ -1117,13 +1021,13 @@ namespace Chummer
                     case "Illusion":
                         {
                             // Either Obvious or Realistic must be selected.
-                            if (!await chkModifier1.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false) && !await chkModifier2.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false))
+                            if (!setChecked.Contains(1) && !setChecked.Contains(2))
                             {
                                 sbdMessage.AppendLine(await LanguageManager.GetStringAsync("Message_IllusionSpellRequirement1", token: token).ConfigureAwait(false));
                             }
 
                             // Either Single-Sense or Multi-Sense must be selected.
-                            if (!await chkModifier3.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false) && !await chkModifier4.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false))
+                            if (!setChecked.Contains(3) && !setChecked.Contains(4))
                             {
                                 sbdMessage.AppendLine(await LanguageManager.GetStringAsync("Message_IllusionSpellRequirement2", token: token).ConfigureAwait(false));
                             }
@@ -1133,13 +1037,13 @@ namespace Chummer
                     case "Manipulation":
                         {
                             // Either Environmental, Mental, or Physical must be selected.
-                            if (!await chkModifier1.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false) && !await chkModifier2.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false) && !await chkModifier3.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false))
+                            if (!setChecked.Contains(1) && !setChecked.Contains(2) && !setChecked.Contains(3))
                             {
                                 sbdMessage.AppendLine(await LanguageManager.GetStringAsync("Message_ManipulationSpellRequirement1", token: token).ConfigureAwait(false));
                             }
 
                             // Either Minor Change or Major Change must be selected.
-                            if (!await chkModifier4.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false) && !await chkModifier5.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false))
+                            if (!setChecked.Contains(4) && !setChecked.Contains(5))
                             {
                                 sbdMessage.AppendLine(await LanguageManager.GetStringAsync("Message_ManipulationSpellRequirement2", token: token).ConfigureAwait(false));
                             }
@@ -1147,37 +1051,39 @@ namespace Chummer
                             break;
                         }
                 }
-                if (sbdMessage.Length > 0)
-                    strMessage = sbdMessage.ToTrimmedString();
-            }
 
-            // Show the message if necessary.
-            if (!string.IsNullOrEmpty(strMessage))
-            {
-                await Program.ShowScrollableMessageBoxAsync(this, strMessage, await LanguageManager.GetStringAsync("Title_CreateSpell", token: token).ConfigureAwait(false), MessageBoxButtons.OK, MessageBoxIcon.Error, token: token).ConfigureAwait(false);
-                return;
+                return sbdMessage.Length > 0 ? sbdMessage.ToTrimmedString() : string.Empty;
             }
+        }
 
-            string strRange = await cboRange.DoThreadSafeFuncAsync(x => x.SelectedValue.ToString(), token: token).ConfigureAwait(false);
-            if (await chkArea.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false))
-                strRange += "(A)";
+        /// <summary>
+        /// Build a custom spell from a design, as the dialog's OK button does. The caller adds it to the character's spells.
+        /// </summary>
+        public static async Task<Spell> CreateCustomSpellAsync(Character objCharacter, string strName, string strCategory, string strType, string strRange,
+                                                               bool blnArea, string strDuration, bool blnLimited, bool blnRestricted, bool blnVeryRestricted,
+                                                               string strRestriction, int intNumberOfEffects, ICollection<int> setChecked,
+                                                               CancellationToken token = default)
+        {
+            string strFullRange = strRange;
+            if (blnArea)
+                strFullRange += "(A)";
 
             // If we're made it this far, everything is OK, so create the Spell.
             string strDescriptors = string.Empty;
-            switch (await cboCategory.DoThreadSafeFuncAsync(x => x.SelectedValue.ToString(), token: token).ConfigureAwait(false))
+            switch (strCategory)
             {
                 case "Detection":
-                    if (await chkModifier4.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false))
+                    if (setChecked.Contains(4))
                         strDescriptors += "Active, ";
-                    if (await chkModifier5.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false))
+                    if (setChecked.Contains(5))
                         strDescriptors += "Passive, ";
-                    if (await chkModifier1.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false))
+                    if (setChecked.Contains(1))
                         strDescriptors += "Directional, ";
-                    if (await chkModifier3.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false))
+                    if (setChecked.Contains(3))
                         strDescriptors += "Psychic, ";
-                    if (await chkModifier2.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false))
+                    if (setChecked.Contains(2))
                     {
-                        if (!await chkModifier14.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false))
+                        if (!setChecked.Contains(14))
                             strDescriptors += "Area, ";
                         else
                             strDescriptors += "Extended Area, ";
@@ -1185,43 +1091,43 @@ namespace Chummer
                     break;
 
                 case "Health":
-                    if (await chkModifier4.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false))
+                    if (setChecked.Contains(4))
                         strDescriptors += "Negative, ";
                     break;
 
                 case "Illusion":
-                    if (await chkModifier1.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false))
+                    if (setChecked.Contains(1))
                         strDescriptors += "Obvious, ";
-                    if (await chkModifier2.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false))
+                    if (setChecked.Contains(2))
                         strDescriptors += "Realistic, ";
-                    if (await chkModifier3.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false))
+                    if (setChecked.Contains(3))
                         strDescriptors += "Single-Sense, ";
-                    if (await chkModifier4.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false))
+                    if (setChecked.Contains(4))
                         strDescriptors += "Multi-Sense, ";
-                    if (await chkArea.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false))
+                    if (blnArea)
                         strDescriptors += "Area, ";
                     break;
 
                 case "Manipulation":
-                    if (await chkModifier1.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false))
+                    if (setChecked.Contains(1))
                         strDescriptors += "Environmental, ";
-                    if (await chkModifier2.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false))
+                    if (setChecked.Contains(2))
                         strDescriptors += "Mental, ";
-                    if (await chkModifier3.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false))
+                    if (setChecked.Contains(3))
                         strDescriptors += "Physical, ";
-                    if (await chkArea.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false))
+                    if (blnArea)
                         strDescriptors += "Area, ";
                     break;
 
                 default:
                     // Combat.
-                    if (await chkModifier1.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false))
+                    if (setChecked.Contains(1))
                         strDescriptors += "Direct, ";
-                    if (await chkModifier2.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false))
+                    if (setChecked.Contains(2))
                         strDescriptors += "Indirect, ";
-                    if ((await cboRange.DoThreadSafeFuncAsync(x => x.SelectedValue.ToString(), token: token).ConfigureAwait(false)).Contains("(A)"))
+                    if (strRange.Contains("(A)"))
                         strDescriptors += "Area, ";
-                    if (await chkModifier3.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false))
+                    if (setChecked.Contains(3))
                         strDescriptors += "Elemental, ";
                     break;
             }
@@ -1230,40 +1136,35 @@ namespace Chummer
             if (!string.IsNullOrEmpty(strDescriptors))
                 strDescriptors = strDescriptors.Substring(0, strDescriptors.Length - 2);
 
-            Spell objSpell = new Spell(_objCharacter);
+            Spell objSpell = new Spell(objCharacter);
             try
             {
-                objSpell.Name = await txtName.DoThreadSafeFuncAsync(x => x.Text, token: token).ConfigureAwait(false);
+                objSpell.Name = strName;
                 objSpell.Source = "SM";
                 objSpell.Page = "159";
-                objSpell.Category = await cboCategory.DoThreadSafeFuncAsync(x => x.SelectedValue.ToString(), token: token).ConfigureAwait(false);
+                objSpell.Category = strCategory;
                 objSpell.Descriptors = strDescriptors;
-                objSpell.Range = strRange;
-                objSpell.Type = await cboType.DoThreadSafeFuncAsync(x => x.SelectedValue.ToString(), token: token).ConfigureAwait(false);
-                objSpell.Limited = await chkLimited.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false);
+                objSpell.Range = strFullRange;
+                objSpell.Type = strType;
+                objSpell.Limited = blnLimited;
                 if (objSpell.Category == "Combat")
-                    objSpell.Damage = await chkModifier4.DoThreadSafeFuncAsync(x => x.Checked, token: token).ConfigureAwait(false) ? "P" : "S";
-                objSpell.DvBase = await CalculateDrain(token).ConfigureAwait(false);
-                string strExtra = await txtRestriction.DoThreadSafeFuncAsync(x => x.Text, token: token).ConfigureAwait(false);
-                if (!string.IsNullOrEmpty(strExtra))
-                    objSpell.Extra = strExtra;
-                objSpell.Duration = await cboDuration.DoThreadSafeFuncAsync(x => x.SelectedValue.ToString(), token: token).ConfigureAwait(false);
+                    objSpell.Damage = setChecked.Contains(4) ? "P" : "S";
+                objSpell.DvBase = await CalculateDrainAsync(strCategory, strType, strRange, blnArea, blnRestricted, blnVeryRestricted, strDuration,
+                                                            intNumberOfEffects, setChecked, token).ConfigureAwait(false);
+                if (!string.IsNullOrEmpty(strRestriction))
+                    objSpell.Extra = strRestriction;
+                objSpell.Duration = strDuration;
             }
             catch
             {
                 await objSpell.RemoveAsync(false, CancellationToken.None).ConfigureAwait(false);
                 throw;
             }
-            _objSpell = objSpell;
 
-            await this.DoThreadSafeAsync(x =>
-            {
-                x.DialogResult = DialogResult.OK;
-                x.Close();
-            }, token: token).ConfigureAwait(false);
+            return objSpell;
         }
 
-        #endregion Methods
+        #endregion Spell design
 
         #region Properties
 

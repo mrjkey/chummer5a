@@ -1287,5 +1287,204 @@ namespace Chummer.Tests
             (blnIsError, strText) = await TryCallOnAsync(strRigger, "copy_item", new JObject { ["id"] = "Claws" }, token).ConfigureAwait(false);
             Assert.IsFalse(blnIsError, strText);
         }
+
+        [TestMethod]
+        public void MagicDesigns()
+        {
+            RunWithMainForm((frmMain, t) => RunMagicDesignsScenarioAsync(t));
+        }
+
+        /// <summary>
+        /// The choices an error lists after "one of: ".
+        /// </summary>
+        private static List<string> ListedChoices(string strRefusal)
+        {
+            int intIndex = strRefusal.IndexOf("one of: ", StringComparison.Ordinal);
+            Assert.IsTrue(intIndex >= 0, strRefusal);
+            return strRefusal.Substring(intIndex + 8).TrimEnd('.').Split(new[] { ", " }, StringSplitOptions.None).ToList();
+        }
+
+        private static async Task RunMagicDesignsScenarioAsync(CancellationToken token)
+        {
+            // A mystic adept splits Magic between spells and powers
+            const string strMystic = "Agent Test Mystic";
+            await CallToolOkAsync("create_character", new JObject
+            {
+                ["settings"] = "Full House",
+                ["metatype"] = "Human",
+                ["priorities"] = new JObject { ["heritage"] = "D", ["attributes"] = "C", ["talent"] = "A", ["skills"] = "B", ["resources"] = "E" },
+                ["talent"] = "Mystic Adept",
+                ["talent_skills"] = new JArray("Spellcasting", "Summoning"),
+                ["name"] = strMystic
+            }, token).ConfigureAwait(false);
+            JObject objResult = (JObject)await CallOnAsync(strMystic, "set_mystic_adept_power_points", new JObject { ["points"] = 2 }, token).ConfigureAwait(false);
+            StringAssert.Contains(objResult.Value<string>("result"), "2 power points");
+            (bool blnIsError, string strText) = await TryCallOnAsync(strMystic, "set_mystic_adept_power_points", new JObject { ["points"] = 99 }, token)
+                .ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+
+            // A custom tradition: its drain and spirits come from the lists the editor offers
+            (blnIsError, strText) = await TryCallOnAsync(strMystic, "set_tradition", new JObject { ["id"] = "Custom", ["name"] = "Agent Lore" }, token)
+                .ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+            string strDrain = ListedChoices(strText)[0];
+            (blnIsError, strText) = await TryCallOnAsync(strMystic, "set_tradition", new JObject { ["id"] = "Custom", ["name"] = "Agent Lore", ["drain"] = strDrain }, token)
+                .ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+            List<string> lstSpirits = ListedChoices(strText);
+            await CallOnAsync(strMystic, "set_tradition", new JObject
+            {
+                ["id"] = "Custom", ["name"] = "Agent Lore", ["drain"] = strDrain,
+                ["spirits"] = new JObject
+                {
+                    ["combat"] = lstSpirits[0], ["detection"] = lstSpirits[1], ["health"] = lstSpirits[2], ["illusion"] = lstSpirits[3], ["manipulation"] = lstSpirits[4]
+                }
+            }, token).ConfigureAwait(false);
+            JObject objSummary = (JObject)await CallOnAsync(strMystic, "get_character_summary", new JObject(), token).ConfigureAwait(false);
+            Assert.AreEqual("Agent Lore", objSummary["magic"].Value<string>("tradition"), objSummary["magic"].ToString());
+
+            // Custom spells: required choices, exclusive choices, and the drain they set
+            (blnIsError, strText) = await TryCallOnAsync(strMystic, "create_spell", new JObject { ["name"] = "Agent Bolt", ["category"] = "Combat" }, token)
+                .ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+            (blnIsError, strText) = await TryCallOnAsync(strMystic, "create_spell", new JObject
+            {
+                ["name"] = "Agent Bolt", ["category"] = "Combat", ["modifiers"] = new JArray(1, 2, 4)
+            }, token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+            objResult = (JObject)await CallOnAsync(strMystic, "create_spell", new JObject
+            {
+                ["name"] = "Agent Bolt", ["category"] = "Combat", ["type"] = "M", ["range"] = "LOS", ["modifiers"] = new JArray(1, 4)
+            }, token).ConfigureAwait(false);
+            StringAssert.Contains(objResult.Value<string>("result"), "drain (F/2)");
+            Assert.IsTrue(((JArray)((JObject)await CallOnAsync(strMystic, "get_character_summary", new JObject(), token).ConfigureAwait(false))["spells"])
+                          .Any(x => x.Value<string>("name").StartsWith("Agent Bolt", StringComparison.Ordinal)));
+
+            // Stacked foci
+            await CallOnAsync(strMystic, "add_gear", new JObject { ["id"] = "Power Focus", ["rating"] = 1 }, token).ConfigureAwait(false);
+            await CallOnAsync(strMystic, "add_gear", new JObject { ["id"] = "Spellcasting Focus, Combat", ["rating"] = 1 }, token).ConfigureAwait(false);
+            List<JToken> lstItems = await ListAllItemsAsync(strMystic, token).ConfigureAwait(false);
+            string[] astrFoci = lstItems.Where(x => x.Value<string>("name").Contains("Focus")).Select(x => x.Value<string>("id")).ToArray();
+            Assert.AreEqual(2, astrFoci.Length, string.Join(", ", lstItems.Select(x => x.Value<string>("name"))));
+            (blnIsError, strText) = await TryCallOnAsync(strMystic, "create_stacked_focus", new JObject { ["foci"] = new JArray(astrFoci[0]) }, token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+            objResult = (JObject)await CallOnAsync(strMystic, "create_stacked_focus", new JObject { ["foci"] = new JArray(astrFoci) }, token).ConfigureAwait(false);
+            StringAssert.Contains(objResult.Value<string>("result"), "Stacked Focus");
+
+            // Enchantments need their art; enhancements need their power and Way
+            await CallOnAsync(strMystic, "add_initiation", new JObject(), token).ConfigureAwait(false);
+            await CallOnAsync(strMystic, "add_art", new JObject { ["id"] = "Channeling" }, token).ConfigureAwait(false);
+            await CallOnAsync(strMystic, "add_art", new JObject { ["id"] = "Inanimate Vessel Preparation", ["kind"] = "enchantment" }, token).ConfigureAwait(false);
+            (blnIsError, strText) = await TryCallOnAsync(strMystic, "add_art", new JObject { ["id"] = "Bolt", ["kind"] = "enchantment" }, token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+            (blnIsError, strText) = await TryCallOnAsync(strMystic, "add_art", new JObject { ["id"] = "Air Walking", ["kind"] = "enhancement" }, token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, "Air Walking needs Light Body and The Athlete's Way: " + strText);
+            await CallOnAsync(strMystic, "add_quality", new JObject { ["id"] = "The Athlete's Way" }, token).ConfigureAwait(false);
+            await CallOnAsync(strMystic, "add_power", new JObject { ["id"] = "Light Body", ["rating"] = 1 }, token).ConfigureAwait(false);
+            await CallOnAsync(strMystic, "add_art", new JObject { ["id"] = "Air Walking", ["kind"] = "enhancement" }, token).ConfigureAwait(false);
+            lstItems = await ListAllItemsAsync(strMystic, token).ConfigureAwait(false);
+            Assert.IsTrue(lstItems.Any(x => x.Value<string>("name").StartsWith("Inanimate Vessel Preparation", StringComparison.Ordinal)), "No enchantment");
+
+            // The Adept Way checkbox needs a discount that covers the power
+            (blnIsError, strText) = await TryCallOnAsync(strMystic, "set_power_rating", new JObject { ["id"] = "Light Body", ["adept_way"] = true }, token)
+                .ConfigureAwait(false);
+            if (!blnIsError)
+                StringAssert.Contains(strText, "Adept Way discount");
+            (blnIsError, strText) = await TryCallOnAsync(strMystic, "set_power_rating", new JObject { ["id"] = "Light Body" }, token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+        }
+
+        [TestMethod]
+        public void CrittersAndConversions()
+        {
+            string strFolder = Path.Combine(Path.GetTempPath(), "AgentToolsTest_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(strFolder);
+            try
+            {
+                RunWithMainForm((frmMain, t) => RunCrittersAndConversionsScenarioAsync(strFolder, t));
+            }
+            finally
+            {
+                Directory.Delete(strFolder, true);
+            }
+        }
+
+        private static async Task RunCrittersAndConversionsScenarioAsync(string strFolder, CancellationToken token)
+        {
+            // A centaur has the Critter Powers tab; the powers it may add are the ones the dialog lists
+            const string strCentaur = "Agent Test Centaur";
+            await CallToolOkAsync("create_character", new JObject
+            {
+                ["settings"] = "Full House",
+                ["metatype"] = "Centaur",
+                ["priorities"] = new JObject { ["heritage"] = "A", ["attributes"] = "B", ["talent"] = "E", ["skills"] = "C", ["resources"] = "D" },
+                ["talent"] = "Mundane",
+                ["name"] = strCentaur
+            }, token).ConfigureAwait(false);
+            const string strPower = "Materialization";
+            JObject objResult = (JObject)await CallOnAsync(strCentaur, "add_critter_power", new JObject { ["id"] = strPower }, token).ConfigureAwait(false);
+            string strPowerId = objResult.Value<string>("result").Split(new[] { "(id " }, StringSplitOptions.None)[1].TrimEnd(')', '.');
+            await CallOnAsync(strCentaur, "set_critter_power", new JObject { ["id"] = strPowerId, ["count_towards_limit"] = false }, token).ConfigureAwait(false);
+            await CallOnAsync(strCentaur, "remove_item", new JObject { ["id"] = strPowerId }, token).ConfigureAwait(false);
+
+            // A human has no critter powers, and isn't a cyberzombie candidate with positive Essence
+            const string strHuman = "Agent Test Plain";
+            await CallToolOkAsync("create_character", new JObject
+            {
+                ["metatype"] = "Human",
+                ["priorities"] = new JObject { ["heritage"] = "D", ["attributes"] = "B", ["talent"] = "E", ["skills"] = "C", ["resources"] = "A" },
+                ["talent"] = "Mundane",
+                ["name"] = strHuman
+            }, token).ConfigureAwait(false);
+            (bool blnIsError, string strText) = await TryCallOnAsync(strHuman, "add_critter_power", new JObject { ["id"] = strPower }, token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+            (blnIsError, strText) = await TryCallOnAsync(strHuman, "convert_to_cyberzombie", new JObject { ["wil_hits"] = 2 }, token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+            (blnIsError, strText) = await TryCallOnAsync(strHuman, "add_ai_program", new JObject { ["id"] = "Browse" }, token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+
+            // A.I.s get programs. A new A.I. asks which action its Codeslinger quality covers, which the hidden window can't show, so this
+            // character gets the A.I. Programs tab the way the A.I. metatypes' bonus gives it
+            const string strAI = strHuman;
+            Character objHuman = (await Program.MainForm.OpenCharacterEditorForms.ToListAsync(token).ConfigureAwait(false))
+                                 .Select(x => x.CharacterObject).First(x => x.Name == strHuman);
+            await objHuman.SetAdvancedProgramsEnabledAsync(true, token).ConfigureAwait(false);
+            await CallOnAsync(strAI, "add_ai_program", new JObject { ["id"] = "Browse" }, token).ConfigureAwait(false);
+            Assert.IsTrue((await ListAllItemsAsync(strAI, token).ConfigureAwait(false)).Any(x => x.Value<string>("kind") == "ai program"));
+
+            // A critter opens in career mode, and a sprite can go free
+            JArray objCritters = (JArray)await CallToolOkAsync("list_metatypes", new JObject { ["critters"] = true, ["category"] = "Sprites" }, token).ConfigureAwait(false);
+            Assert.IsTrue(objCritters.Count > 0);
+            await CallToolOkAsync("create_critter", new JObject { ["metatype"] = "Courier Sprite", ["force"] = 3, ["name"] = "Agent Courier" }, token).ConfigureAwait(false);
+            JArray objOpen = (JArray)await CallToolOkAsync("list_open_characters", null, token).ConfigureAwait(false);
+            Assert.AreEqual("career", objOpen.First(x => x.Value<string>("name") == "Agent Courier").Value<string>("mode"), objOpen.ToString());
+            await CallOnAsync("Agent Courier", "convert_to_free_sprite", new JObject(), token).ConfigureAwait(false);
+            (blnIsError, strText) = await TryCallOnAsync(strHuman, "convert_to_free_sprite", new JObject(), token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+
+            // A technomancer's sprite gets its own linked character file
+            const string strTechno = "Agent Test Registrar";
+            await CallToolOkAsync("create_character", new JObject
+            {
+                ["metatype"] = "Human",
+                ["priorities"] = new JObject { ["heritage"] = "D", ["attributes"] = "C", ["talent"] = "A", ["skills"] = "B", ["resources"] = "E" },
+                ["talent"] = "Technomancer",
+                ["talent_skills"] = new JArray("Compiling", "Registering", "Decompiling"),
+                ["name"] = strTechno
+            }, token).ConfigureAwait(false);
+            await CallOnAsync(strTechno, "set_tradition", new JObject { ["id"] = "Default" }, token).ConfigureAwait(false);
+            await CallOnAsync(strTechno, "add_spirit", new JObject { ["kind"] = "sprite", ["type"] = "Courier Sprite", ["force"] = 2 }, token).ConfigureAwait(false);
+            const string strMage = strTechno;
+            string strSpirit = ((JArray)((JObject)await CallOnAsync(strMage, "get_character_summary", new JObject(), token).ConfigureAwait(false))["spirits"])
+                               .Single().Value<string>("id");
+            string strSpiritFile = Path.Combine(strFolder, "Courier Sprite.chum5");
+            await CallOnAsync(strMage, "create_spirit_character", new JObject { ["id"] = strSpirit, ["path"] = strSpiritFile }, token).ConfigureAwait(false);
+            Assert.IsTrue(File.Exists(strSpiritFile));
+            objResult = (JObject)await CallOnAsync(strMage, "open_linked_character", new JObject { ["id"] = strSpirit }, token).ConfigureAwait(false);
+            StringAssert.Contains(objResult.Value<string>("result"), "already open");
+            await CallOnAsync(strMage, "set_spirit_details", new JObject { ["id"] = strSpirit, ["linked_file"] = "" }, token).ConfigureAwait(false);
+            (blnIsError, strText) = await TryCallOnAsync(strMage, "open_linked_character", new JObject { ["id"] = strSpirit }, token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+        }
     }
 }

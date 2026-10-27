@@ -544,18 +544,8 @@ namespace Chummer
                         await objCharacter.LockObject.EnterWriteLockAsync(token).ConfigureAwait(false);
                     try
                     {
-                        await objCharacter.SetSettingsKeyAsync(
-                            await _objSpirit.CharacterObject.GetSettingsKeyAsync(token).ConfigureAwait(false),
-                            token).ConfigureAwait(false);
-                        // Override the defaults for the setting.
-                        await objCharacter.SetIgnoreRulesAsync(true, token).ConfigureAwait(false);
-                        await objCharacter.SetIsCritterAsync(true, token).ConfigureAwait(false);
-                        await objCharacter.SetAliasAsync(strCritterName, token).ConfigureAwait(false);
-                        await objCharacter.SetCreatedAsync(true, token: token).ConfigureAwait(false);
                         string strCritterCharacterName = await txtCritterName
                             .DoThreadSafeFuncAsync(x => x.Text, token: token).ConfigureAwait(false);
-                        if (!string.IsNullOrEmpty(strCritterCharacterName))
-                            await objCharacter.SetNameAsync(strCritterCharacterName, token).ConfigureAwait(false);
 
                         string strSpace = await LanguageManager.GetStringAsync("String_Space", token: token)
                             .ConfigureAwait(false);
@@ -590,23 +580,9 @@ namespace Chummer
                         if (eResult != DialogResult.OK)
                             return;
 
-                        if (!strFileName.EndsWith(".chum5", StringComparison.OrdinalIgnoreCase)
-                            && !strFileName.EndsWith(".chum5lz", StringComparison.OrdinalIgnoreCase))
-                            strFileName += ".chum5";
-                        await objCharacter.SetFileNameAsync(strFileName, token).ConfigureAwait(false);
-
-                        await objCharacter.CreateAsync(objXmlMetatype["category"]?.InnerTextViaPool(token),
-                            objXmlMetatype["id"]?.InnerTextViaPool(token),
-                            string.Empty, objXmlMetatype, intForce, token: token).ConfigureAwait(false);
-                        await objCharacter.SetMetatypeBPAsync(0, token).ConfigureAwait(false);
-                        using (ThreadSafeForm<LoadingBar> frmLoadingBar =
-                               await Program.CreateAndShowProgressBarAsync(token: token).ConfigureAwait(false))
-                        {
-                            await frmLoadingBar.MyForm.PerformStepAsync(await objCharacter.GetCharacterNameAsync(token).ConfigureAwait(false),
-                                LoadingBar.ProgressBarTextPatterns.Saving, token).ConfigureAwait(false);
-                            if (!await objCharacter.SaveAsync(token: token).ConfigureAwait(false))
-                                return;
-                        }
+                        if (!await CreateCritterCharacterAsync(_objSpirit, objCharacter, objXmlMetatype, strCritterName, intForce, strCritterCharacterName,
+                                                               strFileName, token).ConfigureAwait(false))
+                            return;
                     }
                     finally
                     {
@@ -634,6 +610,50 @@ namespace Chummer
             {
                 await objCursorWait.DisposeAsync().ConfigureAwait(false);
             }
+        }
+
+        /// <summary>
+        /// Build and save the critter character for a spirit or sprite, as its Create Critter menu item does once a file is picked, and link it to the
+        /// spirit. The caller holds <paramref name="objCharacter"/>'s write lock and opens it afterwards.
+        /// </summary>
+        /// <param name="objXmlMetatype">The critter's node in critters.xml.</param>
+        /// <returns>False if the file could not be saved.</returns>
+        public static async Task<bool> CreateCritterCharacterAsync(Spirit objSpirit, Character objCharacter, XmlNode objXmlMetatype, string strCritterName,
+                                                                   int intForce, string strCharacterName, string strFileName, CancellationToken token = default)
+        {
+            // The Critter should use the same settings file as the character.
+            await objCharacter.SetSettingsKeyAsync(
+                await objSpirit.CharacterObject.GetSettingsKeyAsync(token).ConfigureAwait(false),
+                token).ConfigureAwait(false);
+            // Override the defaults for the setting.
+            await objCharacter.SetIgnoreRulesAsync(true, token).ConfigureAwait(false);
+            await objCharacter.SetIsCritterAsync(true, token).ConfigureAwait(false);
+            await objCharacter.SetAliasAsync(strCritterName, token).ConfigureAwait(false);
+            await objCharacter.SetCreatedAsync(true, token: token).ConfigureAwait(false);
+            if (!string.IsNullOrEmpty(strCharacterName))
+                await objCharacter.SetNameAsync(strCharacterName, token).ConfigureAwait(false);
+
+            if (!strFileName.EndsWith(".chum5", StringComparison.OrdinalIgnoreCase)
+                && !strFileName.EndsWith(".chum5lz", StringComparison.OrdinalIgnoreCase))
+                strFileName += ".chum5";
+            await objCharacter.SetFileNameAsync(strFileName, token).ConfigureAwait(false);
+
+            await objCharacter.CreateAsync(objXmlMetatype["category"]?.InnerTextViaPool(token),
+                objXmlMetatype["id"]?.InnerTextViaPool(token),
+                string.Empty, objXmlMetatype, intForce, token: token).ConfigureAwait(false);
+            await objCharacter.SetMetatypeBPAsync(0, token).ConfigureAwait(false);
+            using (ThreadSafeForm<LoadingBar> frmLoadingBar =
+                   await Program.CreateAndShowProgressBarAsync(token: token).ConfigureAwait(false))
+            {
+                await frmLoadingBar.MyForm.PerformStepAsync(await objCharacter.GetCharacterNameAsync(token).ConfigureAwait(false),
+                    LoadingBar.ProgressBarTextPatterns.Saving, token).ConfigureAwait(false);
+                if (!await objCharacter.SaveAsync(token: token).ConfigureAwait(false))
+                    return false;
+            }
+
+            // Link the newly-created Critter to the Spirit.
+            await objSpirit.SetFileNameAsync(strFileName, token).ConfigureAwait(false);
+            return true;
         }
 
         #endregion Methods

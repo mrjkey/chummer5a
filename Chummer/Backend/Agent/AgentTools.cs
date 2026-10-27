@@ -89,6 +89,8 @@ namespace Chummer.Agent
                 yield return objTool;
             foreach (AgentTool objTool in CreateItemTools())
                 yield return objTool;
+            foreach (AgentTool objTool in CreateCritterTools())
+                yield return objTool;
             foreach (AgentTool objTool in CreateCareerTools())
                 yield return objTool;
         }

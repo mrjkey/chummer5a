@@ -41,7 +41,6 @@ namespace Chummer
         private List<ListItem> _lstCategory;
 
         private readonly XPathNavigator _xmlBaseChummerNode;
-        private readonly XPathNavigator _xmlOptionalAIProgramsNode;
 
         #region Control Events
 
@@ -56,7 +55,6 @@ namespace Chummer
             _blnInherentProgram = blnInherentProgram;
             // Load the Programs information.
             _xmlBaseChummerNode = _objCharacter.LoadDataXPath("programs.xml").SelectSingleNodeAndCacheExpression("/chummer");
-            _xmlOptionalAIProgramsNode = _objCharacter.GetNodeXPath().SelectSingleNodeAndCacheExpression("optionalaiprograms");
             _lstCategory = Utils.ListItemListPool.Get();
         }
 
@@ -319,6 +317,29 @@ namespace Chummer
         }
 
         /// <summary>
+        /// Whether the dialog lists a program for the character: with the Limit List box ticked, the program it builds on must be known, and a
+        /// critter with an optional program list only gets those.
+        /// </summary>
+        public static async Task<bool> IsProgramAllowedAsync(Character objCharacter, XPathNavigator objXmlProgram, bool blnLimitList,
+                                                             CancellationToken token = default)
+        {
+            if (blnLimitList)
+            {
+                string strRequire = objXmlProgram.SelectSingleNodeAndCacheExpression("require", token)?.Value;
+                if (!string.IsNullOrEmpty(strRequire) && await objCharacter.AIPrograms
+                        .FirstOrDefaultAsync(x => x.Name == strRequire, token).ConfigureAwait(false) == null)
+                    return false;
+            }
+
+            string strName = objXmlProgram.SelectSingleNodeAndCacheExpression("name", token)?.Value ?? string.Empty;
+            // If this is a critter with Optional Programs, see if this Program is allowed.
+            XPathNavigator xmlOptionalAIProgramsNode = (await objCharacter.GetNodeXPathAsync(token: token).ConfigureAwait(false))
+                ?.SelectSingleNodeAndCacheExpression("optionalaiprograms", token);
+            return xmlOptionalAIProgramsNode?.SelectSingleNodeAndCacheExpression("program", token) == null
+                   || xmlOptionalAIProgramsNode.SelectSingleNode("program[. = " + strName.CleanXPath() + "]") != null;
+        }
+
+        /// <summary>
         /// Update the Program List based on a base program node list.
         /// </summary>
         private async Task UpdateProgramList(XPathNodeIterator objXmlNodeList, CancellationToken token = default)
@@ -335,20 +356,11 @@ namespace Chummer
                     if (string.IsNullOrEmpty(strId))
                         continue;
 
-                    if (blnLimitList)
-                    {
-                        string strRequire = objXmlProgram.SelectSingleNodeAndCacheExpression("require", token)?.Value;
-                        if (!string.IsNullOrEmpty(strRequire) && await _objCharacter.AIPrograms
-                                .FirstOrDefaultAsync(x => x.Name == strRequire, token).ConfigureAwait(false) == null)
-                            continue;
-                    }
+                    if (!await IsProgramAllowedAsync(_objCharacter, objXmlProgram, blnLimitList, token).ConfigureAwait(false))
+                        continue;
 
                     string strName = objXmlProgram.SelectSingleNodeAndCacheExpression("name", token)?.Value
                                      ?? await LanguageManager.GetStringAsync("String_Unknown", token: token).ConfigureAwait(false);
-                    // If this is a critter with Optional Programs, see if this Program is allowed.
-                    if (_xmlOptionalAIProgramsNode?.SelectSingleNodeAndCacheExpression("program", token) != null
-                        && _xmlOptionalAIProgramsNode.SelectSingleNode("program[. = " + strName.CleanXPath() + "]") == null)
-                        continue;
                     string strDisplayName = objXmlProgram.SelectSingleNodeAndCacheExpression("translate", token: token)?.Value ?? strName;
                     if (!GlobalSettings.SearchInCategoryOnly && blnHasSearch)
                     {

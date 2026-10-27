@@ -88,13 +88,51 @@ namespace Chummer
         /// <param name="token"></param>
         private async Task<TreeNode> CacheCharacters(string strFile, CancellationToken token = default)
         {
+            (List<HeroLabCharacterCache> lstCharacters, string strError) = await ReadPortfolioAsync(strFile, _dicImages, token).ConfigureAwait(false);
+            if (!string.IsNullOrEmpty(strError))
+            {
+                await Program.ShowScrollableMessageBoxAsync(this, strError, token: token).ConfigureAwait(false);
+                return null;
+            }
+
+            string strFileText
+                = await strFile
+                        .CheapReplaceAsync(Utils.GetStartupPath, () => "<" + Application.ProductName + ">",
+                                           token: token).ConfigureAwait(false);
+            TreeNode nodRootNode = new TreeNode
+            {
+                Text = strFileText,
+                ToolTipText = strFileText
+            };
+            foreach (HeroLabCharacterCache objCache in lstCharacters)
+            {
+                TreeNode objNode = new TreeNode
+                {
+                    Text = await CalculatedName(objCache, token).ConfigureAwait(false),
+                    ToolTipText = strFileText
+                };
+                nodRootNode.Nodes.Add(objNode);
+
+                await _lstCharacterCache.AddAsync(objCache, token).ConfigureAwait(false);
+                objNode.Tag = await _lstCharacterCache.IndexOfAsync(objCache, token).ConfigureAwait(false);
+            }
+
+            nodRootNode.Expand();
+            return nodRootNode;
+        }
+
+        /// <summary>
+        /// Read the characters in a Hero Lab portfolio, as picking the file in the importer does, and its images into <paramref name="dicImages"/>.
+        /// </summary>
+        /// <returns>The characters, or an error message if the file can't be read.</returns>
+        internal static async Task<(List<HeroLabCharacterCache> Characters, string Error)> ReadPortfolioAsync(string strFile, ConcurrentDictionary<string, Bitmap> dicImages,
+                                                                                                         CancellationToken token = default)
+        {
+            List<HeroLabCharacterCache> lstReturn = new List<HeroLabCharacterCache>();
             if (!File.Exists(strFile))
             {
-                await Program.ShowScrollableMessageBoxAsync(
-                    this,
-                    StringExtensions.FastFormat(
-                        await LanguageManager.GetStringAsync("Message_File_Cannot_Be_Accessed", token: token).ConfigureAwait(false), strFile), token: token).ConfigureAwait(false);
-                return null;
+                return (lstReturn, StringExtensions.FastFormat(
+                    await LanguageManager.GetStringAsync("Message_File_Cannot_Be_Accessed", token: token).ConfigureAwait(false), strFile));
             }
 
             ConcurrentBag<XPathNavigator> lstCharacterXmlStatblocks = new ConcurrentBag<XPathNavigator>();
@@ -159,7 +197,7 @@ namespace Chummer
                                         : bmpMugshot.ConvertPixelFormat(PixelFormat.Format32bppPArgb);
                                     token.ThrowIfCancellationRequested();
                                     string strKey = Path.GetFileName(strEntryFullName);
-                                    _dicImages.AddOrUpdate(strKey, _ => bmpNewMugshot, (_, y) =>
+                                    dicImages.AddOrUpdate(strKey, _ => bmpNewMugshot, (_, y) =>
                                     {
                                         y.Dispose();
                                         return bmpNewMugshot;
@@ -172,42 +210,23 @@ namespace Chummer
             }
             catch (IOException)
             {
-                await Program.ShowScrollableMessageBoxAsync(
-                    this,
-                    StringExtensions.FastFormat(
-                        await LanguageManager.GetStringAsync("Message_File_Cannot_Be_Accessed", token: token)
-                            .ConfigureAwait(false),
-                        strFile), token: token).ConfigureAwait(false);
-                return null;
+                return (lstReturn, StringExtensions.FastFormat(
+                    await LanguageManager.GetStringAsync("Message_File_Cannot_Be_Accessed", token: token)
+                        .ConfigureAwait(false),
+                    strFile));
             }
             catch (NotSupportedException)
             {
-                await Program.ShowScrollableMessageBoxAsync(
-                    this,
-                    StringExtensions.FastFormat(
-                        await LanguageManager.GetStringAsync("Message_File_Cannot_Be_Accessed", token: token)
-                            .ConfigureAwait(false),
-                        strFile), token: token).ConfigureAwait(false);
-                return null;
+                return (lstReturn, StringExtensions.FastFormat(
+                    await LanguageManager.GetStringAsync("Message_File_Cannot_Be_Accessed", token: token)
+                        .ConfigureAwait(false),
+                    strFile));
             }
             catch (UnauthorizedAccessException)
             {
-                await Program.ShowScrollableMessageBoxAsync(
-                    this,
-                    await LanguageManager.GetStringAsync("Message_Insufficient_Permissions_Warning", token: token)
-                        .ConfigureAwait(false), token: token).ConfigureAwait(false);
-                return null;
+                return (lstReturn, await LanguageManager.GetStringAsync("Message_Insufficient_Permissions_Warning", token: token)
+                                                    .ConfigureAwait(false));
             }
-
-            string strFileText
-                = await strFile
-                        .CheapReplaceAsync(Utils.GetStartupPath, () => "<" + Application.ProductName + ">",
-                                           token: token).ConfigureAwait(false);
-            TreeNode nodRootNode = new TreeNode
-            {
-                Text = strFileText,
-                ToolTipText = strFileText
-            };
 
             XPathNavigator xmlMetatypesDocument
                 = await XmlManager.LoadXPathAsync("metatypes.xml", token: token).ConfigureAwait(false);
@@ -363,28 +382,70 @@ namespace Chummer
                     string strImageString = xmlBaseCharacterNode
                         .SelectSingleNodeAndCacheExpression(
                             "images/image/@filename", token)?.Value;
-                    if (!string.IsNullOrEmpty(strImageString) && _dicImages.TryGetValue(strImageString, out Bitmap objTemp))
+                    if (!string.IsNullOrEmpty(strImageString) && dicImages.TryGetValue(strImageString, out Bitmap objTemp))
                     {
                         objCache.Mugshot = objTemp;
                     }
 
                     objCache.FilePath = strFile;
-                    TreeNode objNode = new TreeNode
-                    {
-                        Text = await CalculatedName(objCache, token).ConfigureAwait(false),
-                        ToolTipText = await strFile.CheapReplaceAsync(Utils.GetStartupPath,
-                                                                      () => "<" + Application.ProductName + ">",
-                                                                      token: token).ConfigureAwait(false)
-                    };
-                    nodRootNode.Nodes.Add(objNode);
-
-                    await _lstCharacterCache.AddAsync(objCache, token).ConfigureAwait(false);
-                    objNode.Tag = await _lstCharacterCache.IndexOfAsync(objCache, token).ConfigureAwait(false);
+                    lstReturn.Add(objCache);
                 }
             }
 
-            nodRootNode.Expand();
-            return nodRootNode;
+            return (lstReturn, string.Empty);
+        }
+
+        /// <summary>
+        /// The settings an imported character gets, as the importer picks them before asking: the Hero Lab settings' namesake, or the default or a
+        /// built-in one with the same kind of build.
+        /// </summary>
+        internal static async Task<string> GetSettingsKeyAsync(HeroLabCharacterCache objCache, CancellationToken token = default)
+        {
+            IReadOnlyDictionary<string, CharacterSettings> dicCharacterSettings = await SettingsManager.GetLoadedCharacterSettingsAsync(token).ConfigureAwait(false);
+            CharacterSettings objHeroLabSettings =
+                dicCharacterSettings.FirstOrDefault(
+                    x => x.Value.Name == objCache.SettingsName && x.Value.BuildMethod == objCache.BuildMethod).Value;
+            if (objHeroLabSettings != null)
+            {
+                return await objHeroLabSettings.GetDictionaryKeyAsync(token).ConfigureAwait(false);
+            }
+            else
+            {
+                objHeroLabSettings = dicCharacterSettings.FirstOrDefault(
+                    x => x.Value.Name.Contains(objCache.SettingsName) && x.Value.BuildMethod == objCache.BuildMethod).Value;
+                if (objHeroLabSettings != null)
+                {
+                    return await objHeroLabSettings.GetDictionaryKeyAsync(token).ConfigureAwait(false);
+                }
+                else
+                {
+                    bool blnCacheUsesPriorityTables = objCache.BuildMethod.UsesPriorityTables();
+                    if (dicCharacterSettings.TryGetValue(
+                            GlobalSettings.DefaultCharacterSetting, out CharacterSettings objDefaultCharacterSettings) && blnCacheUsesPriorityTables
+                        == objDefaultCharacterSettings.BuildMethod.UsesPriorityTables())
+                    {
+                        return await objDefaultCharacterSettings.GetDictionaryKeyAsync(token).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        CharacterSettings objTempSetting
+                            = dicCharacterSettings.FirstOrDefault(
+                                x => x.Value.BuiltInOption && x.Value.BuildMethod == objCache.BuildMethod).Value;
+                        if (objTempSetting != null)
+                            return await objTempSetting.GetDictionaryKeyAsync(token).ConfigureAwait(false);
+                        else
+                        {
+                            objTempSetting = dicCharacterSettings.FirstOrDefault(
+                                x => x.Value.BuiltInOption && x.Value.BuildMethod.UsesPriorityTables()
+                                    == blnCacheUsesPriorityTables).Value;
+                            if (objTempSetting != null)
+                                return await objTempSetting.GetDictionaryKeyAsync(token).ConfigureAwait(false);
+                            else
+                                return GlobalSettings.DefaultCharacterSetting;
+                        }
+                    }
+                }
+            }
         }
 
         #region Classes
@@ -392,7 +453,7 @@ namespace Chummer
         /// <summary>
         /// Caches a subset of a full character's properties for loading purposes.
         /// </summary>
-        private sealed class HeroLabCharacterCache
+        internal sealed class HeroLabCharacterCache
         {
             internal string FilePath { get; set; }
             internal string Description { get; set; }
@@ -629,51 +690,7 @@ namespace Chummer
                 try
                 {
                     await Program.OpenCharacters.AddAsync(objCharacter, token: token).ConfigureAwait(false);
-                    IReadOnlyDictionary<string, CharacterSettings> dicCharacterSettings = await SettingsManager.GetLoadedCharacterSettingsAsync(token).ConfigureAwait(false);
-                    CharacterSettings objHeroLabSettings =
-                        dicCharacterSettings.FirstOrDefault(
-                            x => x.Value.Name == objCache.SettingsName && x.Value.BuildMethod == objCache.BuildMethod).Value;
-                    if (objHeroLabSettings != null)
-                    {
-                        await objCharacter.SetSettingsKeyAsync(await objHeroLabSettings.GetDictionaryKeyAsync(token).ConfigureAwait(false), token).ConfigureAwait(false);
-                    }
-                    else
-                    {
-                        objHeroLabSettings = dicCharacterSettings.FirstOrDefault(
-                            x => x.Value.Name.Contains(objCache.SettingsName) && x.Value.BuildMethod == objCache.BuildMethod).Value;
-                        if (objHeroLabSettings != null)
-                        {
-                            await objCharacter.SetSettingsKeyAsync(await objHeroLabSettings.GetDictionaryKeyAsync(token).ConfigureAwait(false), token).ConfigureAwait(false);
-                        }
-                        else
-                        {
-                            bool blnCacheUsesPriorityTables = objCache.BuildMethod.UsesPriorityTables();
-                            if (dicCharacterSettings.TryGetValue(
-                                    GlobalSettings.DefaultCharacterSetting, out CharacterSettings objDefaultCharacterSettings) && blnCacheUsesPriorityTables
-                                == objDefaultCharacterSettings.BuildMethod.UsesPriorityTables())
-                            {
-                                await objCharacter.SetSettingsKeyAsync(await objDefaultCharacterSettings.GetDictionaryKeyAsync(token).ConfigureAwait(false), token).ConfigureAwait(false);
-                            }
-                            else
-                            {
-                                CharacterSettings objTempSetting
-                                    = dicCharacterSettings.FirstOrDefault(
-                                        x => x.Value.BuiltInOption && x.Value.BuildMethod == objCache.BuildMethod).Value;
-                                if (objTempSetting != null)
-                                    await objCharacter.SetSettingsKeyAsync(await objTempSetting.GetDictionaryKeyAsync(token).ConfigureAwait(false), token).ConfigureAwait(false);
-                                else
-                                {
-                                    objTempSetting = dicCharacterSettings.FirstOrDefault(
-                                        x => x.Value.BuiltInOption && x.Value.BuildMethod.UsesPriorityTables()
-                                            == blnCacheUsesPriorityTables).Value;
-                                    if (objTempSetting != null)
-                                        await objCharacter.SetSettingsKeyAsync(await objTempSetting.GetDictionaryKeyAsync(token).ConfigureAwait(false), token).ConfigureAwait(false);
-                                    else
-                                        await objCharacter.SetSettingsKeyAsync(GlobalSettings.DefaultCharacterSetting, token).ConfigureAwait(false);
-                                }
-                            }
-                        }
-                    }
+                    await objCharacter.SetSettingsKeyAsync(await GetSettingsKeyAsync(objCache, token).ConfigureAwait(false), token).ConfigureAwait(false);
 
                     using (ThreadSafeForm<SelectBuildMethod> frmPickBP
                            = await ThreadSafeForm<SelectBuildMethod>.GetAsync(

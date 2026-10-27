@@ -65,46 +65,7 @@ namespace Chummer
 
         private async void SelectCritterPower_Load(object sender, EventArgs e)
         {
-            // Populate the Category list.
-            foreach (XPathNavigator objXmlCategory in _xmlBaseCritterPowerDataNode.SelectAndCacheExpression("categories/category"))
-            {
-                string strInnerText = objXmlCategory.Value;
-                if (strInnerText.ContainsAny((await ImprovementManager
-                                                    .GetCachedImprovementListForValueOfAsync(_objCharacter,
-                                                        Improvement.ImprovementType.AllowCritterPowerCategory)
-                                                    .ConfigureAwait(false))
-                                             .Select(imp => imp.ImprovedName))
-                    && objXmlCategory.SelectSingleNodeAndCacheExpression("@whitelist")?.Value == bool.TrueString
-                    || strInnerText.ContainsAny((await ImprovementManager
-                                                       .GetCachedImprovementListForValueOfAsync(_objCharacter,
-                                                           Improvement.ImprovementType
-                                                                      .LimitCritterPowerCategory)
-                                                       .ConfigureAwait(false))
-                                                .Select(imp => imp.ImprovedName)))
-                {
-                    _lstCategory.Add(new ListItem(strInnerText,
-                                                  objXmlCategory.SelectSingleNodeAndCacheExpression("@translate")?.Value ?? strInnerText));
-                    continue;
-                }
-
-                if ((await ImprovementManager
-                           .GetCachedImprovementListForValueOfAsync(_objCharacter,
-                                                                    Improvement.ImprovementType.LimitCritterPowerCategory).ConfigureAwait(false))
-                    .Exists(imp => !strInnerText.Contains(imp.ImprovedName)))
-                {
-                    continue;
-                }
-                _lstCategory.Add(new ListItem(strInnerText,
-                    objXmlCategory.SelectSingleNodeAndCacheExpression("@translate")?.Value ?? strInnerText));
-            }
-
-            _lstCategory.Sort(CompareListItems.CompareNames);
-
-            if (_lstCategory.Count > 0)
-            {
-                _lstCategory.Insert(0, new ListItem("Show All", await LanguageManager.GetStringAsync("String_ShowAll").ConfigureAwait(false)));
-            }
-
+            await FillCategoriesAsync().ConfigureAwait(false);
             await cboCategory.PopulateWithListItemsAsync(_lstCategory).ConfigureAwait(false);
 
             await cboCategory.DoThreadSafeAsync(x =>
@@ -121,6 +82,58 @@ namespace Chummer
                     x.SelectedIndex = 0;
             }).ConfigureAwait(false);
         }
+
+        /// <summary>
+        /// Fill the category list with the critter power categories the character may pick from ("Show All" first).
+        /// </summary>
+        internal async Task FillCategoriesAsync(CancellationToken token = default)
+        {
+            _lstCategory.Clear();
+            // Populate the Category list.
+            foreach (XPathNavigator objXmlCategory in _xmlBaseCritterPowerDataNode.SelectAndCacheExpression("categories/category"))
+            {
+                string strInnerText = objXmlCategory.Value;
+                if (strInnerText.ContainsAny((await ImprovementManager
+                                                    .GetCachedImprovementListForValueOfAsync(_objCharacter,
+                                                        Improvement.ImprovementType.AllowCritterPowerCategory, token: token)
+                                                    .ConfigureAwait(false))
+                                             .Select(imp => imp.ImprovedName))
+                    && objXmlCategory.SelectSingleNodeAndCacheExpression("@whitelist")?.Value == bool.TrueString
+                    || strInnerText.ContainsAny((await ImprovementManager
+                                                       .GetCachedImprovementListForValueOfAsync(_objCharacter,
+                                                           Improvement.ImprovementType
+                                                                      .LimitCritterPowerCategory, token: token)
+                                                       .ConfigureAwait(false))
+                                                .Select(imp => imp.ImprovedName)))
+                {
+                    _lstCategory.Add(new ListItem(strInnerText,
+                                                  objXmlCategory.SelectSingleNodeAndCacheExpression("@translate")?.Value ?? strInnerText));
+                    continue;
+                }
+
+                if ((await ImprovementManager
+                           .GetCachedImprovementListForValueOfAsync(_objCharacter,
+                                                                    Improvement.ImprovementType.LimitCritterPowerCategory, token: token).ConfigureAwait(false))
+                    .Exists(imp => !strInnerText.Contains(imp.ImprovedName)))
+                {
+                    continue;
+                }
+                _lstCategory.Add(new ListItem(strInnerText,
+                    objXmlCategory.SelectSingleNodeAndCacheExpression("@translate")?.Value ?? strInnerText));
+            }
+
+            _lstCategory.Sort(CompareListItems.CompareNames);
+
+            if (_lstCategory.Count > 0)
+            {
+                _lstCategory.Insert(0, new ListItem("Show All", await LanguageManager.GetStringAsync("String_ShowAll", token: token).ConfigureAwait(false)));
+            }
+        }
+
+        /// <summary>
+        /// The critter power categories the dialog lists, by name.
+        /// </summary>
+        internal IEnumerable<string> Categories => _lstCategory.Select(x => x.Value.ToString());
 
         private async void cmdOK_Click(object sender, EventArgs e)
         {
@@ -283,6 +296,26 @@ namespace Chummer
 
             string strCategory = await cboCategory.DoThreadSafeFuncAsync(x => x.SelectedValue?.ToString(), token: token).ConfigureAwait(false);
 
+            string strSearch = await txtSearch.DoThreadSafeFuncAsync(x => x.Text, token: token).ConfigureAwait(false);
+            foreach (XPathNavigator objXmlPower in await GetAllowedPowersAsync(strCategory, strSearch, token).ConfigureAwait(false))
+            {
+                string strPowerName = objXmlPower.SelectSingleNodeAndCacheExpression("name", token: token)?.Value ?? await LanguageManager.GetStringAsync("String_Unknown", token: token).ConfigureAwait(false);
+                TreeNode objNode = new TreeNode
+                {
+                    Tag = objXmlPower.SelectSingleNodeAndCacheExpression("id", token: token)?.Value ?? string.Empty,
+                    Text = objXmlPower.SelectSingleNodeAndCacheExpression("translate", token: token)?.Value ?? strPowerName
+                };
+                await trePowers.DoThreadSafeAsync(x => x.Nodes.Add(objNode), token: token).ConfigureAwait(false);
+            }
+            await trePowers.DoThreadSafeAsync(x => x.Sort(), token: token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// The critter powers the dialog lists for a category ("Show All" for every allowed category) and search text: in the enabled books, on the
+        /// metatype's optional powers list if it has one, and with their requirements met.
+        /// </summary>
+        internal async Task<List<XPathNavigator>> GetAllowedPowersAsync(string strCategory, string strSearch, CancellationToken token = default)
+        {
             List<string> lstPowerWhitelist = new List<string>(10);
 
             // If the Critter is only allowed certain Powers, display only those.
@@ -400,7 +433,6 @@ namespace Chummer
                         sbdFilter.Append(" and (not(toxic) or toxic != ", bool.TrueString.CleanXPath(), ')');
                 }
 
-                string strSearch = await txtSearch.DoThreadSafeFuncAsync(x => x.Text, token: token).ConfigureAwait(false);
                 if (!string.IsNullOrEmpty(strSearch))
                     sbdFilter.Append(" and ", CommonFunctions.GenerateSearchXPath(strSearch));
 
@@ -409,6 +441,7 @@ namespace Chummer
                     strFilter = string.Concat("[", sbdFilter.Append(']').ToString());
             }
 
+            List<XPathNavigator> lstReturn = new List<XPathNavigator>();
             foreach (XPathNavigator objXmlPower in _xmlBaseCritterPowerDataNode.Select("powers/power" + strFilter))
             {
                 string strPowerName = objXmlPower.SelectSingleNodeAndCacheExpression("name", token: token)?.Value ?? await LanguageManager.GetStringAsync("String_Unknown", token: token).ConfigureAwait(false);
@@ -416,14 +449,10 @@ namespace Chummer
                     continue;
                 if (!await objXmlPower.RequirementsMetAsync(_objCharacter, token: token).ConfigureAwait(false))
                     continue;
-                TreeNode objNode = new TreeNode
-                {
-                    Tag = objXmlPower.SelectSingleNodeAndCacheExpression("id", token: token)?.Value ?? string.Empty,
-                    Text = objXmlPower.SelectSingleNodeAndCacheExpression("translate", token: token)?.Value ?? strPowerName
-                };
-                await trePowers.DoThreadSafeAsync(x => x.Nodes.Add(objNode), token: token).ConfigureAwait(false);
+                lstReturn.Add(objXmlPower);
             }
-            await trePowers.DoThreadSafeAsync(x => x.Sort(), token: token).ConfigureAwait(false);
+
+            return lstReturn;
         }
 
         private async void cmdOKAdd_Click(object sender, EventArgs e)
@@ -460,26 +489,37 @@ namespace Chummer
             _strSelectCategory = await cboCategory.DoThreadSafeFuncAsync(x => x.SelectedValue?.ToString() ?? string.Empty).ConfigureAwait(false);
             _strSelectedPower = strSelectedPower;
 
-            // If the character is a Free Spirit (PC, not the Critter version), populate the Power Points Cost as well.
-            if (await _objCharacter.GetMetatypeAsync().ConfigureAwait(false) == "Free Spirit" && !await _objCharacter.GetIsCritterAsync().ConfigureAwait(false))
-            {
-                string strName = objXmlPower.SelectSingleNodeAndCacheExpression("name")?.Value;
-                if (!string.IsNullOrEmpty(strName))
-                {
-                    XPathNavigator objXmlOptionalPowerCost = _xmlMetatypeDataNode.SelectSingleNode("optionalpowers/power[. = " + strName.CleanXPath() + "]/@cost");
-                    if (objXmlOptionalPowerCost != null)
-                    {
-                        decimal.TryParse(objXmlOptionalPowerCost.Value,
-                            System.Globalization.NumberStyles.Any, GlobalSettings.InvariantCultureInfo, out _decPowerPoints);
-                    }
-                }
-            }
+            _decPowerPoints = await GetPowerPointCostAsync(objXmlPower).ConfigureAwait(false);
 
             await this.DoThreadSafeAsync(x =>
             {
                 x.DialogResult = DialogResult.OK;
                 x.Close();
             }).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// What a power costs a free spirit player character in power points (zero for everyone else).
+        /// </summary>
+        internal async Task<decimal> GetPowerPointCostAsync(XPathNavigator objXmlPower, CancellationToken token = default)
+        {
+            decimal decReturn = 0;
+            // If the character is a Free Spirit (PC, not the Critter version), populate the Power Points Cost as well.
+            if (await _objCharacter.GetMetatypeAsync(token).ConfigureAwait(false) == "Free Spirit" && !await _objCharacter.GetIsCritterAsync(token).ConfigureAwait(false))
+            {
+                string strName = objXmlPower.SelectSingleNodeAndCacheExpression("name", token)?.Value;
+                if (!string.IsNullOrEmpty(strName))
+                {
+                    XPathNavigator objXmlOptionalPowerCost = _xmlMetatypeDataNode.SelectSingleNode("optionalpowers/power[. = " + strName.CleanXPath() + "]/@cost");
+                    if (objXmlOptionalPowerCost != null)
+                    {
+                        decimal.TryParse(objXmlOptionalPowerCost.Value,
+                            System.Globalization.NumberStyles.Any, GlobalSettings.InvariantCultureInfo, out decReturn);
+                    }
+                }
+            }
+
+            return decReturn;
         }
 
         private async void OpenSourceFromLabel(object sender, EventArgs e)

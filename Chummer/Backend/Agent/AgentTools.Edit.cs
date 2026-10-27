@@ -133,6 +133,36 @@ namespace Chummer.Agent
                                  ("forced_value", "string", ForcedValueDescription),
                                  ("character", "string", CharacterArgDescription)),
                 AddSpellAsync);
+            yield return new AgentTool("create_spell",
+                "Design a custom spell (Street Grimoire), as the spells tab's Create Spell dialog does: category, type, range, duration and the "
+                + "category's modifiers set the drain. Each category needs its either/or choices (e.g. combat: Direct or Indirect, and Physical or Stun "
+                + "damage); a wrong or missing modifier lists the category's modifiers. It counts toward the spell limit.",
+                AgentTool.Schema(("name!", "string", "The spell's name."),
+                                 ("category!", "string", "'Combat', 'Detection', 'Health', 'Illusion' or 'Manipulation'."),
+                                 ("type", "string", "'P' (physical, default) or 'M' (mana). Indirect combat spells are always physical."),
+                                 ("range", "string", "'T' (touch, default) or 'LOS' (line of sight)."),
+                                 ("area", "boolean", "An area spell (not for health spells)."),
+                                 ("duration", "string", "'I' (instant, default), 'S' (sustained) or 'P' (permanent)."),
+                                 ("modifiers", "array", "The category's modifiers to tick, by their label (e.g. 'Direct', 'Physical damage') or number."),
+                                 ("effects", "integer", "Number of effects, for elemental combat spells and the matching manipulation modifier. Default 1."),
+                                 ("restricted", "string", "'restricted' or 'very restricted' target, with `restriction`."),
+                                 ("restriction", "string", "What the target is restricted to."),
+                                 ("limited", "boolean", "A limited spell."),
+                                 ("character", "string", CharacterArgDescription)),
+                CreateSpellAsync);
+            yield return new AgentTool("add_life_module",
+                "Add a life module (search_catalog kind='lifemodule', Run Faster), as the Qualities tab's Life Module button does in a Life Module "
+                + "build: nationality, formative years, teen years, further education, then real life. Many modules come in versions; pick one with "
+                + "`version` (a module without one lists them). Remove one with remove_quality.",
+                AgentTool.Schema(("id!", "string", "Life module id from search_catalog, or its exact English name."),
+                                 ("version", "string", "The module's version, by name or id."),
+                                 ("character", "string", CharacterArgDescription)),
+                AddLifeModuleAsync);
+            yield return new AgentTool("create_backstory",
+                "Write the character's background from its life modules, as the Create Backstory button does (it replaces the background, and works "
+                + "once per editor session).",
+                AgentTool.Schema(("character", "string", CharacterArgDescription)),
+                CreateBackstoryAsync);
             yield return new AgentTool("add_power",
                 "Add an adept power from search_catalog(kind='power'), optionally at a rating.",
                 AgentTool.Schema(("id!", "string", "Power id from search_catalog, or its exact English name."),
@@ -185,8 +215,21 @@ namespace Chummer.Agent
                                  ("family", "boolean", "The contact is family."),
                                  ("blackmail", "boolean", "The character has blackmail material on the contact."),
                                  ("free", "boolean", "The contact is free (no contact points or karma), where the settings allow it."),
+                                 ("linked_file", "string", "Path of the contact's own .chum5 file, as Attach Character does; empty removes the link."),
                                  ("character", "string", CharacterArgDescription)),
                 SetContactDetailsAsync);
+            yield return new AgentTool("import_contacts",
+                "Add the contacts saved in an XML file (<chummer><contacts><contact>...), as the Contacts tab's Add From File item does. They come in "
+                + "as they were saved, ratings included.",
+                AgentTool.Schema(("path!", "string", "The contacts file."),
+                                 ("character", "string", CharacterArgDescription)),
+                ImportContactsAsync);
+            yield return new AgentTool("open_linked_character",
+                "Open the character file linked to a contact, pet or spirit (set with linked_file), as its link button's Open Linked Character "
+                + "menu item does.",
+                AgentTool.Schema(("id!", "string", "Contact, pet or spirit id from get_character_summary."),
+                                 ("character", "string", CharacterArgDescription)),
+                OpenLinkedCharacterAsync);
             yield return new AgentTool("set_character_details",
                 "Set the character's personal details, as typing into the editor's Description tab does: name, alias, looks, concept, description, "
                 + "background and notes. Only the fields passed change; an empty string clears one. Works in creation and career mode.",
@@ -205,9 +248,24 @@ namespace Chummer.Agent
                                  ("background", "string", "Background story. Plain text; blank lines separate paragraphs."),
                                  ("notes", "string", "Character notes."),
                                  ("game_notes", "string", "Notes for the GM or game."),
+                                 ("group_name", "string", "The character's group (team) name, as on the Character Info tab."),
+                                 ("group_notes", "string", "Notes about the group."),
                                  ("primary_arm", "string", "'Right' or 'Left' (not for ambidextrous characters)."),
                                  ("character", "string", CharacterArgDescription)),
                 SetCharacterDetailsAsync);
+            yield return new AgentTool("manage_limit_modifier",
+                "Add, change or remove a custom limit modifier, or set its notes, as the Limits tab's Add Modifier, Edit, Delete and Notes items do: "
+                + "a named bonus to the Physical, Mental or Social limit, optionally only under a condition. export_character(section='limitmodifiers') "
+                + "shows them all.",
+                AgentTool.Schema(("action!", "string", "'add', 'edit', 'remove' or 'notes'."),
+                                 ("id", "string", "For edit/remove/notes: the modifier's id or name."),
+                                 ("name", "string", "For add/edit: what the modifier is, e.g. 'Lucky charm'."),
+                                 ("limit", "string", "For add/edit: 'Physical', 'Mental' or 'Social'."),
+                                 ("bonus", "integer", "For add/edit: the bonus, from -100 to 100."),
+                                 ("condition", "string", "For add/edit: when it applies (optional)."),
+                                 ("notes", "string", "For notes: the notes."),
+                                 ("character", "string", CharacterArgDescription)),
+                ManageLimitModifierAsync);
             yield return new AgentTool("remove_item",
                 "Remove something the character has, by the id (or name) shown in list_items or get_character_summary, however deeply it is nested: "
                 + "a spell, adept power, contact, spirit or sprite, knowledge or exotic skill, location, "
@@ -1061,6 +1119,17 @@ namespace Chummer.Agent
             bool blnEnemy = await objContact.GetIsEnemyAsync(token).ConfigureAwait(false);
             List<string> lstChanged = new List<string>();
 
+            // The link button's Attach Character and Remove Character menu items
+            string strLinkedFile = objArgs.Value<string>("linked_file");
+            if (strLinkedFile != null)
+            {
+                string strFile = string.IsNullOrWhiteSpace(strLinkedFile) ? string.Empty : GetExistingCharacterFile(strLinkedFile);
+                await objContact.SetFileNameAsync(strFile, token).ConfigureAwait(false);
+                await objContact.SetRelativeFileNameAsync(string.IsNullOrEmpty(strFile) ? string.Empty : GetRelativeCharacterFile(strFile), token)
+                                .ConfigureAwait(false);
+                lstChanged.Add(string.IsNullOrEmpty(strFile) ? "removed the linked file" : "linked file");
+            }
+
             // Checkboxes first: being a group changes whether loyalty can be set
             bool? blnGroup = objArgs.Value<bool?>("group");
             if (blnGroup.HasValue)
@@ -1177,7 +1246,9 @@ namespace Chummer.Agent
                 ("description", objCharacter.SetDescriptionAsync),
                 ("background", objCharacter.SetBackgroundAsync),
                 ("notes", objCharacter.SetNotesAsync),
-                ("game_notes", objCharacter.SetGameNotesAsync)
+                ("game_notes", objCharacter.SetGameNotesAsync),
+                ("group_name", objCharacter.SetGroupNameAsync),
+                ("group_notes", objCharacter.SetGroupNotesAsync)
             };
             List<string> lstChanged = new List<string>();
             foreach ((string strField, Func<string, CancellationToken, Task> funcSetter) in aobjFields)
@@ -1313,5 +1384,311 @@ namespace Chummer.Agent
         }
 
         #endregion
+
+        /// <summary>
+        /// The modifiers the Create Spell dialog can't tick together, and those it ticks for you, by category (1-based, as CreateSpell numbers them).
+        /// </summary>
+        private static readonly IReadOnlyDictionary<string, int[][]> s_DicExclusiveSpellModifiers = new Dictionary<string, int[][]>
+        {
+            ["Combat"] = new[] { new[] { 1, 2 }, new[] { 1, 3 }, new[] { 4, 5 } },
+            ["Detection"] = new[] { new[] { 1, 2 }, new[] { 4, 5 } },
+            ["Illusion"] = new[] { new[] { 1, 2 }, new[] { 3, 4 } },
+            ["Manipulation"] = new[] { new[] { 1, 2, 3 }, new[] { 4, 5 } }
+        };
+
+        private static async Task<object> CreateSpellAsync(JObject objArgs, CancellationToken token)
+        {
+            CharacterCreate frmCreate = await GetCreateFormAsync(objArgs, token).ConfigureAwait(false);
+            Character objCharacter = frmCreate.CharacterObject;
+            if (!await objCharacter.GetMagicianEnabledAsync(token).ConfigureAwait(false))
+                throw new AgentToolException("Only magicians learn spells.");
+            if (!await frmCreate.CanCreateSpellAsync(token).ConfigureAwait(false))
+                throw new AgentToolException(await LanguageManager.GetStringAsync("Message_SpellLimit", GlobalSettings.DefaultLanguage, token: token).ConfigureAwait(false));
+            string strName = RequiredString(objArgs, "name");
+            // The categories the dialog lists
+            List<string> lstCategories = (await objCharacter.LoadDataXPathAsync("spells.xml", token: token).ConfigureAwait(false))
+                                         .Select("/chummer/categories/category").Cast<XPathNavigator>().Select(x => x.Value).ToList();
+            string strWantedCategory = RequiredString(objArgs, "category");
+            string strCategory = lstCategories.Find(x => string.Equals(x, strWantedCategory, StringComparison.OrdinalIgnoreCase))
+                                 ?? throw new AgentToolException("'" + strWantedCategory + "' isn't a spell category. Options: " + string.Join(", ", lstCategories) + ".");
+
+            string PickCode(string strArg, string strDefault, params string[] astrOptions)
+            {
+                string strValue = objArgs.Value<string>(strArg)?.Trim().ToUpperInvariant();
+                if (string.IsNullOrEmpty(strValue))
+                    return strDefault;
+                return astrOptions.FirstOrDefault(x => x == strValue)
+                       ?? throw new AgentToolException("`" + strArg + "` must be one of: " + string.Join(", ", astrOptions) + ".");
+            }
+
+            string strType = PickCode("type", "P", "P", "M");
+            string strRange = PickCode("range", "T", "T", "LOS");
+            string strDuration = PickCode("duration", "I", "I", "S", "P");
+            bool blnArea = objArgs.Value<bool?>("area") == true;
+            if (blnArea && strCategory == "Health")
+                throw new AgentToolException("Health spells can't be area spells.");
+            int intEffects = OptionalInt(objArgs, "effects") ?? 1;
+            if (intEffects < 1)
+                throw new AgentToolException("`effects` must be at least 1.");
+            bool blnRestricted = false;
+            bool blnVeryRestricted = false;
+            switch (objArgs.Value<string>("restricted")?.Trim().ToLowerInvariant())
+            {
+                case null:
+                case "":
+                case "none":
+                    break;
+                case "restricted":
+                    blnRestricted = true;
+                    break;
+                case "very restricted":
+                    blnVeryRestricted = true;
+                    break;
+                default:
+                    throw new AgentToolException("`restricted` must be 'restricted' or 'very restricted'.");
+            }
+
+            string strRestriction = blnRestricted || blnVeryRestricted ? objArgs.Value<string>("restriction")?.Trim() ?? string.Empty : string.Empty;
+
+            // The category's modifier checkboxes, by label or number
+            IReadOnlyList<(string LabelKey, int Drain)> lstModifiers = CreateSpell.GetCategoryModifiers(strCategory);
+            List<string> lstLabels = new List<string>(lstModifiers.Count);
+            foreach ((string strLabelKey, int _) in lstModifiers)
+                lstLabels.Add(await LanguageManager.GetStringAsync(strLabelKey, GlobalSettings.DefaultLanguage, token: token).ConfigureAwait(false));
+            string strOptions = string.Join(", ", lstLabels.Select((x, i) => (i + 1).ToString(GlobalSettings.InvariantCultureInfo) + ": " + x + " ("
+                                                                            + lstModifiers[i].Drain.ToString("+0;-0;+0", GlobalSettings.InvariantCultureInfo) + ")"));
+            HashSet<int> setChecked = new HashSet<int>();
+            if (objArgs["modifiers"] is JArray objModifiers)
+            {
+                foreach (JToken objModifier in objModifiers)
+                {
+                    string strModifier = objModifier.ToString().Trim();
+                    int intIndex = int.TryParse(strModifier, out int intNumber) && intNumber >= 1 && intNumber <= lstLabels.Count
+                        ? intNumber
+                        : lstLabels.FindIndex(x => string.Equals(x, strModifier, StringComparison.OrdinalIgnoreCase)) + 1;
+                    if (intIndex == 0)
+                        intIndex = lstLabels.FindIndex(x => x.StartsWith(strModifier, StringComparison.OrdinalIgnoreCase)) + 1;
+                    if (intIndex == 0)
+                        throw new AgentToolException("'" + strModifier + "' isn't a " + strCategory.ToLowerInvariant() + " spell modifier. Options: " + strOptions + ".");
+                    setChecked.Add(intIndex);
+                }
+            }
+
+            // The checkbox rules the dialog enforces as they are ticked
+            if (strCategory == "Combat" && setChecked.Contains(3))
+                setChecked.Add(2); // Elemental effect spells must be Indirect
+            if (s_DicExclusiveSpellModifiers.TryGetValue(strCategory, out int[][] aintGroups))
+            {
+                foreach (int[] aintGroup in aintGroups)
+                {
+                    if (aintGroup.Count(setChecked.Contains) > 1)
+                        throw new AgentToolException(string.Join(" and ", aintGroup.Where(setChecked.Contains).Select(x => lstLabels[x - 1])) + " can't be chosen together.");
+                }
+            }
+
+            if (strCategory == "Combat" && setChecked.Contains(2))
+                strType = "P"; // Indirect Combat Spells must always be physical
+            string strProblems = await CreateSpell.ValidateDesignAsync(strName, blnRestricted || blnVeryRestricted, strRestriction, strCategory, setChecked, token)
+                                                  .ConfigureAwait(false);
+            if (!string.IsNullOrEmpty(strProblems))
+                throw new AgentToolException(strProblems.Replace(Environment.NewLine, " ") + " Modifiers: " + strOptions + ".");
+            Spell objSpell = await CreateSpell.CreateCustomSpellAsync(objCharacter, strName, strCategory, strType, strRange, blnArea, strDuration,
+                                                                      objArgs.Value<bool?>("limited") == true, blnRestricted, blnVeryRestricted, strRestriction,
+                                                                      intEffects, setChecked, token).ConfigureAwait(false);
+            await objCharacter.Spells.AddAsync(objSpell, token).ConfigureAwait(false);
+            return await FinishEditAsync(frmCreate, "Created the spell " + objSpell.Name + " (" + strCategory + ", drain " + objSpell.DvBase + ", id "
+                                                    + objSpell.InternalId + ").", token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// The full path of an existing character file, for a contact's or spirit's link.
+        /// </summary>
+        private static string GetExistingCharacterFile(string strPath)
+        {
+            string strFile = System.IO.Path.GetFullPath(strPath.Trim());
+            if (!System.IO.File.Exists(strFile))
+                throw new AgentToolException("There is no file " + strFile + ".");
+            return strFile;
+        }
+
+        /// <summary>
+        /// A linked file's path relative to Chummer's folder, as the Attach Character menu item stores it next to the full path.
+        /// </summary>
+        private static string GetRelativeCharacterFile(string strFile)
+        {
+            Uri uriApplication = new Uri(Utils.GetStartupPath);
+            return "../" + uriApplication.MakeRelativeUri(new Uri(strFile));
+        }
+
+        private static async Task<object> OpenLinkedCharacterAsync(JObject objArgs, CancellationToken token)
+        {
+            CharacterShared frmCharacter = await GetCharacterFormAsync(objArgs, token).ConfigureAwait(false);
+            Character objCharacter = frmCharacter.CharacterObject;
+            string strId = RequiredString(objArgs, "id");
+            string strFile;
+            string strRelativeFile;
+            Contact objContact = await FindOwnedAsync(await (await objCharacter.GetContactsAsync(token).ConfigureAwait(false)).ToListAsync(token).ConfigureAwait(false), strId, token)
+                .ConfigureAwait(false);
+            if (objContact != null)
+            {
+                strFile = await objContact.GetFileNameAsync(token).ConfigureAwait(false);
+                strRelativeFile = await objContact.GetRelativeFileNameAsync(token).ConfigureAwait(false);
+            }
+            else
+            {
+                Spirit objSpirit = await objCharacter.Spirits.FirstOrDefaultAsync(x => string.Equals(x.InternalId, strId, StringComparison.OrdinalIgnoreCase), token)
+                                                  .ConfigureAwait(false)
+                                   ?? throw new AgentToolException("The character has no contact, pet or spirit '" + strId + "'.");
+                strFile = await objSpirit.GetFileNameAsync(token).ConfigureAwait(false);
+                strRelativeFile = await objSpirit.GetRelativeFileNameAsync(token).ConfigureAwait(false);
+            }
+
+            if (string.IsNullOrEmpty(strFile))
+                throw new AgentToolException("No character file is linked; set one with linked_file.");
+            // As the menu item does: the stored path, or the relative one if the file has moved
+            if (!System.IO.File.Exists(strFile) && !string.IsNullOrEmpty(strRelativeFile) && System.IO.File.Exists(System.IO.Path.GetFullPath(strRelativeFile)))
+                strFile = System.IO.Path.GetFullPath(strRelativeFile);
+            return await OpenCharacterAsync(new JObject { ["path"] = strFile }, token).ConfigureAwait(false);
+        }
+
+        private static async Task<object> AddLifeModuleAsync(JObject objArgs, CancellationToken token)
+        {
+            CharacterCreate frmCreate = await GetCreateFormAsync(objArgs, token).ConfigureAwait(false);
+            Character objCharacter = frmCreate.CharacterObject;
+            // The button only shows in Life Module builds
+            if (!await objCharacter.GetEffectiveBuildMethodIsLifeModuleAsync(token).ConfigureAwait(false))
+                throw new AgentToolException("Life modules are only for Life Module builds (the 'Life Modules' settings in list_build_settings).");
+            XmlDocument xmlDocument = await objCharacter.LoadDataAsync("lifemodules.xml", token: token).ConfigureAwait(false);
+            string strBookXPath = await (await objCharacter.GetSettingsAsync(token).ConfigureAwait(false)).BookXPathAsync(token: token).ConfigureAwait(false);
+            string strId = RequiredString(objArgs, "id");
+            XmlNode xmlModule = xmlDocument.TryGetNodeByNameOrId("/chummer/modules/module", strId, strBookXPath)
+                                ?? throw new AgentToolException("No life module '" + strId + "' in the enabled books. Use search_catalog(kind='lifemodule').");
+            await EnsureRequirementsMetAsync(xmlModule, objCharacter, token).ConfigureAwait(false);
+            // The versions the dialog lists under the module: in the enabled books, or without a book of their own
+            List<XmlNode> lstVersions = new List<XmlNode>();
+            using (XmlNodeList xmlVersions = xmlModule.SelectNodes("versions/version[(" + strBookXPath + ") or not(source)]"))
+            {
+                if (xmlVersions != null)
+                    lstVersions.AddRange(xmlVersions.Cast<XmlNode>());
+            }
+
+            string strSelectedId = xmlModule["id"]?.InnerText;
+            string strVersion = objArgs.Value<string>("version")?.Trim();
+            if (!string.IsNullOrEmpty(strVersion))
+            {
+                XmlNode xmlVersion = lstVersions.Find(x => string.Equals(x["id"]?.InnerText, strVersion, StringComparison.OrdinalIgnoreCase)
+                                                           || string.Equals(x["name"]?.InnerText, strVersion, StringComparison.OrdinalIgnoreCase))
+                                     ?? throw new AgentToolException(xmlModule["name"]?.InnerText + " has no version '" + strVersion + "'. Options: "
+                                                                     + string.Join(", ", lstVersions.Select(x => x["name"]?.InnerText)) + ".");
+                strSelectedId = xmlVersion["id"]?.InnerText;
+            }
+            else if (lstVersions.Count > 0)
+                throw new AgentToolException(xmlModule["name"]?.InnerText + " comes in versions; pass `version`. Options: "
+                                             + string.Join(", ", lstVersions.Select(x => x["name"]?.InnerText)) + ".");
+
+            // What the dialog hands back: the version with its module's fields filled in
+            Quality objModule = await frmCreate.AddLifeModuleFromNodeAsync(Quality.GetNodeOverrideable(strSelectedId, xmlDocument), token).ConfigureAwait(false)
+                                ?? throw new AgentToolException("Chummer did not add the life module.");
+            return await FinishEditAsync(frmCreate, "Added the life module " + await objModule.GetCurrentDisplayNameAsync(token).ConfigureAwait(false)
+                                                    + " (" + objModule.Stage + ", id " + objModule.InternalId + ").", token).ConfigureAwait(false);
+        }
+
+        private static async Task<object> CreateBackstoryAsync(JObject objArgs, CancellationToken token)
+        {
+            CharacterCreate frmCreate = await GetCreateFormAsync(objArgs, token).ConfigureAwait(false);
+            // The button only shows when the settings turn it on
+            if (!await frmCreate.CharacterObject.GetEnableAutomaticStoryButtonAsync(token).ConfigureAwait(false))
+                throw new AgentToolException("The backstory generator is off in this character's settings (it needs a Life Module build and the automatic story option).");
+            string strStory = await frmCreate.CreateBackstoryAsync(token).ConfigureAwait(false);
+            return await FinishEditAsync(frmCreate, "Wrote the background: " + strStory, token).ConfigureAwait(false);
+        }
+
+        private static async Task<object> ManageLimitModifierAsync(JObject objArgs, CancellationToken token)
+        {
+            CharacterShared frmCharacter = await GetCharacterFormAsync(objArgs, token).ConfigureAwait(false);
+            Character objCharacter = frmCharacter.CharacterObject;
+            string strAction = RequiredString(objArgs, "action").ToLowerInvariant();
+            LimitModifier objModifier = null;
+            if (strAction != "add")
+            {
+                string strId = RequiredString(objArgs, "id");
+                objModifier = await FindOwnedAsync(await objCharacter.LimitModifiers.ToListAsync(token).ConfigureAwait(false), strId, token).ConfigureAwait(false)
+                              ?? throw new AgentToolException("The character has no custom limit modifier '" + strId + "' (modifiers from items and qualities can't be changed here).");
+            }
+
+            string strResult;
+            switch (strAction)
+            {
+                case "add":
+                case "edit":
+                {
+                    // The fields the Select Limit Modifier dialog requires; an edit keeps the ones not passed
+                    string strName = objArgs.Value<string>("name")?.Trim() ?? objModifier?.Name;
+                    if (string.IsNullOrEmpty(strName))
+                        throw new AgentToolException("`name` is required.");
+                    string strLimit = objArgs.Value<string>("limit")?.Trim() ?? objModifier?.Limit;
+                    strLimit = new[] { "Physical", "Mental", "Social" }.FirstOrDefault(x => string.Equals(x, strLimit, StringComparison.OrdinalIgnoreCase))
+                               ?? throw new AgentToolException("`limit` must be 'Physical', 'Mental' or 'Social'.");
+                    int intBonus = OptionalInt(objArgs, "bonus") ?? objModifier?.Bonus ?? 0;
+                    if (intBonus < -100 || intBonus > 100)
+                        throw new AgentToolException("`bonus` must be from -100 to 100.");
+                    string strCondition = objArgs.Value<string>("condition") ?? (objModifier != null ? await objModifier.GetConditionAsync(token).ConfigureAwait(false) : string.Empty);
+                    LimitModifier objNew;
+                    if (objModifier == null)
+                        objNew = new LimitModifier(objCharacter);
+                    else
+                    {
+                        // As the Edit item does: remove the old one and recreate it under the same id
+                        if (!objModifier.CanDelete)
+                            throw new AgentToolException(objModifier.Name + " can't be changed.");
+                        await objCharacter.LimitModifiers.RemoveAsync(objModifier, token).ConfigureAwait(false);
+                        objNew = new LimitModifier(objCharacter, objModifier.InternalId);
+                    }
+
+                    objNew.Create(strName, intBonus, strLimit, strCondition, true);
+                    await objCharacter.LimitModifiers.AddAsync(objNew, token).ConfigureAwait(false);
+                    strResult = (objModifier == null ? "Added" : "Changed") + " the limit modifier " + strName + " (" + strLimit + " "
+                                + intBonus.ToString("+0;-0;+0", GlobalSettings.InvariantCultureInfo) + ", id " + objNew.InternalId + ").";
+                    break;
+                }
+                case "remove":
+                    if (!objModifier.CanDelete)
+                        throw new AgentToolException(objModifier.Name + " can't be removed.");
+                    await objModifier.RemoveAsync(false, token).ConfigureAwait(false);
+                    strResult = "Removed the limit modifier " + objModifier.Name + ".";
+                    break;
+                case "notes":
+                    await objModifier.SetNotesAsync(objArgs.Value<string>("notes") ?? string.Empty, token).ConfigureAwait(false);
+                    strResult = "Set the notes of " + objModifier.Name + ".";
+                    break;
+                default:
+                    throw new AgentToolException("`action` must be 'add', 'edit', 'remove' or 'notes'.");
+            }
+
+            return await FinishAnyEditAsync(frmCharacter, strResult, token).ConfigureAwait(false);
+        }
+
+        private static async Task<object> ImportContactsAsync(JObject objArgs, CancellationToken token)
+        {
+            CharacterShared frmCharacter = await GetCharacterFormAsync(objArgs, token).ConfigureAwait(false);
+            string strPath = System.IO.Path.GetFullPath(RequiredString(objArgs, "path"));
+            if (!System.IO.File.Exists(strPath))
+                throw new AgentToolException("There is no file " + strPath + ".");
+            System.Xml.XPath.XPathDocument xmlDoc;
+            try
+            {
+                xmlDoc = await XPathDocumentExtensions.LoadStandardFromFileAsync(strPath, token: token).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is System.IO.IOException || ex is XmlException)
+            {
+                throw new AgentToolException("Chummer could not read " + strPath + ": " + ex.Message);
+            }
+
+            int intCount = await frmCharacter.ImportContactsAsync(xmlDoc, token).ConfigureAwait(false);
+            if (intCount == 0)
+                throw new AgentToolException(strPath + " has no contacts (it needs /chummer/contacts/contact elements).");
+            return await FinishAnyEditAsync(frmCharacter, "Added " + intCount.ToString(GlobalSettings.InvariantCultureInfo) + " contact(s) from " + strPath + ".", token)
+                .ConfigureAwait(false);
+        }
     }
 }
