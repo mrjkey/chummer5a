@@ -3521,7 +3521,7 @@ namespace Chummer
                                 await objMartialArt.Techniques.ForEachWithSideEffectsAsync(async (objTechnique, t2) =>
                                 {
                                     if (lstInternalIdFilter?.Contains(objTechnique.InternalId) == false)
-                                        return string.Empty;
+                                        return;
                                     XmlNode objNode = await objTechnique.GetNodeAsync(token: t2)
                                                                         .ConfigureAwait(false);
                                     if (objNode != null)
@@ -3546,7 +3546,7 @@ namespace Chummer
                             await CharacterObject.Spells.ForEachWithSideEffectsAsync(async (objSpell, t) =>
                             {
                                 if (lstInternalIdFilter?.Contains(objSpell.InternalId) == false)
-                                    return string.Empty;
+                                    return;
                                 XmlNode objNode = await objSpell.GetNodeAsync(token: t).ConfigureAwait(false);
                                 if (objNode != null)
                                 {
@@ -3584,7 +3584,7 @@ namespace Chummer
                             await CharacterObject.Powers.ForEachWithSideEffectsAsync(async (objPower, t) =>
                             {
                                 if (lstInternalIdFilter?.Contains(objPower.InternalId) == false)
-                                    return string.Empty;
+                                    return;
                                 XmlNode objNode = await objPower.GetNodeAsync(token: t).ConfigureAwait(false);
                                 if (objNode != null)
                                 {
@@ -3611,7 +3611,7 @@ namespace Chummer
                             await CharacterObject.ComplexForms.ForEachWithSideEffectsAsync(async (objComplexForm, t) =>
                             {
                                 if (lstInternalIdFilter?.Contains(objComplexForm.InternalId) == false)
-                                    return string.Empty;
+                                    return;
                                 XmlNode objNode = await objComplexForm.GetNodeAsync(token: t).ConfigureAwait(false);
                                 if (objNode != null)
                                 {
@@ -3652,7 +3652,7 @@ namespace Chummer
                             await CharacterObject.AIPrograms.ForEachWithSideEffectsAsync(async (objProgram, t) =>
                             {
                                 if (lstInternalIdFilter?.Contains(objProgram.InternalId) == false)
-                                    return string.Empty;
+                                    return;
                                 XmlNode objNode = await objProgram.GetNodeAsync(token: t).ConfigureAwait(false);
                                 if (objNode != null)
                                 {
@@ -3691,7 +3691,7 @@ namespace Chummer
                             await CharacterObject.CritterPowers.ForEachWithSideEffectsAsync(async (objPower, t) =>
                             {
                                 if (lstInternalIdFilter?.Contains(objPower.InternalId) == false)
-                                    return string.Empty;
+                                    return;
                                 XmlNode objNode = await objPower.GetNodeAsync(token: t).ConfigureAwait(false);
                                 if (objNode != null)
                                 {

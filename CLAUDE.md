@@ -15,7 +15,7 @@ Chummer is a .NET Framework 4.8 WinForms app (Windows only). The repo lives on t
 
 - `Chummer/Backend/Agent/` holds the MCP server:
   - `McpServer.cs`: Streamable HTTP, JSON responses, localhost only. Port 51723; override with `/mcpport:N`.
-  - `AgentTools*.cs`: the tools. `AgentTools.cs` reads, `.Catalog.cs` searches the rules data, `.Create.cs` creates/opens/saves/exports characters and sets priorities, `.Edit.cs` edits attributes/skills/qualities/spells/powers/contacts/martial arts and personal details, `.Magic.cs` handles tradition, mentor, spirits, complex forms and initiation, and `.Gear.cs` buys equipment and its accessories/mods.
+  - `AgentTools*.cs`: the tools. `AgentTools.cs` reads, `.Catalog.cs` searches the rules data, `.Create.cs` creates/opens/saves/exports characters and sets priorities, `.Edit.cs` edits attributes/skills/qualities/spells/powers/contacts/martial arts and personal details, `.Magic.cs` handles tradition, mentor, spirits, complex forms and initiation, `.Gear.cs` buys equipment and its accessories/mods (also drugs, suites, PACKS kits, natural weapons and weapon mounts), `.Items.cs` edits owned items (and copy/paste), and `.Critters.cs` handles critter powers, A.I. programs, cyberzombies and new critters.
 - `Program.cs` starts the server around `Application.Run(MainForm)`.
 - Tools work on the characters open in the editor (`Program.MainForm.OpenCharacterEditorForms`).
 - Every edit goes through code the GUI also uses. These methods were refactored out of the forms' button/dialog code, so the results always match the UI:
@@ -27,10 +27,13 @@ Chummer is a .NET Framework 4.8 WinForms app (Windows only). The repo lives on t
   | `SelectMetatypeKarma` | `ApplyMetatypeSelectionAsync` |
   | `ChummerMainForm` | `OpenNewCharacterEditorAsync` |
   | `CharacterSheetViewer` | `TransformToHtmlAsync`, `ConvertHtmlToPdfAsync` |
-  | `CreateWeaponMount` | `GetAllowedSizesAsync`, `GetAllowedOptionsAsync`, `SetWeaponMountOptionsAsync`, `CheckCareerPurchaseAsync` (static) |
+  | `CreateWeaponMount` | `GetAllowedSizesAsync`, `GetAllowedOptionsAsync`, `SetWeaponMountOptionsAsync`, `CheckCareerPurchaseAsync`, `CreateMountModAsync` (static) |
+  | `CharacterCreate` (more) | `AddCyberwareSuiteFromNodeAsync`, `AddPACKSKitFromNodeAsync`, `PasteClipboardAsync`, `AddEnchantmentFromNodeAsync`, `AddEnhancementFromNodeAsync`, `GetDrainAttributeChoices`, `GetTraditionSpiritChoicesAsync`, `CanCreateSpellAsync`, `CreateStackedFocusAsync`, `GetNextLifeModuleStageAsync`, `AddLifeModuleFromNodeAsync`, `CreateBackstoryAsync`, `DoReapplyImprovements` |
+  | Dialog statics | `CreateCyberwareSuite.CheckCanCreateSuiteAsync`/`WriteSuiteAsync`, `CreatePACKSKit.WriteKitAsync`, `SelectCyberwareSuite.IsSuiteAllowedAsync`, `CreateNaturalWeapon.CreateWeaponAsync`, `CreateSpell.GetCategoryModifiers`/`CalculateDrainAsync`/`ValidateDesignAsync`/`CreateCustomSpellAsync`, `SelectAIProgram.IsProgramAllowedAsync`, `SpiritControl.CreateCritterCharacterAsync`; `SelectCritterPower` is constructed unshown for `FillCategoriesAsync`/`GetAllowedPowersAsync`/`GetPowerPointCostAsync` |
+  | `ChummerMainForm` (more) | `PrepareNewCritterAsync`, `OpenNewCritterEditorAsync` |
   | `CharacterCareer` | `AddWeaponMountAsync` |
-  | `CharacterShared` | `SaveCharacterToFileAsync`, `AddSpirit`/`AddSprite`, `Add{WeaponAccessory,VehicleMod}FromNodeAsync` |
-  | Backend | `MartialArt.PurchaseFromNodeAsync`, `Spirit.FillSpiritTypeChoicesAsync`, `SelectMartialArtTechnique.FillAllowedTechniques` |
+  | `CharacterShared` | `SaveCharacterToFileAsync`, `AddSpirit`/`AddSprite`, `Add{WeaponAccessory,VehicleMod}FromNodeAsync`, `AddDrugToCharacterAsync`, `AttachDrugToCyberwareAsync`, `CopyObject`, `ConvertToFreeSpriteAsync`, `ImportContactsAsync` |
+  | Backend | `Character.GetCyberzombieRequirementsProblemAsync`/`ApplyCyberzombieAsync`, `MartialArt.PurchaseFromNodeAsync`, `Spirit.FillSpiritTypeChoicesAsync`, `SelectMartialArtTechnique.FillAllowedTechniques` |
 
   The agent constructs the metatype dialogs without showing them, and calls these cores on them.
 - `CREATION-GAPS.md` is the checklist of creation-mode editor features the tools don't cover yet; tick items off there as tools are added.

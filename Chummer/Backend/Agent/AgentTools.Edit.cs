@@ -255,8 +255,7 @@ namespace Chummer.Agent
                 SetCharacterDetailsAsync);
             yield return new AgentTool("manage_limit_modifier",
                 "Add, change or remove a custom limit modifier, or set its notes, as the Limits tab's Add Modifier, Edit, Delete and Notes items do: "
-                + "a named bonus to the Physical, Mental or Social limit, optionally only under a condition. export_character(section='limitmodifiers') "
-                + "shows them all.",
+                + "a named bonus to the Physical, Mental or Social limit, optionally only under a condition.",
                 AgentTool.Schema(("action!", "string", "'add', 'edit', 'remove' or 'notes'."),
                                  ("id", "string", "For edit/remove/notes: the modifier's id or name."),
                                  ("name", "string", "For add/edit: what the modifier is, e.g. 'Lucky charm'."),

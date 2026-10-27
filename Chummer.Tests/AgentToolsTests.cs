@@ -1486,5 +1486,74 @@ namespace Chummer.Tests
             (blnIsError, strText) = await TryCallOnAsync(strMage, "open_linked_character", new JObject { ["id"] = strSpirit }, token).ConfigureAwait(false);
             Assert.IsTrue(blnIsError, strText);
         }
+
+        [TestMethod]
+        public void DetailsLimitsAndContacts()
+        {
+            string strFolder = Path.Combine(Path.GetTempPath(), "AgentToolsTest_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(strFolder);
+            try
+            {
+                RunWithMainForm((frmMain, t) => RunDetailsLimitsAndContactsScenarioAsync(strFolder, t));
+            }
+            finally
+            {
+                Directory.Delete(strFolder, true);
+            }
+        }
+
+        private static async Task RunDetailsLimitsAndContactsScenarioAsync(string strFolder, CancellationToken token)
+        {
+            const string strFace = "Agent Test Face";
+            await CallToolOkAsync("create_character", new JObject
+            {
+                ["metatype"] = "Human",
+                ["priorities"] = new JObject { ["heritage"] = "D", ["attributes"] = "B", ["talent"] = "E", ["skills"] = "C", ["resources"] = "A" },
+                ["talent"] = "Mundane",
+                ["name"] = strFace
+            }, token).ConfigureAwait(false);
+
+            // Group details
+            await CallOnAsync(strFace, "set_character_details", new JObject { ["group_name"] = "Agent Crew", ["group_notes"] = "Meets on Tuesdays." }, token)
+                .ConfigureAwait(false);
+            Assert.AreEqual("Agent Crew", ((JObject)await CallOnAsync(strFace, "export_character", new JObject { ["section"] = "groupname" }, token).ConfigureAwait(false))
+                                          .Value<string>("groupname"));
+
+            // Custom limit modifiers: add, edit, notes, remove
+            JObject objResult = (JObject)await CallOnAsync(strFace, "manage_limit_modifier", new JObject
+            {
+                ["action"] = "add", ["name"] = "Lucky charm", ["limit"] = "Social", ["bonus"] = 1
+            }, token).ConfigureAwait(false);
+            string strModifier = objResult.Value<string>("result").Split(new[] { "id " }, StringSplitOptions.None)[1].TrimEnd(')', '.');
+            await CallOnAsync(strFace, "manage_limit_modifier", new JObject { ["action"] = "edit", ["id"] = strModifier, ["bonus"] = 2 }, token).ConfigureAwait(false);
+            await CallOnAsync(strFace, "manage_limit_modifier", new JObject { ["action"] = "notes", ["id"] = strModifier, ["notes"] = "From grandma." }, token)
+                .ConfigureAwait(false);
+            StringAssert.Contains((await CallOnAsync(strFace, "export_character", new JObject { ["section"] = "*" }, token).ConfigureAwait(false)).ToString(),
+                                  "Lucky charm");
+            (bool blnIsError, string strText) = await TryCallOnAsync(strFace, "manage_limit_modifier", new JObject
+            {
+                ["action"] = "add", ["name"] = "Bad", ["limit"] = "Astral", ["bonus"] = 1
+            }, token).ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+            await CallOnAsync(strFace, "manage_limit_modifier", new JObject { ["action"] = "remove", ["id"] = strModifier }, token).ConfigureAwait(false);
+
+            // Contacts from a file, and a contact's linked character file
+            string strContacts = Path.Combine(strFolder, "contacts.xml");
+            File.WriteAllText(strContacts, "<chummer><contacts><contact><name>Agent Fixer</name><role>Fixer</role><connection>3</connection>"
+                                           + "<loyalty>2</loyalty><type>Contact</type></contact></contacts></chummer>");
+            await CallOnAsync(strFace, "import_contacts", new JObject { ["path"] = strContacts }, token).ConfigureAwait(false);
+            JObject objSummary = (JObject)await CallOnAsync(strFace, "get_character_summary", new JObject(), token).ConfigureAwait(false);
+            JToken objFixer = ((JArray)objSummary["contacts"]).First(x => x.Value<string>("name") == "Agent Fixer");
+            string strSkink = Path.Combine(AppDomain.CurrentDomain.SetupInformation.ApplicationBase ?? string.Empty, "TestFiles", "Skink.chum5");
+            await CallOnAsync(strFace, "set_contact_details", new JObject { ["id"] = objFixer.Value<string>("id"), ["linked_file"] = strSkink }, token)
+                .ConfigureAwait(false);
+            objResult = (JObject)await CallOnAsync(strFace, "open_linked_character", new JObject { ["id"] = objFixer.Value<string>("id") }, token).ConfigureAwait(false);
+            StringAssert.Contains(objResult.Value<string>("result"), "Opened");
+
+            // Life modules need a Life Module build
+            (blnIsError, strText) = await TryCallOnAsync(strFace, "add_life_module", new JObject { ["id"] = "United Canadian American States" }, token)
+                .ConfigureAwait(false);
+            Assert.IsTrue(blnIsError, strText);
+        }
     }
 }

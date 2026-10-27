@@ -75,7 +75,7 @@ namespace Chummer.Agent
                 "Chummer's full computed character export (the data behind the printed character sheets: dice pools, limits, initiative, "
                 + "armor, weapons with damage, etc). Without `section` this lists the available sections and their sizes.",
                 AgentTool.Schema(("character", "string", CharacterArgDescription),
-                                 ("section", "string", "Top-level export element to return, e.g. 'attributes', 'skills', 'qualities', 'weapons', 'limitmodifiers'. Use '*' for everything.")),
+                                 ("section", "string", "Top-level export element to return, e.g. 'attributes', 'skills', 'qualities', 'weapons'. Use '*' for everything.")),
                 ExportCharacterAsync);
             foreach (AgentTool objTool in CreateCatalogTools())
                 yield return objTool;
